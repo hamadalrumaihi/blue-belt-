@@ -131,7 +131,7 @@ async function persist(
       updated.push(data);
       for (const c of detected) {
         changes.push({ ...c, match_id: previous.id });
-        historyRows.push({ match_id: previous.id, change_type: c.change_type, old_value: c.old_value as Json, new_value: c.new_value as Json, detected_at: checkedAt });
+        historyRows.push({ owner_id: athlete.owner_id, match_id: previous.id, change_type: c.change_type, old_value: c.old_value as Json, new_value: c.new_value as Json, detected_at: checkedAt });
       }
     } else {
       const { data, error: insErr } = await supabase
@@ -147,7 +147,7 @@ async function persist(
         new_value: { value: data.id, label: describeMatch(data, timezone) },
       };
       changes.push({ ...found, match_id: data.id });
-      historyRows.push({ match_id: data.id, change_type: "MATCH_FOUND", old_value: found.old_value as Json, new_value: found.new_value as Json, detected_at: checkedAt });
+      historyRows.push({ owner_id: athlete.owner_id, match_id: data.id, change_type: "MATCH_FOUND", old_value: found.old_value as Json, new_value: found.new_value as Json, detected_at: checkedAt });
     }
   }
 
