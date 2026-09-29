@@ -7,6 +7,7 @@ import type { AthleteRow, EventRow, Platform } from "@/lib/types";
 import { PLATFORMS } from "@/lib/types";
 import { guessPlatform } from "@/lib/watchers/url-policy";
 import type { WatchResult } from "@/lib/watchers/types";
+import { DivisionFields } from "./DivisionFields";
 import { FormError, FormField } from "./FormField";
 import { watchStateCopy } from "./watchStateCopy";
 
@@ -19,8 +20,6 @@ type Props = {
   submitLabel?: string;
   cancelHref?: string;
 };
-
-const BELTS = ["White", "Blue", "Purple", "Brown", "Black"];
 
 export function ClientForm({ action, events, initial, defaultEventId, defaultPlatform = "AJP", submitLabel = "Save client", cancelHref = "/clients" }: Props) {
   const [state, formAction, pending] = useActionState(action, null);
@@ -115,34 +114,15 @@ export function ClientForm({ action, events, initial, defaultEventId, defaultPla
       </section>
 
       <section className="card space-y-5 p-5">
-        <h2 className="text-sm font-extrabold uppercase tracking-wider text-muted">Details <span className="font-normal normal-case tracking-normal">(optional)</span></h2>
-        <div className="grid gap-5 sm:grid-cols-2">
-          <FormField label="Division" htmlFor="division">
-            <input id="division" name="division" className="input" defaultValue={initial?.division ?? ""} placeholder="Adult / Male / Blue / 77kg" />
-          </FormField>
-          <FormField label="Weight" htmlFor="weight">
-            <input id="weight" name="weight" className="input" defaultValue={initial?.weight ?? ""} placeholder="77 kg" />
-          </FormField>
-          <FormField label="Belt" htmlFor="belt">
-            <select id="belt" name="belt" className="input" defaultValue={initial?.belt ?? ""}>
-              <option value="">—</option>
-              {BELTS.map((b) => <option key={b} value={b}>{b}</option>)}
-            </select>
-          </FormField>
-          <FormField label="Gender" htmlFor="gender">
-            <select id="gender" name="gender" className="input" defaultValue={initial?.gender ?? ""}>
-              <option value="">—</option>
-              <option value="Male">Male</option>
-              <option value="Female">Female</option>
-            </select>
-          </FormField>
-          <FormField label="Age category" htmlFor="age_category">
-            <input id="age_category" name="age_category" className="input" defaultValue={initial?.age_category ?? ""} placeholder="Adult / Master 1 / Juvenile" />
-          </FormField>
-          <FormField label="Package name" htmlFor="package_name">
-            <input id="package_name" name="package_name" className="input" defaultValue={initial?.package_name ?? ""} placeholder="Full match coverage" />
-          </FormField>
-        </div>
+        <h2 className="text-sm font-extrabold uppercase tracking-wider text-muted">Division <span className="font-normal normal-case tracking-normal">(optional · AJP Qatar National 2026 rules)</span></h2>
+        <DivisionFields initial={initial} />
+      </section>
+
+      <section className="card space-y-5 p-5">
+        <h2 className="text-sm font-extrabold uppercase tracking-wider text-muted">Booking <span className="font-normal normal-case tracking-normal">(optional)</span></h2>
+        <FormField label="Package name" htmlFor="package_name">
+          <input id="package_name" name="package_name" className="input" defaultValue={initial?.package_name ?? ""} placeholder="Full match coverage" />
+        </FormField>
         <FormField label="Notes" htmlFor="notes" hint="Visible on the client card">
           <textarea id="notes" name="notes" className="input min-h-20 py-2.5" defaultValue={initial?.notes ?? ""} rows={2} />
         </FormField>
