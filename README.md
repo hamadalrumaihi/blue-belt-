@@ -43,6 +43,7 @@ src/
     (auth)/            login, forgot-password, reset-password
     (app)/             private app: dashboard, events, clients, watcher, history, settings, more
     api/watch/         POST /api/watch — the watcher endpoint
+    api/cron/refresh/  POST — scheduled refresh (CRON_SECRET + service role)
     auth/callback/     Supabase code exchange (password reset links)
   components/          BrandHeader, Logo, EventCard, NextClientCard, ClientCard, MatchCard,
                        StatusBadge, EtaBadge, PlatformBadge, LiveIndicator, EmptyState,
@@ -51,7 +52,7 @@ src/
   hooks/               useLiveAthletes (refresh loop), useSettings, useNow
   lib/
     supabase/          browser + server clients, hand-typed Database types
-    watchers/          url-policy (SSRF guard), safe-fetch, extract, ajp, smoothcomp, index
+    watchers/          url-policy (SSRF guard), safe-fetch, browser-fetch (worker client), extract, ajp, smoothcomp, index
     watch-service.ts   refresh → diff → persist matches + history
     changes.ts         change detection (mat / time / eta / opponent / status / order / number)
     eta.ts             ETA buckets, urgency ranking
@@ -63,6 +64,7 @@ src/
   proxy.ts             session refresh + auth gate (Next 16 name for middleware)
 public/brand/          official logo (logo.png) and derived mark / wordmark / icon files
 supabase/migrations/   additive SQL applied on top of the existing tables
+worker/                Playwright render worker (separate Railway service, Dockerfile included)
 ```
 
 **Data flow during a tournament**
@@ -228,16 +230,55 @@ Wall-clock times (e.g. `10:20`) are resolved in the event's timezone (default As
 - Markup on both platforms is not stable. The extraction is heuristic and degrades to `NO_MATCHES` rather than crashing; one failing athlete never breaks a batch refresh.
 - Identity of a match across refreshes uses, in order: platform match id, match number, single-match athlete, opponent name, scheduled time.
 
-### Future Playwright worker
+### Playwright render worker (`/worker`)
 
-The design isolates fetching from parsing so a browser-based worker can be added without touching the UI:
+A small always-on Node service that opens pages in a real Chromium, waits for the Cloudflare challenge to clear, and returns the rendered HTML. The app then runs the **same adapters** on it, so normalisation, change detection, history and alerts are unchanged.
 
-1. Deploy a small Node service (Railway or similar) running Playwright with a persistent Chromium profile that can pass the challenge.
-2. It exposes `POST /render { url } → { html }`.
-3. `src/lib/watchers/index.ts` gains one branch: when `safeFetchHtml` returns a challenge page (or an env flag prefers the worker), fetch the HTML from the worker and hand it to the **same adapters**.
-4. Optionally the worker runs the refresh loop itself on a schedule and writes through the same `watch-service.ts` logic, so the app keeps working while the phone is locked.
+```
+app  --POST /render {url}-->  worker (Chromium, persistent profile)  -->  AJP / Smoothcomp
+app  <--{html, finalUrl}----  worker
+```
 
-Everything downstream — normalisation, change detection, history, alerts — stays unchanged.
+How the app uses it (`src/lib/watchers/index.ts`):
+
+1. Plain HTTPS fetch first (fast, cheap).
+2. If the adapter reports `REQUIRES_BROWSER_WATCHER` and the worker is configured, render there and parse again.
+3. `WATCHER_PREFER_BROWSER=1` skips step 1.
+4. If the worker itself cannot clear the challenge the athlete shows "Browser worker could not clear the site's bot challenge" and the Open AJP button stays one tap away. One failing athlete never breaks a batch.
+
+**Deploy on Railway**
+
+1. New project → Deploy from GitHub repo → set the root directory to `worker/`. The Dockerfile uses the official Playwright image (Chromium + Xvfb included).
+2. Add a **Volume** mounted at `/data` so the Chromium profile (and the Cloudflare clearance cookie) survives restarts.
+3. Variables: `WORKER_TOKEN` (long random string). Optional: `HEADLESS=new|shell|headed`, `CHALLENGE_WAIT_MS`, `MAX_CONCURRENCY`, `BROWSER_PROXY`, `BROWSER_WS_ENDPOINT` (see `worker/.env.example`).
+4. Generate a public domain for the service and note it.
+5. In Vercel add `WATCHER_WORKER_URL=https://<railway-domain>` and `WATCHER_WORKER_TOKEN=<same token>` (server-only, not `NEXT_PUBLIC_`), then redeploy.
+6. Test: client → **Test link** on an AJP profile URL, or `GET /api/watch?url=…` while signed in. The `strategy` field in the JSON says `browser:…` when the worker was used.
+
+**Endpoints**
+
+| Method | Path | Body | Notes |
+| --- | --- | --- | --- |
+| GET | `/health` | | browser state, queue depth, mode |
+| POST | `/render` | `{ "url": "https://ajptour.com/…", "waitForSelector?": "css" }` | `Authorization: Bearer <WORKER_TOKEN>`; only allow-listed hosts; 3 MB cap; queued at `MAX_CONCURRENCY` |
+
+Responses: `{ ok: true, html, finalUrl, status, elapsedMs, fetchedAt }` or `{ ok: false, code: CHALLENGE_NOT_CLEARED | TIMEOUT | NAVIGATION_ERROR | TOO_LARGE | UNSUPPORTED_HOST | INVALID_URL | UNAUTHORIZED, message }`.
+
+**If the challenge still does not clear from Railway.** Cloudflare scores the IP reputation and browser fingerprint. Datacenter IPs are sometimes served an interactive (Turnstile) challenge that no automation can pass. Two switches exist for that case, no code changes needed:
+
+- `BROWSER_PROXY=http://user:pass@host:port` routes the worker's Chromium through a residential proxy.
+- `BROWSER_WS_ENDPOINT=wss://…` connects to a hosted browser (Browserless, Bright Data Scraping Browser, and similar) that handles challenges on its own infrastructure; the worker then only drives it.
+
+The sandbox this app was built in could not clear the challenge in any mode (its egress proxy re-terminates TLS, which alters the fingerprint Cloudflare inspects), so **verify the worker against a live AJP event before Qatar**. `/health` plus one `POST /render` on a schedule page tells you in under a minute.
+
+### Scheduled refresh while phones are locked
+
+`POST /api/cron/refresh` refreshes every active athlete of every active event whose date is today (±1 day in the event's timezone), for all owners, without a user session. Configure:
+
+- App (Vercel): `CRON_SECRET` (random string) and `SUPABASE_SERVICE_ROLE_KEY` (Supabase → Settings → API → `service_role`; server-side only, never `NEXT_PUBLIC_`).
+- Worker (Railway): `SCHEDULE_SECONDS=60`, `APP_URL=https://tournament-watcher.vercel.app`, `CRON_SECRET=<same>`.
+
+The worker then ticks the endpoint every 60 s; the app fetches through the worker, diffs, and writes matches and history exactly as a manual refresh does. Body `{ "all": true }` refreshes every active event regardless of date. Without the service-role key the endpoint answers 503 and the in-app refresh keeps working as before.
 
 ---
 
@@ -258,8 +299,9 @@ Colour language: green = healthy/upcoming, amber = approaching, orange = very so
 
 ## Current limitations
 
-- Live schedule reading depends on the source being reachable without a browser (see above). Until the Playwright worker exists, expect `REQUIRES_BROWSER_WATCHER` on most AJP / Smoothcomp schedule pages.
-- Auto-refresh runs only while the app is open in the foreground (browser timers). A server-side scheduler is part of the worker plan.
+- Live schedule reading needs the Playwright worker deployed (see above); without it, expect `REQUIRES_BROWSER_WATCHER` on most AJP / Smoothcomp schedule pages. Whether Cloudflare lets the worker through from Railway's IPs must be verified against a live event; residential proxy / hosted browser switches exist if not.
+- The parser has only been exercised on synthetic AJP-style markup and the public listing pages. Tune it against a real schedule page once the worker can see one.
+- In-app auto-refresh runs only while the app is open; the worker's scheduler + `/api/cron/refresh` covers locked phones once the service-role key and secrets are set.
 - Settings (timezone fallback, refresh interval, default platform, show completed, notification toggles, pinned event) are stored per device in `localStorage`, not in Supabase.
 - Single-owner model. RLS is per `owner_id`; team accounts would add a membership table and widen the policies.
 - No payments, bookings, galleries, invoices or Pic-Time integration by design.
