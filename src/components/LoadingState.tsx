@@ -9,7 +9,9 @@ export function LoadingState({ label = "Loading…", fullScreen = false }: { lab
       role="status"
       aria-live="polite"
     >
-      <Image src="/brand/logo.svg" alt="Blue Belt Media" width={56} height={56} className="animate-pulse rounded-[22%]" priority />
+      <span className={cn("flex h-16 w-16 animate-pulse items-center justify-center rounded-[22%] p-1.5", fullScreen ? "bg-white" : "bg-transparent")}>
+        <Image src="/brand/mark.png" alt="Blue Belt Media" width={64} height={64} className="h-full w-full" priority />
+      </span>
       <div>
         <p className={cn("text-sm font-bold", fullScreen ? "text-white" : "text-navy")}>Blue Belt Media</p>
         <p className={cn("mt-0.5 text-xs", fullScreen ? "text-white/60" : "text-muted")}>{label}</p>

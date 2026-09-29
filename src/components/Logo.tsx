@@ -3,39 +3,58 @@ import Link from "next/link";
 import { cn } from "@/lib/utils";
 
 type Props = {
-  /** "mark" shows only the icon; "full" adds the wordmark. */
+  /** "mark" shows only the knight badge; "full" shows the badge + script wordmark. */
   variant?: "mark" | "full";
+  /** Height of the mark in px. The wordmark scales with it. */
   size?: number;
   href?: string | null;
-  /** Use on dark backgrounds. */
+  /** Use on dark (navy) surfaces: mark sits on a white tile, wordmark turns white. */
   inverted?: boolean;
+  /** Small "Tournament Watcher" caption under the wordmark. */
+  caption?: boolean;
   className?: string;
 };
 
 /**
- * The Blue Belt Media logo. The image lives at /public/brand/logo.svg so the
- * official file can be dropped in without touching code.
+ * The official Blue Belt Media logo.
+ * Source files live in /public/brand:
+ *   logo.png            full lockup (mark + wordmark), colour
+ *   logo-white.png      full lockup, white ink (dark surfaces)
+ *   mark.png            square knight badge, colour
+ *   wordmark.png        script wordmark, colour
+ *   wordmark-white.png  script wordmark, white ink
  */
-export function Logo({ variant = "full", size = 40, href = "/dashboard", inverted = false, className }: Props) {
+export function Logo({ variant = "full", size = 40, href = "/dashboard", inverted = false, caption = false, className }: Props) {
+  const wordmarkHeight = Math.round(size * 0.85);
+  const wordmarkWidth = Math.round(wordmarkHeight * (240 / 91));
+
+  const mark = inverted ? (
+    <span className="flex shrink-0 items-center justify-center rounded-[22%] bg-white" style={{ width: size, height: size, padding: Math.round(size * 0.08) }}>
+      <Image src="/brand/mark.png" alt="Blue Belt Media" width={size} height={size} priority className="h-full w-full" />
+    </span>
+  ) : (
+    <Image src="/brand/mark.png" alt="Blue Belt Media" width={size} height={size} priority className="shrink-0" style={{ width: size, height: size }} />
+  );
+
   const content = (
-    <span className={cn("inline-flex items-center gap-3", className)}>
-      <Image
-        src="/brand/logo.svg"
-        alt="Blue Belt Media"
-        width={size}
-        height={size}
-        priority
-        className="shrink-0 rounded-[22%]"
-        style={{ width: size, height: size }}
-      />
+    <span className={cn("inline-flex items-center gap-2.5", className)}>
+      {mark}
       {variant === "full" && (
-        <span className="flex flex-col leading-none">
-          <span className={cn("text-[15px] font-extrabold tracking-tight", inverted ? "text-white" : "text-navy")}>
-            Blue Belt Media
-          </span>
-          <span className={cn("mt-1 text-[10px] font-semibold uppercase tracking-[0.16em]", inverted ? "text-white/60" : "text-muted")}>
-            Tournament Watcher
-          </span>
+        <span className="flex flex-col">
+          <Image
+            src={inverted ? "/brand/wordmark-white.png" : "/brand/wordmark.png"}
+            alt=""
+            aria-hidden
+            width={wordmarkWidth}
+            height={wordmarkHeight}
+            priority
+            style={{ width: wordmarkWidth, height: wordmarkHeight }}
+          />
+          {caption && (
+            <span className={cn("mt-0.5 text-[10px] font-semibold uppercase tracking-[0.16em]", inverted ? "text-white/60" : "text-muted")}>
+              Tournament Watcher
+            </span>
+          )}
         </span>
       )}
     </span>

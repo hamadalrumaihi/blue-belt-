@@ -61,7 +61,7 @@ src/
     queries.ts         server data loaders
     settings.ts        per-device preferences (localStorage)
   proxy.ts             session refresh + auth gate (Next 16 name for middleware)
-public/brand/          logo.svg — drop the official Blue Belt Media logo here
+public/brand/          official logo (logo.png) and derived mark / wordmark / icon files
 supabase/migrations/   additive SQL applied on top of the existing tables
 ```
 
@@ -108,13 +108,17 @@ NEXT_PUBLIC_SITE_URL=https://your-domain
 
 ### 3. Logo
 
-Replace `public/brand/logo.svg` with the official Blue Belt Media logo (any square SVG). The login page, sidebar, header, loading screen, favicon (`src/app/icon.svg`) and Apple touch icon (`src/app/apple-icon.png`) all derive from it. Regenerate the PNG with:
+The official Blue Belt Media lockup is `public/brand/logo.png` (364×118, transparent). Everything else in `public/brand` is derived from it:
 
-```
-node -e "require('sharp')(require('fs').readFileSync('public/brand/logo.svg'),{density:600}).resize(180,180).png().toFile('src/app/apple-icon.png')"
-```
+| File | Use |
+| --- | --- |
+| `mark.png` | square knight badge, colour (header, cards, loading) |
+| `wordmark.png` / `wordmark-white.png` | script wordmark for light / dark surfaces |
+| `logo-white.png` | full lockup in white ink |
+| `icon-192.png`, `icon-512.png` | PWA icons (white tile) |
+| `src/app/icon.png`, `src/app/apple-icon.png` | favicon and iPhone home-screen icon |
 
-and copy the SVG to `src/app/icon.svg`.
+To swap in a higher-resolution or vector master later, replace `logo.png` and re-cut the derived files (crop the mark at x 14–105 / y 13–104 and the wordmark at x 110–350 of the 364×118 original, or adjust for the new size).
 
 ---
 

@@ -13,7 +13,7 @@ export function DesktopSidebar({ email }: { email: string | null }) {
   return (
     <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col bg-navy text-white lg:flex">
       <div className="px-5 pb-4 pt-6">
-        <Logo inverted size={44} />
+        <Logo inverted caption size={44} />
       </div>
       <nav className="flex-1 space-y-1 px-3" aria-label="Main">
         {SIDEBAR_ITEMS.map(({ href, label, icon: Icon }) => {
