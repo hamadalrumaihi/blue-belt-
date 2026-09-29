@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96" role="img" aria-label="Blue Belt Media">
+  <defs>
+    <linearGradient id="bbm-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#12294a"/>
+      <stop offset="1" stop-color="#0b1f3a"/>
+    </linearGradient>
+    <linearGradient id="bbm-belt" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#2f80ed"/>
+      <stop offset="1" stop-color="#1769e0"/>
+    </linearGradient>
+  </defs>
+  <rect width="96" height="96" rx="22" fill="url(#bbm-bg)"/>
+  <!-- belt band -->
+  <rect x="10" y="40" width="76" height="18" rx="4" fill="url(#bbm-belt)"/>
+  <!-- belt tips crossing under the knot -->
+  <path d="M40 58 L30 78 L38 80 L48 62 Z" fill="#1769e0"/>
+  <path d="M56 58 L66 78 L58 80 L48 62 Z" fill="#2f80ed"/>
+  <!-- knot -->
+  <rect x="40" y="36" width="16" height="26" rx="4" fill="#0b1f3a" stroke="#eaf3ff" stroke-width="2"/>
+  <!-- rank stripes (photographer's black bar) -->
+  <rect x="64" y="40" width="14" height="18" fill="#0b1f3a"/>
+  <rect x="66.5" y="40" width="2" height="18" fill="#ffffff"/>
+  <rect x="71" y="40" width="2" height="18" fill="#ffffff"/>
+  <rect x="75.5" y="40" width="2" height="18" fill="#ffffff"/>
+  <!-- lens aperture dot -->
+  <circle cx="24" cy="49" r="5" fill="#ffffff"/>
+  <circle cx="24" cy="49" r="2.4" fill="#0b1f3a"/>
+</svg>
