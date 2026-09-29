@@ -72,7 +72,7 @@ export function SettingsForm() {
       <section className="card space-y-4 p-5">
         <h2 className="text-sm font-extrabold uppercase tracking-wider text-muted">Branding</h2>
         <div className="flex items-center gap-4 rounded-2xl bg-navy p-4">
-          <Logo inverted size={52} href={null} />
+          <Logo inverted caption size={52} href={null} />
         </div>
         <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-line p-4">
           <Logo size={40} href={null} />
@@ -83,7 +83,7 @@ export function SettingsForm() {
             <StatusBadge bucket="GO TO MAT" size="sm" />
           </div>
         </div>
-        <p className="hint">Logo file: <code>/public/brand/logo.svg</code>. Replace it to update the app everywhere.</p>
+        <p className="hint">Logo files live in <code>/public/brand</code> (logo.png, mark.png, wordmark.png and white variants).</p>
       </section>
 
       <section className="card space-y-3 p-5">

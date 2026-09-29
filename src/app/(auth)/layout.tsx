@@ -10,9 +10,13 @@ export default function AuthLayout({ children }: { children: ReactNode }) {
       </div>
       <main className="relative z-10 flex flex-1 flex-col items-center justify-center px-4 py-10">
         <div className="mb-8 flex flex-col items-center text-center">
-          <Image src="/brand/logo.svg" alt="Blue Belt Media" width={84} height={84} priority className="rounded-[22%] shadow-hero" />
-          <h1 className="mt-5 text-3xl font-extrabold tracking-tight">Blue Belt Media</h1>
-          <p className="mt-1 text-sm font-semibold uppercase tracking-[0.18em] text-white/60">Tournament Coverage Command Center</p>
+          <span className="flex h-24 w-24 items-center justify-center rounded-[22%] bg-white p-2 shadow-hero">
+            <Image src="/brand/mark.png" alt="" aria-hidden width={96} height={96} priority className="h-full w-full" />
+          </span>
+          <h1 className="mt-5">
+            <Image src="/brand/wordmark-white.png" alt="Blue Belt Media" width={240} height={91} priority style={{ width: 220, height: "auto" }} />
+          </h1>
+          <p className="mt-2 text-sm font-semibold uppercase tracking-[0.18em] text-white/60">Tournament Coverage Command Center</p>
         </div>
         <div className="w-full max-w-sm">{children}</div>
         <p className="mt-10 text-center text-xs text-white/40">Private tool for Blue Belt Media photographers.</p>
