@@ -132,7 +132,12 @@ async function renderOnce(url, waitForSelector, started) {
       challenged = await isChallenged(page);
     }
     if (challenged) {
-      return { ok: false, code: "CHALLENGE_NOT_CLEARED", message: "The site's bot challenge did not clear in time.", elapsedMs: Date.now() - started };
+      const kind = await challengeKind(page);
+      const message =
+        kind === "interactive"
+          ? "The site shows an interactive CAPTCHA (Turnstile); it cannot be cleared automatically. Open the source page by hand."
+          : "The site's automatic bot challenge did not clear in time.";
+      return { ok: false, code: "CHALLENGE_NOT_CLEARED", message, challengeKind: kind, status: response?.status() ?? null, elapsedMs: Date.now() - started };
     }
 
     if (waitForSelector) {
@@ -184,6 +189,28 @@ async function isContextGone(ctx) {
     return false;
   } catch (err) {
     return CLOSED_RE.test(err instanceof Error ? err.message : String(err));
+  }
+}
+
+/**
+ * Classifies a challenge page that did not clear: "interactive" when a
+ * Turnstile widget (user must click / solve) is present, "managed" for the
+ * automatic JavaScript check, "unknown" when the page could not be read.
+ * Diagnostic only; nothing here attempts to solve either.
+ */
+async function challengeKind(page) {
+  try {
+    const found = await page.evaluate(() => {
+      const html = document.documentElement.outerHTML;
+      const turnstile = /challenges\.cloudflare\.com\/turnstile|cf-turnstile|turnstile_|data-sitekey/i.test(html) || Boolean(document.querySelector("iframe[src*='challenges.cloudflare.com']"));
+      const managed = /cf-chl|challenge-platform|_cf_chl_opt|just a moment/i.test(html);
+      return { turnstile, managed };
+    });
+    if (found.turnstile) return "interactive";
+    if (found.managed) return "managed";
+    return "unknown";
+  } catch {
+    return "unknown";
   }
 }
 
