@@ -134,7 +134,7 @@ async function watchUrlInner(rawUrl: string | null | undefined, options: WatchOp
       code: mapped.code,
       message: mapped.message(rendered.message),
       strategy: "browser",
-      diagnostics: diag({ strategy: "browser", sourceStatus: rendered.status ?? null, elapsedMs: rendered.elapsedMs ?? Date.now() - started, workerCode: rendered.workerCode ?? rendered.code, attempts: rendered.attempts }),
+      diagnostics: diag({ strategy: "browser", sourceStatus: rendered.status ?? null, elapsedMs: rendered.elapsedMs ?? Date.now() - started, workerCode: rendered.challengeKind ? `${rendered.workerCode ?? rendered.code}:${rendered.challengeKind}` : rendered.workerCode ?? rendered.code, attempts: rendered.attempts }),
     };
   }
   const result = adapter.parse(rendered.html, ctx(rendered.finalUrl));
@@ -164,7 +164,11 @@ function fetchCode(r: Extract<SafeFetchResult, { ok: false }>): WatchCode {
 function browserFailure(code: BrowserFetchCode): { status: WatchStatus; code: WatchCode; message: (worker: string) => string } {
   switch (code) {
     case "CHALLENGE_NOT_CLEARED":
-      return { status: "REQUIRES_BROWSER_WATCHER", code: "BROWSER_CHALLENGE", message: () => "Browser worker could not clear the site's bot challenge (CHALLENGE_NOT_CLEARED)." };
+      return {
+        status: "REQUIRES_BROWSER_WATCHER",
+        code: "BROWSER_CHALLENGE",
+        message: (w) => (/interactive|turnstile/i.test(w) ? `Browser worker hit an interactive CAPTCHA (CHALLENGE_NOT_CLEARED). ${w}` : "Browser worker could not clear the site's bot challenge (CHALLENGE_NOT_CLEARED)."),
+      };
     case "NOT_CONFIGURED":
       return { status: "REQUIRES_BROWSER_WATCHER", code: "BROWSER_WORKER_NOT_CONFIGURED", message: () => "The source needs a browser and the browser worker is not configured." };
     case "TIMEOUT":

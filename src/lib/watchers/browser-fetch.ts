@@ -28,7 +28,7 @@ export type BrowserFetchCode =
 
 type RenderOnce =
   | { ok: true; html: string; finalUrl: string; status: number | null; elapsedMs: number }
-  | { ok: false; code: BrowserFetchCode; message: string; workerCode?: string; status?: number | null; elapsedMs?: number };
+  | { ok: false; code: BrowserFetchCode; message: string; workerCode?: string; challengeKind?: string; status?: number | null; elapsedMs?: number };
 
 export type BrowserFetchResult = RenderOnce & { attempts: number };
 
@@ -95,7 +95,7 @@ async function renderOnce(url: URL, fetchImpl: typeof fetch): Promise<RenderOnce
       : { ok: false, code: "WORKER_UNREACHABLE", message: "Browser worker unreachable." };
   }
 
-  let body: { ok?: boolean; html?: string; finalUrl?: string; status?: number | null; elapsedMs?: number; code?: string; message?: string };
+  let body: { ok?: boolean; html?: string; finalUrl?: string; status?: number | null; elapsedMs?: number; code?: string; message?: string; challengeKind?: string };
   try {
     body = (await response.json()) as typeof body;
   } catch {
@@ -111,6 +111,7 @@ async function renderOnce(url: URL, fetchImpl: typeof fetch): Promise<RenderOnce
       ok: false,
       code,
       workerCode,
+      challengeKind: typeof body.challengeKind === "string" ? body.challengeKind : undefined,
       message: typeof body.message === "string" ? body.message.slice(0, 200) : `Browser worker error (HTTP ${response.status}).`,
       status: typeof body.status === "number" ? body.status : null,
       elapsedMs: typeof body.elapsedMs === "number" ? body.elapsedMs : undefined,

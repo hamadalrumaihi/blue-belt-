@@ -86,8 +86,8 @@ export function createServer(deps = {}) {
         return json(res, 200, { ok: true, html: result.html, finalUrl: landed.url.toString(), status: result.status ?? null, elapsedMs, strategy: "browser", fetchedAt: new Date().toISOString() });
       }
 
-      reqLog.info("render.failed", { host: target.hostname, path: target.pathname, code: result.code, status: result.status ?? null, elapsedMs });
-      return json(res, 502, { ok: false, code: result.code, message: result.message, status: result.status ?? null, elapsedMs, strategy: "browser", fetchedAt: new Date().toISOString() });
+      reqLog.info("render.failed", { host: target.hostname, path: target.pathname, code: result.code, challengeKind: result.challengeKind, status: result.status ?? null, elapsedMs });
+      return json(res, 502, { ok: false, code: result.code, message: result.message, challengeKind: result.challengeKind, status: result.status ?? null, elapsedMs, strategy: "browser", fetchedAt: new Date().toISOString() });
     }
 
     return json(res, 404, { ok: false, code: "NOT_FOUND", message: "Unknown route." });
