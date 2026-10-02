@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NEXT_TELEMETRY_DISABLED: "1"
+  CI: "true"
+
+jobs:
+  app:
+    name: App (typecheck, lint, test, build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Public placeholders only; the build needs no real project and no other env.
+      NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+  worker:
+    name: Worker (syntax + unit tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: worker
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: worker/package-lock.json
+      - run: npm ci
+      - run: node --check src/*.mjs
+      - run: npm test
+
+  worker-browser:
+    name: Worker (real Chromium integration test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Same image as worker/Dockerfile: Chromium + OS deps matching playwright 1.56.1.
+    container:
+      image: mcr.microsoft.com/playwright:v1.56.1-noble
+    defaults:
+      run:
+        working-directory: worker
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+      BBM_WORKER_BROWSER_TESTS: "1"
+      CHROMIUM_NO_SANDBOX: "1"
+      HEADLESS: new
+      ENGINE: playwright
+      HOME: /root
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-worker-browser-${{ runner.os }}-${{ hashFiles('worker/package-lock.json') }}
+          restore-keys: npm-worker-browser-${{ runner.os }}-
+      - run: node --version && npm --version
+      - run: npm ci
+      - run: node --test test/browser.integration.test.mjs

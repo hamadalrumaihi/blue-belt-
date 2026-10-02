@@ -103,17 +103,24 @@ function json(res, status, body) {
 function readBody(req, limit = 64 * 1024) {
   return new Promise((resolve, reject) => {
     let size = 0;
+    let tooLarge = false;
     const chunks = [];
     req.on("data", (c) => {
+      if (tooLarge) return;
       size += c.length;
       if (size > limit) {
+        // Stop buffering but keep draining so the 413 can still be written on
+        // the open connection instead of resetting it.
+        tooLarge = true;
+        chunks.length = 0;
         reject(new Error("Body too large"));
-        req.destroy();
         return;
       }
       chunks.push(c);
     });
-    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    req.on("end", () => {
+      if (!tooLarge) resolve(Buffer.concat(chunks).toString("utf8"));
+    });
     req.on("error", reject);
   });
 }
