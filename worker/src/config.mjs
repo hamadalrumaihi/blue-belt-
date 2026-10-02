@@ -65,6 +65,17 @@ export function proxyOptions() {
   return out;
 }
 
+/** Chromium rejects anything but an IANA zone id ("London" is not one; "Europe/London" is). */
+export function isValidTimezone(id) {
+  if (typeof id !== "string" || !id.includes("/") && id !== "UTC") return false;
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: id });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function validateConfig() {
   const problems = [];
   if (config.proxyServer) {
@@ -77,6 +88,7 @@ export function validateConfig() {
   if (!config.token || config.token.length < 16) problems.push("WORKER_TOKEN must be set (16+ random characters)");
   if (!["new", "shell", "headed"].includes(config.headless)) problems.push("HEADLESS must be new, shell or headed");
   if (!["playwright", "patchright"].includes(config.engine)) problems.push("ENGINE must be playwright or patchright");
+  if (!isValidTimezone(config.timezone)) problems.push(`TZ_ID must be an IANA zone such as Europe/London (got "${config.timezone}")`);
   if (config.schedule.seconds && (!config.schedule.appUrl || !config.schedule.cronSecret)) {
     problems.push("SCHEDULE_SECONDS requires APP_URL and CRON_SECRET");
   }

@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
  */
 let n = 0;
 async function loadConfig(env) {
-  for (const key of ["BROWSER_PROXY", "WORKER_TOKEN", "HEADLESS", "ENGINE", "SCHEDULE_SECONDS", "APP_URL", "CRON_SECRET", "ALLOWED_HOSTS", "PORT", "MAX_CONCURRENCY"]) delete process.env[key];
+  for (const key of ["BROWSER_PROXY", "WORKER_TOKEN", "HEADLESS", "ENGINE", "SCHEDULE_SECONDS", "APP_URL", "CRON_SECRET", "ALLOWED_HOSTS", "PORT", "MAX_CONCURRENCY", "TZ_ID"]) delete process.env[key];
   Object.assign(process.env, env);
   n += 1;
   return import(`../src/config.mjs?case=${n}`);
@@ -59,14 +59,21 @@ describe("config + validateConfig", () => {
   });
 
   test("names every problem", async () => {
-    const { validateConfig } = await loadConfig({ WORKER_TOKEN: "short", HEADLESS: "sometimes", ENGINE: "puppeteer", SCHEDULE_SECONDS: "60", BROWSER_PROXY: "http://[bad" });
+    const { validateConfig } = await loadConfig({ WORKER_TOKEN: "short", HEADLESS: "sometimes", ENGINE: "puppeteer", SCHEDULE_SECONDS: "60", BROWSER_PROXY: "http://[bad", TZ_ID: "London" });
     assert.deepEqual(validateConfig(), [
       "BROWSER_PROXY must look like http://user:pass@host:port",
       "WORKER_TOKEN must be set (16+ random characters)",
       "HEADLESS must be new, shell or headed",
       "ENGINE must be playwright or patchright",
+      'TZ_ID must be an IANA zone such as Europe/London (got "London")',
       "SCHEDULE_SECONDS requires APP_URL and CRON_SECRET",
     ]);
+  });
+
+  test("accepts IANA time zones and rejects city names", async () => {
+    const { isValidTimezone } = await loadConfig({ WORKER_TOKEN: "x".repeat(24) });
+    for (const ok of ["Europe/London", "Asia/Qatar", "America/New_York", "UTC"]) assert.equal(isValidTimezone(ok), true, ok);
+    for (const bad of ["London", "Qatar", "GMT+3", "", "Europe/Nowhere"]) assert.equal(isValidTimezone(bad), false, bad);
   });
 
   test("scheduler config is complete when all three values are set", async () => {
