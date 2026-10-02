@@ -16,6 +16,12 @@ export const config = {
     .filter(Boolean),
   /** "new" (Chromium new headless, least detectable), "shell" (Playwright headless shell) or "headed" (needs Xvfb). */
   headless: (process.env.HEADLESS ?? "new").toLowerCase(),
+  /**
+   * Browser automation engine: "playwright" (default) or "patchright", a
+   * drop-in Playwright fork that hides the automation fingerprints Cloudflare
+   * looks for. Patchright ships its own Chromium (installed in the Dockerfile).
+   */
+  engine: (process.env.ENGINE ?? "playwright").toLowerCase(),
   /** Persistent Chromium profile so Cloudflare clearance cookies survive restarts. Mount a volume here on Railway. */
   profileDir: process.env.PROFILE_DIR ?? "/data/profile",
   /** Optional: connect to an external browser over CDP instead of launching Chromium (e.g. a browser-as-a-service with residential IPs). */
@@ -46,6 +52,7 @@ export function validateConfig() {
   const problems = [];
   if (!config.token || config.token.length < 16) problems.push("WORKER_TOKEN must be set (16+ random characters)");
   if (!["new", "shell", "headed"].includes(config.headless)) problems.push("HEADLESS must be new, shell or headed");
+  if (!["playwright", "patchright"].includes(config.engine)) problems.push("ENGINE must be playwright or patchright");
   if (config.schedule.seconds && (!config.schedule.appUrl || !config.schedule.cronSecret)) {
     problems.push("SCHEDULE_SECONDS requires APP_URL and CRON_SECRET");
   }

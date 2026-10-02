@@ -10,6 +10,9 @@ ENV NODE_ENV=production \
 
 COPY package.json package-lock.json* ./
 RUN npm install --omit=dev --no-audit --no-fund
+# Patchright (ENGINE=patchright) needs its own Chromium build; Playwright's is already in the base image.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN npx patchright install chromium
 
 COPY src ./src
 COPY start.sh ./start.sh
