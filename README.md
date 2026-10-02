@@ -262,14 +262,14 @@ How the app uses it (`src/lib/watchers/index.ts`):
 | GET | `/health` | | browser state, queue depth, mode |
 | POST | `/render` | `{ "url": "https://ajptour.com/…", "waitForSelector?": "css" }` | `Authorization: Bearer <WORKER_TOKEN>`; only allow-listed hosts; 3 MB cap; queued at `MAX_CONCURRENCY` |
 
-Responses: `{ ok: true, html, finalUrl, status, elapsedMs, fetchedAt }` or `{ ok: false, code: CHALLENGE_NOT_CLEARED | TIMEOUT | NAVIGATION_ERROR | TOO_LARGE | UNSUPPORTED_HOST | INVALID_URL | UNAUTHORIZED, message }`.
+Responses: `{ ok: true, html, finalUrl, status, elapsedMs, fetchedAt }` or `{ ok: false, code: CHALLENGE_NOT_CLEARED | TIMEOUT | NAVIGATION_ERROR | PROXY_AUTH_FAILED | PROXY_ERROR | BROWSER_CLOSED | WORKER_RESTARTING | TOO_LARGE | UNSUPPORTED_HOST | INVALID_URL | UNAUTHORIZED, message }`. A context that dies under a request (crash, restart) is relaunched and the page retried once before `BROWSER_CLOSED` is reported.
 
-**If the challenge still does not clear from Railway.** Cloudflare scores the IP reputation and browser fingerprint. Datacenter IPs are sometimes served an interactive (Turnstile) challenge that no automation can pass. Two switches exist for that case, no code changes needed:
+**Cloudflare from Railway: verified result.** Cloudflare scores the IP reputation first and the browser fingerprint second. From Railway's data-centre IPs the AJP and Smoothcomp bracket pages stayed challenged in every browser mode tried (stock Playwright new-headless, Patchright new-headless, Patchright headed under Xvfb), with `CHALLENGE_WAIT_MS=60000`. The browser mode is not the lever; the exit IP is. Two switches exist for that, no code changes needed:
 
-- `BROWSER_PROXY=http://user:pass@host:port` routes the worker's Chromium through a residential proxy.
+- `BROWSER_PROXY=http://user:pass@host:port` routes the worker's Chromium through a residential proxy. Put the login in the URL; the worker splits it into the separate `username`/`password` fields Playwright needs (Playwright itself drops credentials from the URL). With a per-GB plan, `PROXY_BLOCK_ASSETS=1` skips images, media and fonts once the challenge is clearing.
 - `BROWSER_WS_ENDPOINT=wss://…` connects to a hosted browser (Browserless, Bright Data Scraping Browser, and similar) that handles challenges on its own infrastructure; the worker then only drives it.
 
-The sandbox this app was built in could not clear the challenge in any mode (its egress proxy re-terminates TLS, which alters the fingerprint Cloudflare inspects), so **verify the worker against a live AJP event before Qatar**. `/health` plus one `POST /render` on a schedule page tells you in under a minute.
+`/health` reports the active `proxy` host, and one Test-link run from the app shows the outcome as a `[watch] …` line in the Vercel runtime logs.
 
 ### Scheduled refresh while phones are locked
 

@@ -36,8 +36,10 @@ export const config = {
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
   /** Extra Chromium flags, space separated (e.g. "--ignore-certificate-errors" behind a corporate proxy). */
   extraArgs: (process.env.CHROMIUM_EXTRA_ARGS ?? "").split(/\s+/).filter(Boolean),
-  /** Optional HTTP(S) proxy for the browser, e.g. http://user:pass@host:port. */
-  proxyServer: process.env.BROWSER_PROXY ?? "",
+  /** Optional HTTP(S) or SOCKS proxy for the browser, e.g. http://user:pass@host:port (residential IPs clear Cloudflare). */
+  proxyServer: (process.env.BROWSER_PROXY ?? "").trim(),
+  /** With a proxy: skip images, media and fonts so a per-GB residential plan is not spent on page chrome. */
+  proxyBlockAssets: process.env.PROXY_BLOCK_ASSETS === "1",
   locale: process.env.LOCALE ?? "en-GB",
   timezone: process.env.TZ_ID ?? "Asia/Qatar",
   /** Optional scheduler: call the app's cron endpoint every N seconds so refreshes run while phones are locked. */
@@ -48,8 +50,30 @@ export const config = {
   },
 };
 
+/**
+ * Playwright keeps only `protocol//host` of `proxy.server` and reads the
+ * login from `username`/`password`, so credentials embedded in the URL must
+ * be split out here or the proxy answers 407 to every request.
+ * @returns {{server:string, username?:string, password?:string} | null}
+ */
+export function proxyOptions() {
+  if (!config.proxyServer) return null;
+  const url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(config.proxyServer) ? config.proxyServer : `http://${config.proxyServer}`);
+  const out = { server: `${url.protocol}//${url.host}` };
+  if (url.username) out.username = decodeURIComponent(url.username);
+  if (url.password) out.password = decodeURIComponent(url.password);
+  return out;
+}
+
 export function validateConfig() {
   const problems = [];
+  if (config.proxyServer) {
+    try {
+      proxyOptions();
+    } catch {
+      problems.push("BROWSER_PROXY must look like http://user:pass@host:port");
+    }
+  }
   if (!config.token || config.token.length < 16) problems.push("WORKER_TOKEN must be set (16+ random characters)");
   if (!["new", "shell", "headed"].includes(config.headless)) problems.push("HEADLESS must be new, shell or headed");
   if (!["playwright", "patchright"].includes(config.engine)) problems.push("ENGINE must be playwright or patchright");

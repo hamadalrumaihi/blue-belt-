@@ -1,4 +1,4 @@
-import { config } from "./config.mjs";
+import { config, proxyOptions } from "./config.mjs";
 
 /** Loads the selected engine lazily so a missing optional package only fails when used. */
 async function loadChromium() {
@@ -21,6 +21,7 @@ let shuttingDown = false;
 let active = 0;
 const queue = [];
 
+const BLOCKED_RESOURCES = new Set(["image", "media", "font"]);
 const CLOSED_RE = /Target page, context or browser has been closed|browser has been closed|Target closed|Session closed|has been closed/i;
 
 function launchArgs() {
@@ -53,7 +54,7 @@ export async function getContext() {
       locale: config.locale,
       timezoneId: config.timezone,
       ignoreHTTPSErrors: config.extraArgs.includes("--ignore-certificate-errors"),
-      proxy: config.proxyServer ? { server: config.proxyServer } : undefined,
+      proxy: proxyOptions() ?? undefined,
     });
     context.on("close", () => { context = null; });
     return context;
@@ -114,7 +115,13 @@ async function renderOnce(url, waitForSelector, started) {
     ctx = await getContext();
     page = await ctx.newPage();
     page.setDefaultNavigationTimeout(config.navTimeoutMs);
+    if (config.proxyServer && config.proxyBlockAssets) {
+      await page.route("**/*", (route) => (BLOCKED_RESOURCES.has(route.request().resourceType()) ? route.abort() : route.continue()));
+    }
     const response = await page.goto(url, { waitUntil: "domcontentloaded" });
+    if (response?.status() === 407) {
+      return { ok: false, code: "PROXY_AUTH_FAILED", message: "The proxy rejected the BROWSER_PROXY credentials (HTTP 407).", elapsedMs: Date.now() - started };
+    }
 
     // Let a managed challenge resolve itself (it reloads the page when done).
     const deadline = Date.now() + config.challengeWaitMs;
@@ -148,9 +155,11 @@ async function renderOnce(url, waitForSelector, started) {
       ? "WORKER_RESTARTING"
       : contextGone || CLOSED_RE.test(message)
         ? "BROWSER_CLOSED"
-        : /timeout/i.test(message)
-          ? "TIMEOUT"
-          : "NAVIGATION_ERROR";
+        : /ERR_PROXY_|ERR_TUNNEL_CONNECTION_FAILED|ERR_NO_SUPPORTED_PROXIES/.test(message)
+          ? "PROXY_ERROR"
+          : /timeout/i.test(message)
+            ? "TIMEOUT"
+            : "NAVIGATION_ERROR";
     return { ok: false, code, message, elapsedMs: Date.now() - started };
   } finally {
     await page?.close().catch(() => undefined);
@@ -194,5 +203,12 @@ export async function shutdown() {
 }
 
 export function stats() {
-  return { active, queued: queue.length, browserReady: Boolean(context), mode: config.browserWsEndpoint ? "cdp" : config.headless, engine: config.engine };
+  return {
+    active,
+    queued: queue.length,
+    browserReady: Boolean(context),
+    mode: config.browserWsEndpoint ? "cdp" : config.headless,
+    engine: config.engine,
+    proxy: config.proxyServer ? proxyOptions()?.server ?? "invalid" : null,
+  };
 }
