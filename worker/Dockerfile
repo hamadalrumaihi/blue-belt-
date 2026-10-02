@@ -12,10 +12,10 @@ COPY package.json package-lock.json* ./
 RUN npm install --omit=dev --no-audit --no-fund
 
 COPY src ./src
-RUN mkdir -p /data/profile
+COPY start.sh ./start.sh
+RUN chmod +x ./start.sh && mkdir -p /data/profile
 
 EXPOSE 8080
 
-# HEADLESS=headed needs a display; xvfb-run provides one. For "new"/"shell" plain `node` is enough,
-# but running under xvfb is harmless, so one command covers every mode.
-CMD ["xvfb-run", "-a", "--server-args=-screen 0 1280x800x24", "node", "src/server.mjs"]
+# start.sh runs node directly for headless modes and only wraps in Xvfb for HEADLESS=headed.
+CMD ["./start.sh"]
