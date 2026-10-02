@@ -80,3 +80,15 @@ describe("verifySignature", () => {
     expect(verifySignature("abc", { nothing: true }, SECRET)).toMatchObject({ valid: false, reason: "unsupported_event" });
   });
 });
+
+describe("webhook version header", () => {
+  it("accepts v2 (any case) and a missing header, rejects v1 and unknown values", async () => {
+    const { isSupportedWebhookVersion } = await import("@/lib/payments/myfatoorah/signature");
+    expect(isSupportedWebhookVersion("v2")).toBe(true);
+    expect(isSupportedWebhookVersion("V2")).toBe(true);
+    expect(isSupportedWebhookVersion(null)).toBe(true);
+    expect(isSupportedWebhookVersion("")).toBe(true);
+    expect(isSupportedWebhookVersion("v1")).toBe(false);
+    expect(isSupportedWebhookVersion("v3")).toBe(false);
+  });
+});
