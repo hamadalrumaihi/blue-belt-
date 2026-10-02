@@ -63,6 +63,10 @@ export const RULES = {
   watchPerUser: { max: 40, windowMs: 60_000 } satisfies RateLimitRule,
   /** Link previews (Test link) per user. */
   previewPerUser: { max: 20, windowMs: 60_000 } satisfies RateLimitRule,
+  /** Page imports (hand-over from the photographer's own browser) per user. */
+  importPerUser: { max: 20, windowMs: 60_000 } satisfies RateLimitRule,
+  /** Unauthenticated hand-over endpoint, per client address. */
+  importReceivePerIp: { max: 30, windowMs: 60_000 } satisfies RateLimitRule,
   /** Scheduled refresh endpoint (shared secret, but still bounded). */
   cron: { max: 12, windowMs: 60_000 } satisfies RateLimitRule,
 };

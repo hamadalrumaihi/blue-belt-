@@ -76,6 +76,9 @@ export function ClientDetail({ athlete: initialAthlete, history: initialHistory 
           <div className="mt-4 flex flex-wrap gap-2">
             <RefreshButton onClick={() => refresh([athlete.id])} loading={state?.loading} label={failed ? "Retry refresh" : "Refresh Match Data"} variant="primary" disabled={!athlete.source_url} />
             <SourceLinkButton url={athlete.source_url} platform={athlete.platform} />
+            {athlete.source_url && (
+              <Link href={`/import?url=${encodeURIComponent(athlete.source_url)}`} className="btn-ghost">Import page</Link>
+            )}
           </div>
         </section>
 

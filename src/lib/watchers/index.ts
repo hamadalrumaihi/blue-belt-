@@ -53,6 +53,57 @@ export async function watchUrl(rawUrl: string | null | undefined, options: Watch
   return result;
 }
 
+export type ImportParseOptions = Omit<WatchOptions, "log"> & { log?: Logger };
+
+/**
+ * Parses HTML the photographer's own browser already rendered (page import).
+ * Same URL policy and adapters as a live watch, no network. A pasted
+ * challenge page is reported as BROWSER_CHALLENGE so the UI can say the
+ * check was not passed before the page was handed over.
+ */
+export function parseImportedHtml(rawUrl: string, html: string, options: ImportParseOptions = {}): WatchResult {
+  const started = Date.now();
+  const now = options.now ?? new Date();
+  const fetchedAt = now.toISOString();
+  const athlete = options.athleteName ?? null;
+  const diag = (strategy: string): WatchDiagnostics => ({ strategy, sourceStatus: null, finalUrl: null, elapsedMs: Date.now() - started, attempts: 1 });
+
+  let result: WatchResult;
+  const policy = validateSourceUrl(rawUrl);
+  if (!policy.ok) {
+    result = { platform: "OTHER", status: policy.code, code: policy.code, athlete, matches: [], sourceUrl: rawUrl, fetchedAt, message: policy.message, strategy: "import", diagnostics: diag("import") };
+  } else {
+    const adapter = ADAPTERS.find((a) => a.canHandle(policy.url));
+    if (!adapter) {
+      result = { platform: policy.platform, status: "UNSUPPORTED_HOST", code: "UNSUPPORTED_HOST", athlete, matches: [], sourceUrl: policy.url.toString(), fetchedAt, message: "No adapter for this host.", strategy: "import", diagnostics: diag("import") };
+    } else {
+      const parsed = adapter.parse(html, { url: policy.url, athleteName: athlete, timezone: options.timezone || DEFAULT_TIMEZONE, eventDate: options.eventDate ?? null, now });
+      const strategy = `import:${parsed.strategy ?? "none"}`;
+      result = { ...parsed, strategy, diagnostics: { ...diag(strategy), finalUrl: policy.url.toString() } };
+      if (parsed.status === "REQUIRES_BROWSER_WATCHER") {
+        result.message = "The handed-over page is still the bot-challenge page. Pass the check in your browser, wait for the bracket to load, then import again.";
+      }
+    }
+  }
+
+  const log = options.log ?? createLogger();
+  const { hostname, pathname } = hostOf(result.sourceUrl);
+  log.info(`[watch] ${result.status}`, {
+    tag: "[watch]",
+    status: result.status,
+    code: result.code,
+    strategy: result.diagnostics?.strategy ?? "import",
+    matches: result.matches.length,
+    host: hostname,
+    path: pathname,
+    sourceStatus: null,
+    elapsedMs: result.diagnostics?.elapsedMs ?? Date.now() - started,
+    htmlBytes: html.length,
+    detail: result.message,
+  });
+  return result;
+}
+
 function hostOf(url: string): { hostname: string; pathname: string } {
   try {
     const u = new URL(url);

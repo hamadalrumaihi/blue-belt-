@@ -42,6 +42,12 @@ export type RefreshOptions = {
   now?: Date;
   concurrency?: number;
   staggerMs?: number;
+  /**
+   * Replaces the live fetch+parse step. Used by page imports, where the HTML
+   * was already obtained by the photographer's own browser; everything after
+   * (plan, RPC, history, notifications) is identical.
+   */
+  watch?: (athlete: AthleteRow, event: EventRow | null) => Promise<WatchResult>;
 };
 
 const STAGGER_MS = 350;
@@ -96,7 +102,9 @@ export async function refreshAthlete(supabase: Client, athlete: AthleteRow, even
   try {
     const existing = await loadMatches(supabase, athlete.id);
     const timezone = event?.timezone ?? DEFAULT_TIMEZONE;
-    const result = await watchUrl(athlete.source_url, { athleteName: athlete.name, timezone, eventDate: event?.event_date ?? null, now, log });
+    const result = options.watch
+      ? await options.watch(athlete, event)
+      : await watchUrl(athlete.source_url, { athleteName: athlete.name, timezone, eventDate: event?.event_date ?? null, now, log });
     const plan = buildRefreshPlan(existing, result, checkedAt, timezone);
 
     const applied = await applyRefresh(supabase, {
