@@ -80,7 +80,9 @@ function relative(ms: number): string {
 export function describeFailure(code: string | null | undefined, message?: string | null): string {
   switch (code) {
     case "BROWSER_CHALLENGE":
-      return "The source is behind a bot challenge the browser worker could not clear (CHALLENGE_NOT_CLEARED).";
+      return /interactive|turnstile|captcha/i.test(message ?? "")
+        ? "The source asks for a human check (CAPTCHA) the browser worker cannot pass (CHALLENGE_NOT_CLEARED). Open the page yourself and use Import page."
+        : "The source is behind a bot challenge the browser worker could not clear (CHALLENGE_NOT_CLEARED). Open the page yourself and use Import page.";
     case "BROWSER_JS_SHELL":
       return "The page needs a browser to render its schedule.";
     case "BROWSER_WORKER_NOT_CONFIGURED":

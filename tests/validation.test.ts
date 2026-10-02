@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CRON_DEFAULT_LIMIT, CRON_MAX_LIMIT, MAX_WATCH_BATCH, daysInMonth, isPlainObject, isUuid, isValidCalendarDate, parseCronRequest, parseWatchRequest } from "@/lib/validation";
+import { CRON_DEFAULT_LIMIT, CRON_MAX_LIMIT, MAX_IMPORT_HTML_BYTES, MAX_WATCH_BATCH, daysInMonth, isPlainObject, isUuid, isValidCalendarDate, parseCronRequest, parseImportRequest, parseWatchRequest } from "@/lib/validation";
 
 const UUID_A = "7f4f6d1e-3c2b-4a1d-9e8f-0a1b2c3d4e5f";
 const UUID_B = "8a5a7e2f-4d3c-4b2e-8f9a-1b2c3d4e5f60";
@@ -123,5 +123,30 @@ describe("parseCronRequest", () => {
   it("clamps limit and cooldown and accepts a cursor", () => {
     expect(parseCronRequest({ all: true, limit: 10_000, cursor: UUID_A, cooldownSeconds: 99_999 })).toEqual({ ok: true, all: true, limit: CRON_MAX_LIMIT, cursor: UUID_A, cooldownSeconds: 3600 });
     expect(parseCronRequest({ limit: 5, cursor: null, cooldownSeconds: 0 })).toEqual({ ok: true, all: false, limit: 5, cursor: null, cooldownSeconds: 0 });
+  });
+});
+
+describe("parseImportRequest", () => {
+  const html = "<html><body><table><tr><td>Mat 1</td></tr></table></body></html>";
+  const url = "https://ajptour.com/en/event/1411/bracket/130617";
+
+  it("accepts url + html and trims the url", () => {
+    expect(parseImportRequest({ url: ` ${url} `, html })).toEqual({ ok: true, url, html });
+  });
+
+  it("rejects malformed bodies with a code", () => {
+    expect(parseImportRequest(undefined)).toMatchObject({ ok: false, code: "INVALID_JSON" });
+    expect(parseImportRequest("x")).toMatchObject({ ok: false, code: "INVALID_BODY" });
+    expect(parseImportRequest([])).toMatchObject({ ok: false, code: "INVALID_BODY" });
+    expect(parseImportRequest({ url, html, extra: 1 })).toMatchObject({ ok: false, code: "UNKNOWN_FIELD" });
+    expect(parseImportRequest({ html })).toMatchObject({ ok: false, code: "INVALID_URL" });
+    expect(parseImportRequest({ url: "", html })).toMatchObject({ ok: false, code: "INVALID_URL" });
+    expect(parseImportRequest({ url })).toMatchObject({ ok: false, code: "INVALID_HTML" });
+    expect(parseImportRequest({ url, html: "just text, no tags" })).toMatchObject({ ok: false, code: "INVALID_HTML" });
+    expect(parseImportRequest({ url, html: 42 })).toMatchObject({ ok: false, code: "INVALID_HTML" });
+  });
+
+  it("caps the page size", () => {
+    expect(parseImportRequest({ url, html: "<p>" + "x".repeat(MAX_IMPORT_HTML_BYTES) })).toMatchObject({ ok: false, code: "TOO_LARGE" });
   });
 });

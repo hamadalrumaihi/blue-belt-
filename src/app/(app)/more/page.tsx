@@ -3,7 +3,7 @@ import Link from "next/link";
 import { BrandHeader } from "@/components/BrandHeader";
 import { PageBody } from "@/components/AppShell";
 import { Logo } from "@/components/Logo";
-import { ChevronRightIcon, HistoryIcon, LogoutIcon, SettingsIcon, ShieldIcon } from "@/components/icons";
+import { ChevronRightIcon, EyeIcon, HistoryIcon, LogoutIcon, SettingsIcon, ShieldIcon } from "@/components/icons";
 import { signOut } from "@/lib/actions/auth";
 import { getUser } from "@/lib/supabase/server";
 
@@ -13,6 +13,7 @@ export default async function MorePage() {
   const user = await getUser();
   const items = [
     { href: "/history", label: "Activity / change history", icon: HistoryIcon },
+    { href: "/import", label: "Import a page (CAPTCHA workaround)", icon: EyeIcon },
     { href: "/settings", label: "Settings", icon: SettingsIcon },
     { href: "/settings/danger", label: "Danger zone / delete management", icon: ShieldIcon },
   ];

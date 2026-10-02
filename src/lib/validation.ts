@@ -128,3 +128,28 @@ export function parseCronRequest(body: unknown): CronRequest {
   if (typeof cooldownRaw !== "number" || !Number.isFinite(cooldownRaw) || cooldownRaw < 0) return fail("INVALID_FIELD", "cooldownSeconds must be a non-negative number.");
   return { ok: true, all, limit, cursor, cooldownSeconds: Math.min(cooldownRaw, 3600) };
 }
+
+export type ImportRequest = { ok: true; url: string; html: string } | ValidationFailure;
+
+/** Upper bound for a pasted / handed-over page (Vercel's request limit is 4.5 MB). */
+export const MAX_IMPORT_HTML_BYTES = 3 * 1024 * 1024;
+
+/**
+ * Validates the body of POST /api/import: a source URL plus the HTML of that
+ * page as the photographer's own browser rendered it. The URL policy
+ * (https, allow-listed host) is enforced again by the import service.
+ */
+export function parseImportRequest(body: unknown): ImportRequest {
+  if (body === undefined) return fail("INVALID_JSON", "Request body must be valid JSON.");
+  if (!isPlainObject(body)) return fail("INVALID_BODY", "Request body must be a JSON object.");
+  const unknown = Object.keys(body).filter((k) => k !== "url" && k !== "html");
+  if (unknown.length) return fail("UNKNOWN_FIELD", `Unsupported field: ${unknown[0]}.`);
+  const url = body.url;
+  if (typeof url !== "string" || !url.trim()) return fail("INVALID_URL", "url must be a non-empty string.");
+  if (url.length > MAX_URL_LENGTH) return fail("INVALID_URL", "url is too long.");
+  const html = body.html;
+  if (typeof html !== "string" || !html.trim()) return fail("INVALID_HTML", "html must be the page's HTML.");
+  if (html.length > MAX_IMPORT_HTML_BYTES) return fail("TOO_LARGE", "The page is too large to import (3 MB limit).");
+  if (!html.includes("<")) return fail("INVALID_HTML", "html does not look like a web page.");
+  return { ok: true, url: url.trim(), html };
+}

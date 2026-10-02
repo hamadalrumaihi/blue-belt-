@@ -278,6 +278,17 @@ With a proxy, set `LOCALE` and `TZ_ID` to match the exit country so the browser'
 
 `/health` without the token returns only `{ ok, browserReady, mode }` (what Railway's health check needs); with `Authorization: Bearer <WORKER_TOKEN>` it adds config problems, queue depth, engine, uptime and the active `proxy` host. One Test-link run from the app shows the outcome as a `[watch] …` line in the Vercel runtime logs (strategy, source status, elapsed time, worker code).
 
+### Import a page (the human-in-the-loop path)
+
+**Verified 2 Oct 2026:** through a UK residential proxy, headed Patchright, 60 s wait, AJP still answered a 403 with a Turnstile widget (`CHALLENGE_NOT_CLEARED`, `challengeKind: interactive`). Cloudflare wants a person to tick the box on that IP; no browser setting changes that, and the project does not use CAPTCHA solvers or bypass libraries. The import route makes the person the normal workflow instead of a fallback:
+
+1. The photographer opens the bracket page in their own browser (phone or laptop) and passes the check as a human.
+2. A bookmarklet (or an iOS Shortcut running the same script) on that page submits a plain form with the page URL and `document.documentElement.outerHTML` to `POST /api/import/receive`.
+3. That endpoint stores nothing: it answers a tiny first-party page that parks the payload in the tab's `sessionStorage` and navigates to `/import`.
+4. `/import` (signed in) shows the URL and size, and one tap posts it to `POST /api/import`, which runs every active client whose `source_url` is that page through the usual adapters → refresh plan → `photo_apply_refresh` RPC → history → notifications. The `[watch]` log line carries `strategy: "import:table"` (or `import:embedded-json`, …).
+
+Safety: the hand-over accepts only `Origin`s on the allow-listed source hosts (or the app itself), is rate-limited per address and capped at 3 MB, and never auto-imports: the signed-in page asks for a tap first. `/api/import` requires the session like `/api/watch` and is rate-limited per user. A handed-over page that is still the challenge page is reported as `BROWSER_CHALLENGE` with a message to pass the check first. `/import` also accepts pasted HTML (desktop: view-source, select all, copy) and reads the page URL from its canonical tag.
+
 ### `CHALLENGE_NOT_CLEARED` — what it means and what to do
 
 The worker answers `CHALLENGE_NOT_CLEARED` when the page is still Cloudflare's "Just a moment…" interstitial after `CHALLENGE_WAIT_MS`. The app records it per athlete as `REQUIRES_BROWSER_WATCHER` / code `BROWSER_CHALLENGE`, keeps the last known matches on screen marked **Stale**, and keeps the manual **Open source page** button, which is the guaranteed fallback at the mats.
