@@ -49,6 +49,7 @@ export function parseGeneric(html: string, ctx: WatchContext, platform: "AJP" | 
       return {
         ...base,
         status: "REQUIRES_BROWSER_WATCHER",
+        code: "BROWSER_CHALLENGE",
         matches: [],
         message: "The source is protected by a browser challenge. A Playwright worker is required for live data.",
       };
@@ -72,35 +73,38 @@ export function parseGeneric(html: string, ctx: WatchContext, platform: "AJP" | 
         return {
           ...base,
           status: "ATHLETE_NOT_FOUND",
+          code: "ATHLETE_NOT_FOUND",
           matches: [],
           strategy: name,
           message: `Found ${found.length} schedule rows but none mention ${ctx.athleteName}. Check the profile URL.`,
         };
       }
-      return { ...base, status: "OK", matches: sortMatches(matches), strategy: name, message: title || undefined };
+      return { ...base, status: "OK", code: "MATCHES_FOUND", matches: sortMatches(matches), strategy: name, message: title || undefined };
     }
 
     if (looksLikeJsShell($)) {
       return {
         ...base,
         status: "REQUIRES_BROWSER_WATCHER",
+        code: "BROWSER_JS_SHELL",
         matches: [],
         message: "The page renders its schedule with JavaScript. A Playwright worker is required for live data.",
       };
     }
 
+    const unpublished = scheduleNotPublished($);
     return {
       ...base,
       status: "NO_MATCHES",
+      code: unpublished ? "SCHEDULE_NOT_PUBLISHED" : "NO_MATCH_ROWS",
       matches: [],
-      message: scheduleNotPublished($)
-        ? "Schedule not published yet."
-        : "No match information found on the page yet.",
+      message: unpublished ? "Schedule not published yet." : "No match information found on the page yet.",
     };
   } catch (err) {
     return {
       ...base,
       status: "PARSE_ERROR",
+      code: "PARSE_FAILED",
       matches: [],
       message: err instanceof Error ? err.message : "Could not parse the source page.",
     };

@@ -11,6 +11,7 @@ import { RefreshButton } from "@/components/RefreshButton";
 import { SourceLinkButton } from "@/components/SourceLinkButton";
 import { StatusBadge } from "@/components/StatusBadge";
 import { EditIcon, MailIcon, PhoneIcon } from "@/components/icons";
+import { SourceHealthBadge } from "@/components/SourceHealthBadge";
 import { isWatchFailure, watchStateCopy } from "@/components/watchStateCopy";
 import { useLiveAthletes } from "@/hooks/useLiveAthletes";
 import { deleteAthlete, deleteMatchDataForAthlete } from "@/lib/actions/danger";
@@ -32,6 +33,8 @@ export function ClientDetail({ athlete: initialAthlete, history: initialHistory 
   const current = entry?.match ?? null;
   const eta = entry?.eta ?? computeEta(null);
   const status = state?.status ?? athlete.last_watch_status;
+  const code = state?.code ?? athlete.last_watch_code;
+  const copy = watchStateCopy(status, state?.message ?? athlete.last_watch_message, code);
   const failed = isWatchFailure(status);
   const matches = [...athlete.matches].sort((a, b) => (a.scheduled_at ?? "").localeCompare(b.scheduled_at ?? ""));
 
@@ -61,9 +64,15 @@ export function ClientDetail({ athlete: initialAthlete, history: initialHistory 
               <p className="mt-2 text-xs text-muted">Status: {STATUS_LABEL[matchStatusOf(current)]} · Checked {formatTime(state?.checkedAt ?? current.last_checked_at, tz)}</p>
             </>
           ) : (
-            <p className={cn("mt-2 rounded-xl px-3 py-2 text-sm font-semibold", failed ? "bg-danger-soft text-danger" : "bg-page text-muted")}>{watchStateCopy(status, state?.message ?? athlete.last_watch_message)}</p>
+            <p className={cn("mt-2 rounded-xl px-3 py-2 text-sm font-semibold", failed ? "bg-danger-soft text-danger" : "bg-page text-muted")}>{copy}</p>
           )}
-          {current && failed && <p className="mt-2 text-xs font-semibold text-danger">{watchStateCopy(status, state?.message ?? athlete.last_watch_message)}</p>}
+          {current && failed && <p className="mt-2 text-xs font-semibold text-danger">{copy} Showing the last known schedule.</p>}
+          {current?.identity_confidence === "ambiguous" && (
+            <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">Needs review: this match looked like several stored matches, so it was kept as a separate row instead of merged.</p>
+          )}
+          <div className="mt-3">
+            <SourceHealthBadge athlete={{ ...athlete, last_watch_status: status, last_watch_code: code }} now={now} hasMatches={athlete.matches.length > 0} showDetail />
+          </div>
           <div className="mt-4 flex flex-wrap gap-2">
             <RefreshButton onClick={() => refresh([athlete.id])} loading={state?.loading} label={failed ? "Retry refresh" : "Refresh Match Data"} variant="primary" disabled={!athlete.source_url} />
             <SourceLinkButton url={athlete.source_url} platform={athlete.platform} />
@@ -100,6 +109,19 @@ export function ClientDetail({ athlete: initialAthlete, history: initialHistory 
             <Row label="Internal notes" value={athlete.internal_notes} />
             <Row label="Tracking" value={athlete.active ? "Active" : "Paused"} />
           </dl>
+          <details className="mt-4 rounded-xl border border-line px-3 py-2 text-xs text-muted">
+            <summary className="cursor-pointer font-semibold text-ink">Source diagnostics</summary>
+            <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
+              <dt>Last attempt</dt><dd className="text-ink">{formatDateTime(athlete.last_attempt_at, tz)}</dd>
+              <dt>Last success</dt><dd className="text-ink">{formatDateTime(athlete.last_success_at, tz)}</dd>
+              <dt>Consecutive failures</dt><dd className="text-ink">{athlete.consecutive_failures ?? 0}</dd>
+              <dt>Last status</dt><dd className="text-ink">{status ?? "—"}{code ? ` · ${code}` : ""}</dd>
+              <dt>Strategy</dt><dd className="text-ink">{athlete.last_watch_strategy ?? "—"}</dd>
+              <dt>Source HTTP</dt><dd className="text-ink">{athlete.last_source_status ?? "—"}</dd>
+              <dt>Elapsed</dt><dd className="text-ink">{athlete.last_elapsed_ms != null ? `${athlete.last_elapsed_ms} ms` : "—"}</dd>
+              <dt>Final URL</dt><dd className="break-all text-ink">{athlete.last_final_url ?? "—"}</dd>
+            </dl>
+          </details>
           <div className="mt-4">
             <Link href={`/clients/${athlete.id}/edit`} className="btn-secondary w-full"><EditIcon size={16} /> Edit Client</Link>
           </div>

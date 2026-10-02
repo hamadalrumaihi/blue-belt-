@@ -178,19 +178,19 @@ Add the site to the iPhone home screen for a full-screen, standalone experience 
 
 ## Database
 
-Column reference for the four tables the app uses (existing columns plus the additive migration):
+Schema lives in `supabase/migrations/`:
 
-**photo_events** — id, owner_id, name, venue, country*, event_date, platform (`AJP` | `SMOOTHCOMP` | `OTHER`), source_url, timezone, active, created_at, updated_at
+- `20260929000000_baseline_schema.sql` — canonical, idempotent baseline: every table with foreign keys, constraints, indexes, RLS policies and `updated_at` triggers. A clean project is reproduced with `supabase db push` (or by pasting the files into the SQL editor in order).
+- `20260929120000_tournament_watcher_v1.sql` — the original additive watcher columns.
+- `20261002150000_watcher_v2.sql` — source health, the atomic refresh RPC, persisted settings, the collaboration foundation, Telegram and payment tables.
 
-**photo_athletes** — id, owner_id, event_id, name, phone, email, division, academy, source_url, notes, active, platform*, belt*, weight*, gender*, age_category*, package_name*, internal_notes*, last_checked_at*, last_watch_status*, last_watch_message*, created_at, updated_at
+Core tables: **photo_events**, **photo_athletes** (with source health: `last_attempt_at`, `last_success_at`, `consecutive_failures`, `last_watch_status/code/message/strategy`, `last_source_status`, `last_final_url`, `last_elapsed_ms`, `refresh_version`, generated `name_key`), **photo_matches** (`identity_confidence` exact | probable | ambiguous), **photo_match_history**. Prepared tables: `photo_user_settings`, `photo_event_settings`, `photo_event_members`, `photo_telegram_links`, `photo_notification_subscriptions`, `photo_notification_deliveries`, `photo_bookings`, `photo_payment_attempts`, `photo_payment_events`.
 
-**photo_matches** — id, owner_id, athlete_id, external_match_id, opponent, mat, scheduled_at, estimated_at, status (`scheduled` | `on_mat` | `complete` | `delayed` | `unknown`), match_order, source_url, last_checked_at, last_changed_at, raw_snapshot (includes `matchNumber`), created_at, updated_at
+TypeScript types are hand-maintained in `src/lib/supabase/database.types.ts` and must change together with the migration.
 
-**photo_match_history** — id, owner_id, match_id, change_type, old_value `{value,label}`, new_value `{value,label}`, detected_at
+**Atomic refresh.** `public.photo_apply_refresh(...)` applies one athlete's refresh plan (row updates, inserts, history rows, "still listed" stamps) in a single transaction under a per-athlete advisory lock and rejects it when `refresh_version` moved, so two overlapping refreshes of the same athlete can never duplicate matches or history. It is `SECURITY INVOKER`: RLS applies exactly as for the caller.
 
-`*` added by `supabase/migrations/`.
-
-RLS: every table has `auth.uid() = owner_id` policies for select / insert / update / delete. Deleting an event cascades to athletes → matches → history.
+RLS: every table has `auth.uid() = owner_id` policies for select / insert / update / delete. `photo_event_members` records owner / photographer / assistant memberships but **does not widen access yet**; `supabase/tests/rls.test.sql` (pgTAP, run with `supabase test db`) asserts the isolation invariant and must be extended before any policy consults memberships. Deleting an event cascades to athletes → matches → history.
 
 **Deletion is manual only** (Settings → Danger zone, or per event / client). Deleting a tournament or everything requires typing `DELETE` and shows exactly what will be removed.
 
@@ -204,6 +204,9 @@ RLS: every table has `auth.uid() = owner_id` policies for select / insert / upda
 - Redirects are followed manually (max 3) and re-validated against the allow-list on every hop.
 - 10 s timeout, 2 MB body cap, no credentials, no custom ports.
 - The endpoint requires a signed-in user, so it cannot be used as an open proxy.
+- Request bodies are validated explicitly (`src/lib/validation.ts`): malformed JSON, null, primitives, arrays, empty or non-id `athleteIds`, invalid `eventId`, unknown fields and impossible dates all get a `400` with a `code`. Per-user rate limits answer `429` with `Retry-After` (`src/lib/rate-limit.ts`; per Vercel instance).
+- Every request logs one JSON line per attempt with a correlation id (`x-request-id`, echoed in the response) and redaction of tokens, e-mails and phone numbers (`src/lib/log.ts`). Page HTML is never logged. Search Vercel runtime logs for `[watch]`.
+- Transient source failures (timeouts, network errors, 5xx) are retried with backoff (3 attempts); 4xx, oversized bodies, blocked redirects, invalid URLs and parser failures are not.
 
 ### Adapters
 
@@ -228,7 +231,9 @@ Wall-clock times (e.g. `10:20`) are resolved in the event's timezone (default As
 - AJP's **listing pages** render server-side, but **event, schedule and athlete pages sit behind a Cloudflare JavaScript challenge** for non-browser clients. Smoothcomp event and schedule pages behave the same way.
 - Plain `fetch` therefore cannot read live match data from those pages today. The app reports this honestly per athlete as **"Live schedule unavailable (source needs a browser). Open source page."** and keeps the one-tap **Open AJP / Open Smoothcomp** button prominent.
 - Markup on both platforms is not stable. The extraction is heuristic and degrades to `NO_MATCHES` rather than crashing; one failing athlete never breaks a batch refresh.
-- Identity of a match across refreshes uses, in order: platform match id, match number, single-match athlete, opponent name, scheduled time.
+- Identity of a match across refreshes uses, in order: platform match id, match number (exact), then a single id-less candidate by sole row / opponent name / scheduled time (probable). When a fallback key matches **several** stored rows the parsed match is kept as a separate row flagged `identity_confidence = ambiguous` with an `IDENTITY_AMBIGUOUS` history entry ("Needs review" on the card) instead of silently merging.
+- **Last-known data stays visible.** A failed or empty read never erases stored matches; the athlete's `last_success_at` / `consecutive_failures` drive the Live / Aging / Stale badge and the card says what failed (bot challenge, worker unreachable, source timeout, parser problem, athlete not listed, schedule not published).
+- Each client's page has a "Source diagnostics" panel: last attempt, last success, failure streak, strategy (`http:table`, `browser:embedded-json`, …), source HTTP status, elapsed time and final URL.
 
 ### Playwright render worker (`/worker`)
 
@@ -269,9 +274,26 @@ Responses: `{ ok: true, html, finalUrl, status, elapsedMs, fetchedAt }` or `{ ok
 - `BROWSER_PROXY=http://user:pass@host:port` routes the worker's Chromium through a residential proxy. Put the login in the URL; the worker splits it into the separate `username`/`password` fields Playwright needs (Playwright itself drops credentials from the URL). With a per-GB plan, `PROXY_BLOCK_ASSETS=1` skips images, media and fonts once the challenge is clearing.
 - `BROWSER_WS_ENDPOINT=wss://…` connects to a hosted browser (Browserless, Bright Data Scraping Browser, and similar) that handles challenges on its own infrastructure; the worker then only drives it.
 
-`/health` reports the active `proxy` host, and one Test-link run from the app shows the outcome as a `[watch] …` line in the Vercel runtime logs.
+`/health` without the token returns only `{ ok, browserReady, mode }` (what Railway's health check needs); with `Authorization: Bearer <WORKER_TOKEN>` it adds config problems, queue depth, engine, uptime and the active `proxy` host. One Test-link run from the app shows the outcome as a `[watch] …` line in the Vercel runtime logs (strategy, source status, elapsed time, worker code).
+
+### `CHALLENGE_NOT_CLEARED` — what it means and what to do
+
+The worker answers `CHALLENGE_NOT_CLEARED` when the page is still Cloudflare's "Just a moment…" interstitial after `CHALLENGE_WAIT_MS`. The app records it per athlete as `REQUIRES_BROWSER_WATCHER` / code `BROWSER_CHALLENGE`, keeps the last known matches on screen marked **Stale**, and keeps the manual **Open source page** button, which is the guaranteed fallback at the mats.
+
+**Status as of 2026-10-02:** real `/render` requests for AJP and Smoothcomp bracket pages from Railway return `CHALLENGE_NOT_CLEARED` in every browser mode tried (Playwright new-headless, Patchright headless, Patchright headed under Xvfb). The parser has therefore **not** been exercised on real bracket markup; the fixtures in `tests/fixtures/` are synthetic. Do not treat the browser path as working until a real render returns usable HTML and `[watch] OK` appears in the logs with `matches > 0`.
+
+What is needed, in order of likelihood of success:
+
+1. **Persistent volume** at `/data` (already configured): once a challenge clears, the `cf_clearance` cookie in the Chromium profile keeps the site open for its lifetime.
+2. **A residential or ISP egress IP you are permitted to use** (`BROWSER_PROXY=http://user:pass@host:port`): Cloudflare scores the data-centre IP first. Use a provider whose terms allow this traffic; the worker does not and must not try to defeat interactive (Turnstile) challenges.
+3. **A hosted browser service** (`BROWSER_WS_ENDPOINT=wss://…`) that handles challenges on its own infrastructure.
+4. **A browser-friendly deployment** closer to a normal client (for example a small VM or Mac mini on a home / office connection running `worker/` with `HEADLESS=headed`).
+
+If a page shows an interactive CAPTCHA, the correct response is to open the source page by hand; the worker will keep reporting `CHALLENGE_NOT_CLEARED` and must not be modified to bypass it. "Stealth" or "Cloudflare bypass" packages are not dependencies of this project and must not become ones.
 
 ### Scheduled refresh while phones are locked
+
+`POST /api/cron/refresh` processes **one page per call** (default 40 athletes, max 200) ordered by last attempt (never-attempted first), honours a per-athlete cooldown, and returns `{ eligible, processed, failed, skipped, remaining, cursor, changes, statuses }`; pass `cursor` back to continue. The worker's scheduler follows the cursor automatically (up to 10 pages per tick). The route stops after ~240 s and reports what is left as `remaining`.
 
 `POST /api/cron/refresh` refreshes every active athlete of every active event whose date is today (±1 day in the event's timezone), for all owners, without a user session. Configure:
 
@@ -296,6 +318,32 @@ The worker then ticks the endpoint every 60 s; the app fetches through the worke
 Colour language: green = healthy/upcoming, amber = approaching, orange = very soon, red = GO TO MAT / ON MAT / mat change only, blue = general tracking.
 
 ---
+
+## Reliability notes
+
+- **Offline:** the auto-refresh loop pauses while the browser is offline, keeps the last known schedule on screen, and refreshes promptly when connectivity returns.
+- **Multiple tabs:** only one tab runs the automatic loop (Web Locks API, localStorage lease fallback); the others follow.
+- **Backoff:** failed batch calls double the interval (max 5 min); `429` responses are honoured via `Retry-After`.
+- **Concurrent refreshes** of the same athlete (two taps, two tabs, cron + tap) are serialised in the database; the loser receives the winner's rows and `skipped: "CONCURRENT"`.
+- **Alerts** are announced once per threshold crossing (30 → 15 → 5 → GO TO MAT) through `aria-live` regions (assertive for danger, polite otherwise); banners stay until dismissed.
+- **Settings** are cached per device in localStorage and synced to `photo_user_settings` so another device starts from the same preferences.
+
+## Notifications and payments
+
+- **Telegram** (grammY) is implemented behind `TELEGRAM_ENABLED=1` + `TELEGRAM_BOT_TOKEN`; see [docs/telegram.md](docs/telegram.md). In-app alerts are independent of it.
+- **MyFatoorah** is prepared behind `PAYMENTS_MYFATOORAH_ENABLED=1` (state machine, webhook signature verification, idempotent webhook deliveries, reconciliation); no checkout, invoices or Pic-Time integration exist, and paid bookings never create clients automatically. See [docs/payments.md](docs/payments.md).
+
+## Testing and CI
+
+```bash
+npm run typecheck   # next typegen + tsc
+npm run lint        # eslint
+npm test            # vitest: parsers (fixtures), time/DST, validation, identity, plans, alerts, API 400s, worker client (MSW)
+npm run test:worker # worker: node --test (HTTP contract, URL policy, config); browser integration with BBM_WORKER_BROWSER_TESTS=1
+npm run build
+```
+
+`.github/workflows/ci.yml` runs type-check, lint, unit tests and the build with placeholder public Supabase values (no secrets), plus the worker checks and the browser integration test in the Playwright container. `supabase/tests/rls.test.sql` is a pgTAP suite for the RLS invariant (needs a local Supabase stack; not part of CI).
 
 ## Current limitations
 

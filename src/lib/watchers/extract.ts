@@ -71,6 +71,8 @@ const TIME_RE = /\b(\d{1,2}:\d{2})(?:\s*(am|pm))?\b/i;
 const DATE_RE = /\b(\d{4})-(\d{2})-(\d{2})\b|\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/;
 const MATCH_NO_RE = /\b(?:match|fight|bout)\s*(?:no\.?|#|number)?\s*(\d{1,4})\b|#\s?(\d{1,4})\b/i;
 const VS_RE = /(.{2,80}?)\s+(?:vs\.?|v\.|x|versus)\s+(.{2,80})/i;
+// Status labels that card markup appends after the pairing ("A vs B In progress").
+const STATUS_WORD_RE = /\b(?:in progress|live now|on mat|now fighting|fighting now|ongoing|started|finished|completed|complete|delayed|postponed|running late|walkover)\b/gi;
 
 export function extractMat(text: string): string | null {
   const m = MAT_RE.exec(text);
@@ -96,7 +98,7 @@ export function extractMatchNumber(text: string): string | null {
 }
 
 export function extractStatus(text: string): MatchStatus {
-  const t = text.toLowerCase();
+  const t = text.toLowerCase().replace(/_/g, " ");
   if (/\b(in progress|live now|on mat|now fighting|fighting now|ongoing|started)\b/.test(t)) return "on_mat";
   if (/\b(finished|completed|complete|result|winner|won by|lost by|submission|decision|walkover|w\.o\.)\b/.test(t)) return "complete";
   if (/\b(delayed|postponed|running late)\b/.test(t)) return "delayed";
@@ -122,6 +124,7 @@ function cleanName(value: string): string {
     .replace(TIME_RE, " ")
     .replace(MATCH_NO_RE, " ")
     .replace(/\b(scheduled|estimated|eta|time|mat|tatami)\b:?/gi, " ")
+    .replace(STATUS_WORD_RE, " ")
     .replace(/(^|\s)[|•·\-–—]+(?=\s|$)/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -168,8 +171,12 @@ export function matchFromText(text: string, ctx: WatchContext, extra: Partial<No
 export function matchesFromTables($: CheerioRoot, ctx: WatchContext): NormalizedMatch[] {
   const out: NormalizedMatch[] = [];
   $("table").each((_, table) => {
-    const header = $(table).find("th").text().toLowerCase();
-    const headerLooksRight = /mat|tatami|time|opponent|fight|match/.test(header);
+    const headers = $(table)
+      .find("th")
+      .map((_, th) => $(th).text().replace(/\s+/g, " ").trim().toLowerCase())
+      .get();
+    const headerLooksRight = /mat|tatami|time|opponent|fight|match/.test(headers.join(" "));
+    const columns = columnMap(headers);
     $(table)
       .find("tr")
       .each((_, tr) => {
@@ -180,11 +187,52 @@ export function matchesFromTables($: CheerioRoot, ctx: WatchContext): Normalized
         if (!cells.length) return;
         const text = cells.join(" | ");
         if (!headerLooksRight && !MAT_RE.test(text)) return;
-        const match = matchFromText(text, ctx, { raw: { cells } });
+        const extra = cells.length === headers.length ? extraFromColumns(cells, columns, ctx) : {};
+        const match = matchFromText(text, ctx, { ...extra, raw: { cells } });
         if (match) out.push(match);
       });
   });
+  return dedupe(out);
+}
+
+// Bracket tables name the pairing in two columns ("Red" / "Blue") instead of
+// an "A vs B" cell, and the match number in a "Match #" column. Header labels
+// are matched exactly (lower-cased) so prose columns are never mistaken.
+const COLUMN_RE = {
+  number: /^(?:(?:match|fight|bout)\s*)?(?:#|no\.?|number)$|^(?:match|fight|bout)$/,
+  red: /^(?:red|athlete ?1|competitor ?1|fighter ?1|player ?1|home)$/,
+  blue: /^(?:blue|athlete ?2|competitor ?2|fighter ?2|player ?2|away)$/,
+  opponent: /^opponent$/,
+};
+type ColumnMap = Partial<Record<keyof typeof COLUMN_RE, number>>;
+
+function columnMap(headers: string[]): ColumnMap {
+  const out: ColumnMap = {};
+  headers.forEach((h, i) => {
+    for (const [key, re] of Object.entries(COLUMN_RE) as Array<[keyof typeof COLUMN_RE, RegExp]>) {
+      if (out[key] === undefined && re.test(h)) out[key] = i;
+    }
+  });
   return out;
+}
+
+function extraFromColumns(cells: string[], columns: ColumnMap, ctx: WatchContext): Partial<NormalizedMatch> {
+  const extra: Partial<NormalizedMatch> = {};
+  const cell = (i: number | undefined) => (i === undefined ? "" : (cells[i] ?? ""));
+  const number = cell(columns.number);
+  const matchNumber = /^\d{1,4}$/.test(number) ? number : extractMatchNumber(number);
+  if (matchNumber) extra.matchNumber = matchNumber;
+  const opponent = cell(columns.opponent);
+  const red = cell(columns.red);
+  const blue = cell(columns.blue);
+  if (opponent) {
+    extra.opponent = opponent;
+  } else if (red && blue) {
+    const blueIsMine = !mentionsAthlete(red, ctx.athleteName) && mentionsAthlete(blue, ctx.athleteName);
+    extra.athlete = blueIsMine ? blue : red;
+    extra.opponent = blueIsMine ? red : blue;
+  }
+  return extra;
 }
 
 /** Strategy 2: card/list markup with class names hinting at matches. */
@@ -332,7 +380,10 @@ function matchFromObject(obj: Record<string, unknown>, ctx: WatchContext): Norma
   const matchOrder = typeof orderRaw === "number" ? orderRaw : Number.isFinite(Number(orderRaw)) && orderRaw !== undefined ? Number(orderRaw) : null;
 
   return {
-    athlete: athlete ?? ctx.athleteName ?? null,
+    // A row that names its competitors is only "about" the athlete when one of
+    // them matches; the context fallback is for athlete-centric pages that do
+    // not repeat the name.
+    athlete: athlete ?? (names.length ? null : ctx.athleteName ?? null),
     opponent,
     mat: mat ? (MAT_RE.test(mat) ? extractMat(mat) : `Mat ${mat}`) : null,
     scheduledAt: toIsoLoose(time, ctx),

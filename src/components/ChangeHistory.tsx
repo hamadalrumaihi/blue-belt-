@@ -25,6 +25,7 @@ const DOT: Record<string, string> = {
   ORDER_CHANGE: "bg-primary",
   MATCH_NUMBER_CHANGE: "bg-primary",
   MATCH_FOUND: "bg-success",
+  IDENTITY_AMBIGUOUS: "bg-amber-500",
 };
 
 function labelOf(v: unknown): string {

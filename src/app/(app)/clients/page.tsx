@@ -17,7 +17,12 @@ export default async function ClientsPage({ searchParams }: PageProps<"/clients"
 
   return (
     <>
-      <BrandHeader title="Clients" subtitle="Pre-booked athletes" actions={<Link href="/clients/new" className="btn-primary min-h-10"><PlusIcon size={18} /> Add</Link>} />
+      <BrandHeader title="Clients" subtitle="Pre-booked athletes" actions={
+          <div className="flex gap-2">
+            <Link href="/clients/quick" className="btn-secondary min-h-10 px-3 text-xs">Quick add</Link>
+            <Link href="/clients/new" className="btn-primary min-h-10"><PlusIcon size={18} /> Add</Link>
+          </div>
+        } />
       <PageBody>
         {athletes.length === 0 ? (
           <EmptyState
@@ -27,7 +32,12 @@ export default async function ClientsPage({ searchParams }: PageProps<"/clients"
             action={<Link href="/clients/new" className="btn-primary"><PlusIcon size={18} /> Add First Client</Link>}
           />
         ) : (
-          <ClientsList athletes={athletes} events={events} initialEventId={eventFilter} />
+          <>
+            <ClientsList athletes={athletes} events={events} initialEventId={eventFilter} />
+            <p className="pt-3 text-center text-xs text-muted">
+              <Link href="/clients/import" className="font-semibold text-primary">Import clients from CSV</Link>
+            </p>
+          </>
         )}
       </PageBody>
     </>

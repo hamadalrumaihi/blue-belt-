@@ -40,7 +40,7 @@ function passesQuick(entry: AthleteEta, f: QuickFilter): boolean {
 }
 
 export function WatcherLive({ event, athletes: initialAthletes, history: initialHistory }: Props) {
-  const { ranked, history, states, now, lastCheckedAt, refreshingAll, globalError, refresh, settings } = useLiveAthletes({ initialAthletes, initialHistory });
+  const { ranked, history, states, now, lastCheckedAt, refreshingAll, globalError, refresh, settings, connectivity } = useLiveAthletes({ initialAthletes, initialHistory });
   const tz = event.timezone || settings.timezone;
   const [query, setQuery] = useState("");
   const [quick, setQuick] = useState<QuickFilter>("all");
@@ -87,7 +87,7 @@ export function WatcherLive({ event, athletes: initialAthletes, history: initial
     <div className="space-y-3">
       <AlertBanners alerts={alerts} />
       <div className="sticky top-14 z-10 -mx-4 space-y-2 bg-page/95 px-4 pb-2 pt-1 backdrop-blur lg:-mx-8 lg:px-8">
-        <LiveToolbar lastCheckedAt={lastCheckedAt} refreshing={refreshingAll} onRefreshAll={() => refresh()} error={globalError} trackedCount={tracked} />
+        <LiveToolbar lastCheckedAt={lastCheckedAt} refreshing={refreshingAll} onRefreshAll={() => refresh()} error={globalError} trackedCount={tracked} connectivity={connectivity} />
         <div className="relative">
           <SearchIcon size={18} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
           <input
@@ -137,7 +137,7 @@ export function WatcherLive({ event, athletes: initialAthletes, history: initial
         <ul className="space-y-2">
           {visible.map((entry) => (
             <li key={entry.athlete.id}>
-              <MatchCard entry={entry} timezone={tz} state={states[entry.athlete.id]} onRefresh={() => refresh([entry.athlete.id])} />
+              <MatchCard entry={entry} timezone={tz} state={states[entry.athlete.id]} onRefresh={() => refresh([entry.athlete.id])} now={now} />
             </li>
           ))}
         </ul>

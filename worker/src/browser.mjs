@@ -1,4 +1,5 @@
 import { config, proxyOptions } from "./config.mjs";
+import { log } from "./log.mjs";
 
 /** Loads the selected engine lazily so a missing optional package only fails when used. */
 async function loadChromium() {
@@ -92,7 +93,7 @@ export async function render(url, { waitForSelector } = {}) {
     // A closed context (browser crash, or the context closing under a
     // request) is not a verdict on the page: relaunch and try once more.
     if (!first.ok && first.code === "BROWSER_CLOSED" && !shuttingDown) {
-      console.warn(`[browser] context was closed mid-render; relaunching and retrying ${url}`);
+      log.warn("browser.context_closed_retry", { host: safeHost(url) });
       await resetContext();
       return renderOnce(url, waitForSelector, started);
     }
@@ -194,6 +195,14 @@ async function isChallenged(page) {
     return CHALLENGE_RE.test(head);
   } catch {
     return true;
+  }
+}
+
+function safeHost(value) {
+  try {
+    return new URL(value).hostname;
+  } catch {
+    return "-";
   }
 }
 

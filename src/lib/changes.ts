@@ -69,7 +69,7 @@ function same(a: string | number | null, b: string | number | null): boolean {
 }
 
 /** Applies parsed data on top of the stored row; nulls never erase known values. */
-export function mergeMatch(previous: MatchRow | null, next: NormalizedMatch, now: string): Omit<MatchRow, "id" | "owner_id" | "athlete_id" | "created_at" | "updated_at"> {
+export function mergeMatch(previous: MatchRow | null, next: NormalizedMatch, now: string): Omit<MatchRow, "id" | "owner_id" | "athlete_id" | "created_at" | "updated_at" | "identity_confidence"> {
   const changed = previous ? detectChanges(previous, next, "UTC").length > 0 : true;
   return {
     external_match_id: next.externalMatchId ?? previous?.external_match_id ?? null,
@@ -99,6 +99,7 @@ export const CHANGE_LABEL: Record<ChangeType, string> = {
   ORDER_CHANGE: "Match order change",
   MATCH_NUMBER_CHANGE: "Match number change",
   MATCH_FOUND: "Match found",
+  IDENTITY_AMBIGUOUS: "Needs review (similar matches)",
 };
 
 export function isChangeType(value: string): value is ChangeType {
