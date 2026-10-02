@@ -21,9 +21,23 @@ export function telegramBotToken(): string {
 }
 
 export function telegramWebhookSecret(): string | null {
-  // Tolerate the two common paste mistakes in dashboard env editors:
-  // surrounding whitespace and surrounding quotes.
-  const secret = (process.env.TELEGRAM_WEBHOOK_SECRET ?? "").trim().replace(/^["']+|["']+$/g, "");
+  return normalizeWebhookSecret(process.env.TELEGRAM_WEBHOOK_SECRET);
+}
+
+/**
+ * Tolerates the common paste mistakes seen in dashboard env editors:
+ * surrounding whitespace or quotes, and the entire setWebhook URL pasted in
+ * place of the secret (the value is then the `secret_token` query parameter).
+ */
+export function normalizeWebhookSecret(raw: string | null | undefined): string | null {
+  let secret = (raw ?? "").trim().replace(/^["']+|["']+$/g, "");
+  if (/^https?:\/\//i.test(secret)) {
+    try {
+      secret = new URL(secret).searchParams.get("secret_token")?.trim() ?? "";
+    } catch {
+      secret = "";
+    }
+  }
   return secret.length >= 8 ? secret : null;
 }
 
