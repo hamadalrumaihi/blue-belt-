@@ -27,6 +27,23 @@ export type WatchOptions = {
  *      configured, render it there and parse the rendered HTML instead
  */
 export async function watchUrl(rawUrl: string | null | undefined, options: WatchOptions = {}): Promise<WatchResult> {
+  const result = await watchUrlInner(rawUrl, options);
+  // One line per attempt in the server logs (Vercel runtime logs) so field
+  // problems can be diagnosed without exposing anything to the client.
+  console.log(`[watch] ${result.status} strategy=${result.strategy ?? "-"} matches=${result.matches.length} ${hostOf(result.sourceUrl)}${result.message ? ` :: ${result.message}` : ""}`);
+  return result;
+}
+
+function hostOf(url: string): string {
+  try {
+    const u = new URL(url);
+    return `${u.hostname}${u.pathname}`;
+  } catch {
+    return url;
+  }
+}
+
+async function watchUrlInner(rawUrl: string | null | undefined, options: WatchOptions): Promise<WatchResult> {
   const now = options.now ?? new Date();
   const fetchedAt = now.toISOString();
   const policy = validateSourceUrl(rawUrl);
