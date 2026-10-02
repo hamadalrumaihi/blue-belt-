@@ -17,8 +17,11 @@ const CHALLENGE_RE = /just a moment|attention required|cf-chl|challenge-platform
 
 let context = null;
 let launching = null;
+let shuttingDown = false;
 let active = 0;
 const queue = [];
+
+const CLOSED_RE = /Target page, context or browser has been closed|browser has been closed|Target closed|Session closed|has been closed/i;
 
 function launchArgs() {
   const args = ["--disable-blink-features=AutomationControlled", "--no-first-run", "--no-default-browser-check"];
@@ -29,6 +32,7 @@ function launchArgs() {
 }
 
 export async function getContext() {
+  if (shuttingDown) throw new Error("Worker is shutting down; browser has been closed");
   if (context) return context;
   if (launching) return launching;
   launching = (async () => {
@@ -82,9 +86,32 @@ function release() {
 export async function render(url, { waitForSelector } = {}) {
   const started = Date.now();
   await acquire();
-  let page;
   try {
-    const ctx = await getContext();
+    const first = await renderOnce(url, waitForSelector, started);
+    // A closed context (browser crash, or the context closing under a
+    // request) is not a verdict on the page: relaunch and try once more.
+    if (!first.ok && first.code === "BROWSER_CLOSED" && !shuttingDown) {
+      console.warn(`[browser] context was closed mid-render; relaunching and retrying ${url}`);
+      await resetContext();
+      return renderOnce(url, waitForSelector, started);
+    }
+    return first;
+  } finally {
+    release();
+  }
+}
+
+async function resetContext() {
+  const ctx = context;
+  context = null;
+  await ctx?.close().catch(() => undefined);
+}
+
+async function renderOnce(url, waitForSelector, started) {
+  let page;
+  let ctx = null;
+  try {
+    ctx = await getContext();
     page = await ctx.newPage();
     page.setDefaultNavigationTimeout(config.navTimeoutMs);
     const response = await page.goto(url, { waitUntil: "domcontentloaded" });
@@ -113,11 +140,40 @@ export async function render(url, { waitForSelector } = {}) {
     return { ok: true, html, finalUrl: page.url(), status: response?.status() ?? null, elapsedMs: Date.now() - started };
   } catch (err) {
     const message = err instanceof Error ? err.message.split("\n")[0] : String(err);
-    const code = /timeout/i.test(message) ? "TIMEOUT" : "NAVIGATION_ERROR";
+    // The context's own close handler nulls `context`, so a context that is
+    // no longer the live one died under this request (crash, or closed by a
+    // restart), whatever error the aborted navigation reported.
+    const contextGone = ctx !== null && (await isContextGone(ctx));
+    const code = shuttingDown
+      ? "WORKER_RESTARTING"
+      : contextGone || CLOSED_RE.test(message)
+        ? "BROWSER_CLOSED"
+        : /timeout/i.test(message)
+          ? "TIMEOUT"
+          : "NAVIGATION_ERROR";
     return { ok: false, code, message, elapsedMs: Date.now() - started };
   } finally {
     await page?.close().catch(() => undefined);
-    release();
+  }
+}
+
+/**
+ * True when `ctx` can no longer open pages. A navigation aborted by a closing
+ * context can reject before the context's own close event has run, so this
+ * waits a beat for that handler and then probes the context directly.
+ */
+async function isContextGone(ctx) {
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  if (context !== ctx) return true;
+  try {
+    const probe = await Promise.race([
+      ctx.newPage(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("probe timeout")), 3_000)),
+    ]);
+    await probe.close().catch(() => undefined);
+    return false;
+  } catch (err) {
+    return CLOSED_RE.test(err instanceof Error ? err.message : String(err));
   }
 }
 
@@ -133,9 +189,8 @@ async function isChallenged(page) {
 }
 
 export async function shutdown() {
-  const ctx = context;
-  context = null;
-  await ctx?.close().catch(() => undefined);
+  shuttingDown = true;
+  await resetContext();
 }
 
 export function stats() {
