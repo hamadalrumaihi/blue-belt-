@@ -160,3 +160,12 @@ Only after webhook processing has been observed working in production
 (signatures verified, duplicates handled, statuses matching the portal) should
 that boundary be replaced with a real link, and even then it should link to an
 existing athlete the owner chose rather than inventing one from booking text.
+
+## Cross-check against the official PHP library
+
+Compared on 2026-10-02 with [my-fatoorah/library](https://github.com/my-fatoorah/library) (`MyFatoorahWebhook.php`, `MyFatoorahHelper.php`, `MyFatoorahPaymentStatus.php`, `mf-config.json`) and [my-fatoorah/omnipay-myfatoorah](https://github.com/my-fatoorah/omnipay-myfatoorah):
+
+- **Signature**: identical for Webhook V2 codes 1 (payment status) and 2 (refund): same field lists and order, `key=value` joined with commas, HMAC-SHA256 raw digest, base64, constant-time compare. The library additionally verifies codes 3-5 (balance transferred, supplier, recurring) and V1 signatures; this adapter answers 401 for those (do not subscribe to them) and requires the `MyFatoorah-Webhook-Version` header to be absent or `v2`.
+- **Status words**: the library maps webhook `CANCELED` to "Expired"; this adapter maps it to the booking status `cancelled`. `GetPaymentStatus` success transactions are spelled `Succss` by the API (handled), and `DuplicatePayment` counts as paid (handled). The library derives "Expired" from `ExpiryDate`/`ExpiryTime` in the vendor timezone; this adapter leaves such invoices `pending` until a webhook or a later inquiry says otherwise.
+- **Endpoints and auth**: `POST /v2/SendPayment`, `POST /v2/GetPaymentStatus` with `Authorization: Bearer <API key>`, matching both libraries. Refunds use `POST /v2/MakeRefund` (not implemented here yet).
+- **Base URLs**: Qatar production `https://api-qa.myfatoorah.com`, test `https://apitest.myfatoorah.com`, matching `mf-config.json`.

@@ -37,6 +37,19 @@ import { createHmac, timingSafeEqual } from "node:crypto";
  */
 
 export const SIGNATURE_HEADER = "myfatoorah-signature";
+export const VERSION_HEADER = "myfatoorah-webhook-version";
+
+/**
+ * Only Webhook V2 is supported (V1 signs every field of `Data` sorted
+ * case-insensitively, which this adapter does not implement). The official
+ * PHP library rejects a missing or unknown version header outright; MyFatoorah
+ * always sends it, so an absent header is treated as V2 for forward
+ * compatibility while any other value is refused.
+ */
+export function isSupportedWebhookVersion(headerValue: string | null | undefined): boolean {
+  const v = (headerValue ?? "").trim().toLowerCase();
+  return v === "" || v === "v2";
+}
 
 export type SignedEventName = "PAYMENT_STATUS_CHANGED" | "REFUND_STATUS_CHANGED" | "DISPUTE_STATUS_CHANGED";
 

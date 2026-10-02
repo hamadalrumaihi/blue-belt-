@@ -170,7 +170,7 @@ export function mapWebhookEvent(eventName: SignedEventName | null, data: Record<
 
 /**
  * Maps a GetPaymentStatus inquiry to a booking status.
- *   InvoiceStatus Paid→paid, Canceled→cancelled;
+ *   InvoiceStatus Paid / DuplicatePayment→paid, Canceled→cancelled;
  *   Pending → paid if any transaction Succss/Success, failed if the only
  *   transactions failed, otherwise pending (nothing to apply yet).
  */
@@ -179,7 +179,9 @@ export function mapInquiry(inquiry: PaymentStatusOutput): StatusMapping {
   const success = inquiry.transactions.find((t) => ["SUCCSS", "SUCCESS"].includes(t.status.toUpperCase()));
   const latest = inquiry.transactions[inquiry.transactions.length - 1] ?? null;
   const base = { invoiceId: inquiry.invoiceId, amount: inquiry.invoiceValue, currency: latest?.currency ?? null };
-  if (invoiceStatus === "PAID" || success) {
+  // "DuplicatePayment" is a paid invoice that was paid twice (official library
+  // treats it as Paid; the duplicate is refunded by MyFatoorah).
+  if (invoiceStatus === "PAID" || invoiceStatus === "DUPLICATEPAYMENT" || success) {
     return { kind: "apply", status: "paid", paymentId: success?.paymentId ?? latest?.paymentId ?? null, transaction: (success?.raw ?? latest?.raw ?? null) as Json, ...base };
   }
   if (invoiceStatus === "CANCELED" || invoiceStatus === "CANCELLED") {

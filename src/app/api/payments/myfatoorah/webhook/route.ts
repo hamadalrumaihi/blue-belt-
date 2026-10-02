@@ -3,7 +3,7 @@ import { requestLogger } from "@/lib/log";
 import { rateLimit, rateLimitHeaders } from "@/lib/rate-limit";
 import { createServiceClient, isServiceClientConfigured } from "@/lib/supabase/service";
 import { getPaymentsConfig, isPaymentsEnabled } from "@/lib/payments/config";
-import { SIGNATURE_HEADER, verifySignature } from "@/lib/payments/myfatoorah/signature";
+import { isSupportedWebhookVersion, SIGNATURE_HEADER, VERSION_HEADER, verifySignature } from "@/lib/payments/myfatoorah/signature";
 import { processWebhook } from "@/lib/payments/myfatoorah/webhook";
 
 export const runtime = "nodejs";
@@ -48,6 +48,10 @@ export async function POST(request: Request) {
   }
 
   const config = getPaymentsConfig();
+  if (!isSupportedWebhookVersion(request.headers.get(VERSION_HEADER))) {
+    log.warn("payments.webhook_unsupported_version");
+    return NextResponse.json({ error: "Only MyFatoorah Webhook V2 is supported.", code: "UNSUPPORTED_VERSION" }, { status: 401, headers });
+  }
   const verdict = verifySignature(request.headers.get(SIGNATURE_HEADER), body as Record<string, unknown>, config.webhookSecret);
 
   const outcome = await processWebhook({ body: body as Record<string, unknown>, signatureValid: verdict.valid }, { supabase: createServiceClient(), now: () => new Date(), log });
