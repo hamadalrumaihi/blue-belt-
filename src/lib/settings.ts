@@ -2,9 +2,10 @@ import type { Platform } from "./types";
 import { DEFAULT_TIMEZONE } from "./time";
 
 /**
- * Per-device preferences, stored in localStorage. These are operational
- * conveniences (refresh cadence, which event is pinned), not tournament data,
- * so they intentionally live outside Supabase for V1.
+ * Preferences: refresh cadence, pinned event, notification thresholds.
+ * localStorage is the per-device cache (instant, works offline); the account
+ * copy in photo_user_settings is synced by <SettingsSync/> so another device
+ * starts from the same values. Event-specific timezone lives on the event row.
  */
 export type NotificationPrefs = {
   m30: boolean;
@@ -53,6 +54,10 @@ function read(): Settings {
   return cache;
 }
 
+export function sanitizeSettings(input: unknown): Settings {
+  return sanitize(input);
+}
+
 function sanitize(input: unknown): Settings {
   const s = (input && typeof input === "object" ? input : {}) as Partial<Settings>;
   const seconds = Number(s.autoRefreshSeconds);
@@ -73,6 +78,18 @@ export function getSettings(): Settings {
 
 export function getServerSettings(): Settings {
   return DEFAULT_SETTINGS;
+}
+
+/** Replaces the cached settings wholesale (used when the account copy loads). */
+export function replaceSettings(next: Settings, options: { silent?: boolean } = {}): Settings {
+  cache = sanitize(next);
+  try {
+    window.localStorage.setItem(KEY, JSON.stringify(cache));
+  } catch {
+    // Private mode or storage disabled: keep the in-memory copy.
+  }
+  if (!options.silent) listeners.forEach((l) => l());
+  return cache;
 }
 
 export function updateSettings(patch: Partial<Settings>): Settings {

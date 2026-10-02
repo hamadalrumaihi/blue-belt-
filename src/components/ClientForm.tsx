@@ -60,6 +60,12 @@ export function ClientForm({ action, events, initial, defaultEventId, defaultPla
         <FormField label="Full name" htmlFor="name" required error={fe.name}>
           <input id="name" name="name" className="input" value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" required />
         </FormField>
+        {state?.duplicate && (
+          <label className="flex min-h-11 items-center gap-3 rounded-xl border border-warning/50 bg-amber-50 px-3">
+            <input type="checkbox" name="allow_duplicate" value="1" className="h-5 w-5 accent-primary" />
+            <span className="text-sm font-semibold text-ink">Add anyway <span className="font-normal text-muted">(this is a different person)</span></span>
+          </label>
+        )}
         <div className="grid gap-5 sm:grid-cols-2">
           <FormField label="Phone" htmlFor="phone" required error={fe.phone}>
             <input id="phone" name="phone" type="tel" inputMode="tel" className="input" defaultValue={initial?.phone ?? ""} autoComplete="tel" placeholder="+974 …" />
@@ -107,7 +113,7 @@ export function ClientForm({ action, events, initial, defaultEventId, defaultPla
           {test.error && <p className="mt-2 text-xs font-semibold text-danger">{test.error}</p>}
           {test.result && (
             <p className={`mt-2 text-xs font-semibold ${test.result.status === "OK" ? "text-success" : test.result.status === "NO_MATCHES" ? "text-muted" : "text-warning"}`}>
-              {test.result.status === "OK" ? `Found ${test.result.matches.length} match row(s).` : watchStateCopy(test.result.status, test.result.message)}
+              {test.result.status === "OK" ? `Found ${test.result.matches.length} match row(s).` : watchStateCopy(test.result.status, test.result.message, test.result.code)}
             </p>
           )}
         </div>

@@ -2,7 +2,7 @@
   "name": "bbm-watcher-worker",
   "version": "1.0.0",
   "private": true,
-  "description": "Blue Belt Media Tournament Watcher — Playwright render worker for AJP / Smoothcomp pages",
+  "description": "Blue Belt Media Tournament Watcher \u2014 Playwright render worker for AJP / Smoothcomp pages",
   "type": "module",
   "engines": {
     "node": ">=20"
@@ -10,7 +10,8 @@
   "scripts": {
     "start": "node src/server.mjs",
     "start:xvfb": "xvfb-run -a --server-args='-screen 0 1280x800x24' node src/server.mjs",
-    "dev": "node --watch src/server.mjs"
+    "dev": "node --watch src/server.mjs",
+    "test": "node --test \"test/*.test.mjs\""
   },
   "dependencies": {
     "patchright": "1.63.0",

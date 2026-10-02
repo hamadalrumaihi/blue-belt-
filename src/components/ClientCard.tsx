@@ -6,6 +6,7 @@ import { formatTime } from "@/lib/time";
 import { cn, initials } from "@/lib/utils";
 import { EtaBadge } from "./EtaBadge";
 import { PlatformBadge } from "./PlatformBadge";
+import { SourceHealthBadge } from "./SourceHealthBadge";
 import { StatusBadge } from "./StatusBadge";
 import { ChevronRightIcon } from "./icons";
 
@@ -15,10 +16,11 @@ type Props = {
   /** Explains a missing match ("Schedule not published yet."). */
   note?: string | null;
   className?: string;
+  now?: Date | null;
 };
 
 /** Compact upcoming-client card for the dashboard list. */
-export function ClientCard({ entry, timezone, note, className }: Props) {
+export function ClientCard({ entry, timezone, note, className, now = null }: Props) {
   const { athlete, match, eta } = entry;
   const time = match ? (match.estimated_at ?? match.scheduled_at) : null;
   return (
@@ -43,6 +45,7 @@ export function ClientCard({ entry, timezone, note, className }: Props) {
             <span>{match.mat ?? "Mat —"}</span>
             <span className="tabular-nums">{formatTime(time, timezone)}</span>
             <EtaBadge eta={eta} />
+            <SourceHealthBadge athlete={athlete} now={now} hasMatches={athlete.matches.length > 0} />
           </span>
         ) : (
           <span className="mt-1.5 block text-xs font-semibold text-muted">{note ?? "Schedule not published yet."}</span>

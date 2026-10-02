@@ -21,7 +21,7 @@ import type { AthleteWithMatches, EventRow, HistoryEntry } from "@/lib/types";
 type Props = { event: EventRow; athletes: AthleteWithMatches[]; history: HistoryEntry[] };
 
 export function DashboardLive({ event, athletes: initialAthletes, history: initialHistory }: Props) {
-  const { ranked, history, states, now, lastCheckedAt, refreshingAll, globalError, refresh, settings } = useLiveAthletes({
+  const { ranked, history, states, now, lastCheckedAt, refreshingAll, globalError, refresh, settings, connectivity } = useLiveAthletes({
     initialAthletes,
     initialHistory,
   });
@@ -65,11 +65,11 @@ export function DashboardLive({ event, athletes: initialAthletes, history: initi
         timezone={tz}
         onRefresh={next ? () => refresh([next.athlete.id]) : undefined}
         refreshing={next ? states[next.athlete.id]?.loading : false}
-        note={next ? watchStateCopy(states[next.athlete.id]?.status ?? next.athlete.last_watch_status, states[next.athlete.id]?.message ?? next.athlete.last_watch_message) : undefined}
+        note={next ? watchStateCopy(states[next.athlete.id]?.status ?? next.athlete.last_watch_status, states[next.athlete.id]?.message ?? next.athlete.last_watch_message, states[next.athlete.id]?.code ?? next.athlete.last_watch_code) : undefined}
       />
 
       {active.length > 0 && (
-        <LiveToolbar lastCheckedAt={lastCheckedAt} refreshing={refreshingAll} onRefreshAll={() => refresh()} error={globalError} trackedCount={tracked} />
+        <LiveToolbar lastCheckedAt={lastCheckedAt} refreshing={refreshingAll} onRefreshAll={() => refresh()} error={globalError} trackedCount={tracked} connectivity={connectivity} />
       )}
 
       <section aria-label="Upcoming clients">
@@ -90,7 +90,7 @@ export function DashboardLive({ event, athletes: initialAthletes, history: initi
           <ul className="space-y-2">
             {upcoming.map((entry) => (
               <li key={entry.athlete.id}>
-                <ClientCard entry={entry} timezone={tz} note={watchStateCopy(states[entry.athlete.id]?.status ?? entry.athlete.last_watch_status, states[entry.athlete.id]?.message ?? entry.athlete.last_watch_message)} />
+                <ClientCard entry={entry} timezone={tz} note={watchStateCopy(states[entry.athlete.id]?.status ?? entry.athlete.last_watch_status, states[entry.athlete.id]?.message ?? entry.athlete.last_watch_message, states[entry.athlete.id]?.code ?? entry.athlete.last_watch_code)} now={now} />
               </li>
             ))}
           </ul>

@@ -9,14 +9,16 @@ import { EtaBadge } from "./EtaBadge";
 import { snapshotNumber } from "./NextClientCard";
 import { RefreshButton } from "./RefreshButton";
 import { SourceLinkButton } from "./SourceLinkButton";
+import { SourceHealthBadge } from "./SourceHealthBadge";
 import { StatusBadge } from "./StatusBadge";
-import { watchStateCopy } from "./watchStateCopy";
+import { isWatchFailure, watchStateCopy } from "./watchStateCopy";
 
 type Props = {
   entry: AthleteEta;
   timezone: string;
   state?: AthleteRefreshState;
   onRefresh: () => void;
+  now?: Date | null;
 };
 
 const BORDER: Record<string, string> = {
@@ -28,11 +30,13 @@ const BORDER: Record<string, string> = {
 };
 
 /** Dense Match Watcher row: athlete, opponent, mat, time, ETA, match #, status. */
-export function MatchCard({ entry, timezone, state, onRefresh }: Props) {
+export function MatchCard({ entry, timezone, state, onRefresh, now = null }: Props) {
   const { athlete, match, eta } = entry;
   const time = match ? (match.estimated_at ?? match.scheduled_at) : null;
-  const failed = state?.status && state.status !== "OK" && state.status !== "NO_MATCHES" && state.status !== null;
-  const copy = watchStateCopy(state?.status ?? athlete.last_watch_status, state?.message ?? athlete.last_watch_message);
+  const status = state?.status ?? athlete.last_watch_status;
+  const failed = isWatchFailure(status);
+  const copy = watchStateCopy(status, state?.message ?? athlete.last_watch_message, state?.code ?? athlete.last_watch_code);
+  const needsReview = match?.identity_confidence === "ambiguous";
 
   return (
     <article className={cn("card p-3.5", BORDER[eta.bucket] ?? "border-line", failed && !match && "border-danger/30")} aria-label={athlete.name}>
@@ -68,12 +72,14 @@ export function MatchCard({ entry, timezone, state, onRefresh }: Props) {
         </p>
       )}
 
-      {match && failed && <p className="mt-2 text-xs font-semibold text-danger">{copy}</p>}
+      {match && failed && <p className="mt-2 text-xs font-semibold text-danger">{copy} Showing last known schedule.</p>}
+      {needsReview && <p className="mt-2 rounded-lg bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700">Needs review: similar matches were found, so this row was kept separate.</p>}
 
       <div className="mt-3 flex items-center gap-2">
         <SourceLinkButton url={match?.source_url ?? athlete.source_url} platform={athlete.platform} size="sm" />
         <RefreshButton onClick={onRefresh} loading={state?.loading} label={failed ? "Retry" : "Refresh"} className="min-h-9 px-3 text-xs" />
-        <span className="ml-auto text-[11px] text-muted">
+        <span className="ml-auto flex items-center gap-2 text-[11px] text-muted">
+          <SourceHealthBadge athlete={{ ...athlete, last_watch_status: status, last_watch_code: state?.code ?? athlete.last_watch_code }} now={now} hasMatches={athlete.matches.length > 0} />
           {state?.checkedAt || athlete.last_checked_at ? `Checked ${formatTime(state?.checkedAt ?? athlete.last_checked_at, timezone)}` : "Not checked yet"}
         </span>
       </div>

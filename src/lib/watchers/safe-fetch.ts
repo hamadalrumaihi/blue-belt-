@@ -1,22 +1,58 @@
 import "server-only";
 import { platformForHost } from "./url-policy";
 
-export const FETCH_TIMEOUT_MS = 10_000;
+export const FETCH_TIMEOUT_MS = 8_000;
 export const MAX_HTML_BYTES = 2 * 1024 * 1024; // 2 MB
 const MAX_REDIRECTS = 3;
+/** Total attempts for transient failures (timeouts, network, 5xx). */
+export const MAX_ATTEMPTS = 3;
+const BACKOFF_MS = [400, 1_200];
 
 const USER_AGENT =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1";
 
-export type SafeFetchResult =
+export type SafeFetchFailureCode = "TIMEOUT" | "HTTP_ERROR" | "TOO_LARGE" | "NETWORK" | "REDIRECT_BLOCKED";
+
+type FetchOnce =
   | { ok: true; html: string; finalUrl: string; status: number }
-  | { ok: false; code: "TIMEOUT" | "HTTP_ERROR" | "TOO_LARGE" | "NETWORK" | "REDIRECT_BLOCKED"; status?: number; message: string };
+  | { ok: false; code: SafeFetchFailureCode; status?: number; message: string };
+
+export type SafeFetchResult = FetchOnce & { attempts: number };
+
+export type SafeFetchOptions = {
+  /** Override for tests. */
+  fetchImpl?: typeof fetch;
+  /** Override for tests (defaults to real timers). */
+  sleep?: (ms: number) => Promise<void>;
+  maxAttempts?: number;
+};
+
+const TRANSIENT_HTTP = new Set([408, 425, 429, 500, 502, 503, 504]);
 
 /**
- * Fetches an allowlisted HTML page with a hard timeout, a body size cap and
+ * Fetches an allow-listed HTML page with a hard timeout, a body size cap and
  * manual redirect following that re-validates the host on every hop.
+ * Transient failures (timeout, network error, 5xx) are retried with a short
+ * backoff; 4xx, oversized bodies and blocked redirects are not.
  */
-export async function safeFetchHtml(url: URL): Promise<SafeFetchResult> {
+export async function safeFetchHtml(url: URL, options: SafeFetchOptions = {}): Promise<SafeFetchResult> {
+  const maxAttempts = options.maxAttempts ?? MAX_ATTEMPTS;
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  let attempt = 1;
+  for (;;) {
+    const result = await fetchOnce(url, options.fetchImpl ?? fetch);
+    if (result.ok || !isTransient(result) || attempt >= maxAttempts) return { ...result, attempts: attempt };
+    await sleep(BACKOFF_MS[Math.min(attempt - 1, BACKOFF_MS.length - 1)] + Math.floor(Math.random() * 200));
+    attempt += 1;
+  }
+}
+
+function isTransient(r: Extract<FetchOnce, { ok: false }>): boolean {
+  if (r.code === "TIMEOUT" || r.code === "NETWORK") return true;
+  return r.code === "HTTP_ERROR" && r.status !== undefined && TRANSIENT_HTTP.has(r.status);
+}
+
+async function fetchOnce(url: URL, fetchImpl: typeof fetch): Promise<FetchOnce> {
   let current = url;
 
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
@@ -28,7 +64,7 @@ export async function safeFetchHtml(url: URL): Promise<SafeFetchResult> {
     const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
     let response: Response;
     try {
-      response = await fetch(current, {
+      response = await fetchImpl(current, {
         method: "GET",
         redirect: "manual",
         signal: controller.signal,

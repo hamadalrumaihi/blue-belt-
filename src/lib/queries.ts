@@ -119,10 +119,50 @@ export async function eventStats(eventIds: string[]): Promise<Map<string, EventS
   return stats;
 }
 
-/** Recent change history with athlete names attached. */
-export async function listHistory(options: { eventId?: string | null; athleteId?: string | null; limit?: number } = {}): Promise<HistoryEntry[]> {
+export type HistoryFilters = {
+  eventId?: string | null;
+  athleteId?: string | null;
+  changeType?: string | null;
+  limit?: number;
+  /** Opaque cursor from a previous page (see encodeHistoryCursor). */
+  cursor?: string | null;
+};
+
+export type HistoryPage = { entries: HistoryEntry[]; nextCursor: string | null };
+
+/** Cursor = "<detected_at ISO>|<id>" base64url; rows are ordered (detected_at desc, id desc). */
+export function encodeHistoryCursor(entry: Pick<HistoryEntry, "detected_at" | "id">): string {
+  return Buffer.from(`${entry.detected_at}|${entry.id}`, "utf8").toString("base64url");
+}
+
+export function decodeHistoryCursor(cursor: string | null | undefined): { detectedAt: string; id: number } | null {
+  if (!cursor) return null;
+  try {
+    const raw = Buffer.from(cursor, "base64url").toString("utf8");
+    const sep = raw.lastIndexOf("|");
+    if (sep < 0) return null;
+    const detectedAt = raw.slice(0, sep);
+    const id = Number(raw.slice(sep + 1));
+    if (!Number.isInteger(id) || Number.isNaN(new Date(detectedAt).getTime())) return null;
+    return { detectedAt, id };
+  } catch {
+    return null;
+  }
+}
+
+/** Recent change history with athlete names attached (first page). */
+export async function listHistory(options: Omit<HistoryFilters, "cursor"> = {}): Promise<HistoryEntry[]> {
+  return (await listHistoryPage(options)).entries;
+}
+
+/**
+ * Cursor-paginated change history. Uses the (owner_id, detected_at desc,
+ * id desc) index; the cursor is a keyset so pages stay stable while new
+ * rows arrive at the top.
+ */
+export async function listHistoryPage(options: HistoryFilters = {}): Promise<HistoryPage> {
   const supabase = await createClient();
-  const limit = options.limit ?? 200;
+  const limit = Math.min(Math.max(options.limit ?? 100, 1), 500);
 
   // Scope match ids by athlete/event when asked.
   let matchIds: string[] | null = null;
@@ -132,19 +172,30 @@ export async function listHistory(options: { eventId?: string | null; athleteId?
     if (options.eventId) athletesQuery = athletesQuery.eq("event_id", options.eventId);
     const { data: athletes } = await athletesQuery;
     const ids = (athletes ?? []).map((a) => a.id);
-    if (!ids.length) return [];
+    if (!ids.length) return { entries: [], nextCursor: null };
     const { data: matches } = await supabase.from("photo_matches").select("id").in("athlete_id", ids);
     matchIds = (matches ?? []).map((m) => m.id);
-    if (!matchIds.length) return [];
+    if (!matchIds.length) return { entries: [], nextCursor: null };
   }
 
-  let query = supabase.from("photo_match_history").select("*").order("detected_at", { ascending: false }).limit(limit);
+  let query = supabase
+    .from("photo_match_history")
+    .select("*")
+    .order("detected_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(limit + 1);
   if (matchIds) query = query.in("match_id", matchIds);
+  if (options.changeType) query = query.eq("change_type", options.changeType);
+  const after = decodeHistoryCursor(options.cursor);
+  if (after) query = query.or(`detected_at.lt.${after.detectedAt},and(detected_at.eq.${after.detectedAt},id.lt.${after.id})`);
   const { data: rows, error } = await query;
   if (error) throw error;
-  if (!rows?.length) return [];
+  if (!rows?.length) return { entries: [], nextCursor: null };
 
-  const ids = [...new Set(rows.map((r) => r.match_id))];
+  const hasMore = rows.length > limit;
+  const pageRows = hasMore ? rows.slice(0, limit) : rows;
+
+  const ids = [...new Set(pageRows.map((r) => r.match_id))];
   const { data: matches } = await supabase.from("photo_matches").select("id,athlete_id").in("id", ids);
   const athleteIds = [...new Set((matches ?? []).map((m) => m.athlete_id))];
   const { data: athletes } = athleteIds.length
@@ -154,16 +205,22 @@ export async function listHistory(options: { eventId?: string | null; athleteId?
   const athleteOfMatch = new Map((matches ?? []).map((m) => [m.id, m.athlete_id]));
   const athleteById = new Map((athletes ?? []).map((a) => [a.id, a]));
 
-  return rows.map((r) => {
+  const entries = pageRows.map((r) => {
     const athleteId = athleteOfMatch.get(r.match_id) ?? null;
     const athlete = athleteId ? athleteById.get(athleteId) : undefined;
-    return {
-      ...r,
-      athlete_id: athleteId,
-      athlete_name: athlete?.name ?? null,
-      event_id: athlete?.event_id ?? null,
-    };
+    return { ...r, athlete_id: athleteId, athlete_name: athlete?.name ?? null, event_id: athlete?.event_id ?? null };
   });
+  const last = entries.at(-1);
+  return { entries, nextCursor: hasMore && last ? encodeHistoryCursor(last) : null };
+}
+
+/** Athletes (id, name) for filter dropdowns, optionally scoped to an event. */
+export async function listAthleteOptions(eventId?: string | null): Promise<Array<Pick<AthleteRow, "id" | "name" | "event_id">>> {
+  const supabase = await createClient();
+  let query = supabase.from("photo_athletes").select("id,name,event_id").order("name", { ascending: true });
+  if (eventId) query = query.eq("event_id", eventId);
+  const { data } = await query;
+  return data ?? [];
 }
 
 export async function countEverything(): Promise<{ events: number; athletes: number; matches: number; history: number }> {
