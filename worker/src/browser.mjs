@@ -1,5 +1,10 @@
-import { chromium } from "playwright";
 import { config } from "./config.mjs";
+
+/** Loads the selected engine lazily so a missing optional package only fails when used. */
+async function loadChromium() {
+  const mod = config.engine === "patchright" ? await import("patchright") : await import("playwright");
+  return mod.chromium;
+}
 
 /**
  * Owns a single Chromium instance (persistent profile) and renders pages.
@@ -27,20 +32,22 @@ export async function getContext() {
   if (context) return context;
   if (launching) return launching;
   launching = (async () => {
+    const chromium = await loadChromium();
     if (config.browserWsEndpoint) {
       const browser = await chromium.connectOverCDP(config.browserWsEndpoint);
       context = browser.contexts()[0] ?? (await browser.newContext({ locale: config.locale, timezoneId: config.timezone }));
       browser.on("disconnected", () => { context = null; });
       return context;
     }
+    // Patchright's guidance: persistent context, no custom user agent, no
+    // viewport override, and no extra "stealth" flags; it patches the rest.
+    const stealth = config.engine === "patchright";
     context = await chromium.launchPersistentContext(config.profileDir, {
       headless: config.headless !== "headed",
-      args: launchArgs(),
-      userAgent: config.userAgent,
+      args: stealth ? launchArgs().filter((a) => a !== "--disable-blink-features=AutomationControlled") : launchArgs(),
+      ...(stealth ? { viewport: null } : { userAgent: config.userAgent, viewport: { width: 1280, height: 800 }, ignoreDefaultArgs: ["--enable-automation"] }),
       locale: config.locale,
       timezoneId: config.timezone,
-      viewport: { width: 1280, height: 800 },
-      ignoreDefaultArgs: ["--enable-automation"],
       ignoreHTTPSErrors: config.extraArgs.includes("--ignore-certificate-errors"),
       proxy: config.proxyServer ? { server: config.proxyServer } : undefined,
     });
@@ -132,5 +139,5 @@ export async function shutdown() {
 }
 
 export function stats() {
-  return { active, queued: queue.length, browserReady: Boolean(context), mode: config.browserWsEndpoint ? "cdp" : config.headless };
+  return { active, queued: queue.length, browserReady: Boolean(context), mode: config.browserWsEndpoint ? "cdp" : config.headless, engine: config.engine };
 }
