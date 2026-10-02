@@ -274,6 +274,8 @@ Responses: `{ ok: true, html, finalUrl, status, elapsedMs, fetchedAt }` or `{ ok
 - `BROWSER_PROXY=http://user:pass@host:port` routes the worker's Chromium through a residential proxy. Put the login in the URL; the worker splits it into the separate `username`/`password` fields Playwright needs (Playwright itself drops credentials from the URL). With a per-GB plan, `PROXY_BLOCK_ASSETS=1` skips images, media and fonts once the challenge is clearing.
 - `BROWSER_WS_ENDPOINT=wss://…` connects to a hosted browser (Browserless, Bright Data Scraping Browser, and similar) that handles challenges on its own infrastructure; the worker then only drives it.
 
+With a proxy, set `LOCALE` and `TZ_ID` to match the exit country so the browser's clock agrees with its IP (a UK proxy: `LOCALE=en-GB`, `TZ_ID=Europe/London`). `TZ_ID` must be an IANA zone id; a bare city name such as `London` makes Chromium refuse to launch (`Invalid timezone ID`), which `/health` now reports under `configErrors` and `/render` answers with 503 `MISCONFIGURED`.
+
 `/health` without the token returns only `{ ok, browserReady, mode }` (what Railway's health check needs); with `Authorization: Bearer <WORKER_TOKEN>` it adds config problems, queue depth, engine, uptime and the active `proxy` host. One Test-link run from the app shows the outcome as a `[watch] …` line in the Vercel runtime logs (strategy, source status, elapsed time, worker code).
 
 ### `CHALLENGE_NOT_CLEARED` — what it means and what to do
