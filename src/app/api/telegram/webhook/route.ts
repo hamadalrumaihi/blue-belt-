@@ -37,8 +37,11 @@ export async function POST(request: Request) {
     log.error("telegram.webhook.no_secret");
     return new Response(null, { status: 404, headers });
   }
-  if (!secretMatches(request.headers.get("x-telegram-bot-api-secret-token"), secret)) {
-    log.warn("telegram.webhook.unauthorized");
+  const supplied = request.headers.get("x-telegram-bot-api-secret-token");
+  if (!secretMatches(supplied, secret)) {
+    // Lengths only: enough to tell "webhook registered without secret_token"
+    // from "different value" without ever logging either secret.
+    log.warn("telegram.webhook.unauthorized", { hasHeader: supplied !== null, suppliedLength: supplied?.length ?? 0, expectedLength: secret.length });
     return new Response(null, { status: 401, headers });
   }
 
