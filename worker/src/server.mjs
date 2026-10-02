@@ -15,11 +15,11 @@ import { startScheduler } from "./scheduler.mjs";
  * browser is touched.
  */
 
-const problems = validateConfig();
-if (problems.length) {
-  for (const p of problems) console.error(`[config] ${p}`);
-  process.exit(1);
-}
+// Misconfiguration is reported on /health and blocks /render, but never
+// prevents the process from starting: a crash-looping container is much
+// harder to diagnose on Railway than a health response that names the problem.
+const configErrors = validateConfig();
+for (const p of configErrors) console.error(`[config] ${p}`);
 
 function json(res, status, body) {
   const payload = JSON.stringify(body);
@@ -61,9 +61,10 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", "http://localhost");
 
   if (req.method === "GET" && url.pathname === "/health") {
-    return json(res, 200, { ok: true, ...stats(), uptimeSec: Math.round(process.uptime()) });
+    return json(res, 200, { ok: configErrors.length === 0, configErrors, ...stats(), uptimeSec: Math.round(process.uptime()) });
   }
 
+  if (configErrors.length) return json(res, 503, { ok: false, code: "MISCONFIGURED", message: configErrors.join("; ") });
   if (!authorized(req)) return json(res, 401, { ok: false, code: "UNAUTHORIZED", message: "Missing or invalid worker token." });
 
   if (req.method === "POST" && url.pathname === "/render") {
@@ -91,8 +92,9 @@ const server = http.createServer(async (req, res) => {
   return json(res, 404, { ok: false, code: "NOT_FOUND", message: "Unknown route." });
 });
 
-server.listen(config.port, () => {
-  console.log(`[worker] listening on :${config.port} (mode=${config.browserWsEndpoint ? "cdp" : config.headless}, hosts=${config.allowedHosts.join(",")})`);
+server.listen(config.port, "0.0.0.0", () => {
+  console.log(`[worker] listening on 0.0.0.0:${config.port} (mode=${config.browserWsEndpoint ? "cdp" : config.headless}, hosts=${config.allowedHosts.join(",")})`);
+  if (configErrors.length) console.error(`[worker] NOT READY: fix the config errors above (see /health). /render will answer 503 until then.`);
   // Warm the browser so the first request is fast; failures surface in /health.
   getContext().then(
     () => console.log("[worker] browser ready"),
