@@ -21,8 +21,10 @@ export function telegramBotToken(): string {
 }
 
 export function telegramWebhookSecret(): string | null {
-  const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
-  return secret && secret.length >= 8 ? secret : null;
+  // Tolerate the two common paste mistakes in dashboard env editors:
+  // surrounding whitespace and surrounding quotes.
+  const secret = (process.env.TELEGRAM_WEBHOOK_SECRET ?? "").trim().replace(/^["']+|["']+$/g, "");
+  return secret.length >= 8 ? secret : null;
 }
 
 export function telegramBotUsername(): string | null {
