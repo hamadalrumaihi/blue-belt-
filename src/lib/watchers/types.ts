@@ -38,6 +38,7 @@ export type WatchCode =
   | "BROWSER_WORKER_ERROR"
   | "BROWSER_WORKER_RESTARTING"
   | "BROWSER_PROXY_ERROR"
+  | "BROWSER_PAGE_NOT_READY"
   // plain fetch
   | "SOURCE_TIMEOUT"
   | "SOURCE_HTTP_ERROR"
@@ -81,6 +82,12 @@ export interface WatchDiagnostics {
   workerCode?: string;
   /** Number of fetch attempts made (retries included). */
   attempts?: number;
+  /** Worker's verdict on what it captured: complete / partial (a bound was hit) / unknown. */
+  completeness?: "complete" | "partial" | "unknown";
+  /** Worker's readiness reason (SCHEDULE_FOUND, NO_SCHEDULE_YET, …). */
+  readiness?: string;
+  /** True when the page was fetched once for this owner+source and shared by several clients. */
+  shared?: boolean;
 }
 
 export interface WatchResult {

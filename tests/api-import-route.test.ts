@@ -16,6 +16,7 @@ const importPageMock = vi.mocked(importPage);
 const previewMock = vi.mocked(previewImport);
 const USER = { id: "user-1", email: "photographer@example.com" };
 const PAGE = "https://ajptour.com/en/event/1411/bracket/130617";
+const CAPTURE = { id: "cap-row-1", captureId: "cap-1", sourceKey: "ajptour.com|/event/1411/bracket/130617", transport: "import" as const, capturedAt: "2026-03-14T05:59:00.000Z", completeness: "unknown" as const, replayed: false };
 
 function install(user: typeof USER | null) {
   createClientMock.mockResolvedValue({ auth: { getUser: async () => ({ data: { user } }) } } as unknown as Awaited<ReturnType<typeof createClient>>);
@@ -29,7 +30,7 @@ beforeEach(() => {
   resetRateLimits();
   install(USER);
   importPageMock.mockReset();
-  importPageMock.mockResolvedValue({ ok: true, url: PAGE, matched: 1, results: [], checkedAt: "2026-03-14T06:00:00.000Z" });
+  importPageMock.mockResolvedValue({ ok: true, url: PAGE, matched: 1, results: [], checkedAt: "2026-03-14T06:00:00.000Z", capture: CAPTURE });
   previewMock.mockReset();
   previewMock.mockResolvedValue({ ok: true, url: PAGE, capturedAt: "2026-03-14T06:00:00.000Z", found: 1, withMatches: 1, notFound: 0, rows: [] });
 });
@@ -55,12 +56,35 @@ describe("POST /api/import", () => {
     expect(importPageMock).not.toHaveBeenCalled();
   });
 
-  it("applies the page through the import service and returns its outcome", async () => {
+  it("applies the page through the import service with the session's owner id and returns its outcome", async () => {
     const res = await post(JSON.stringify({ url: PAGE, html: "<html><body>ok</body></html>" }));
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ ok: true, matched: 1 });
-    expect(importPageMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ url: PAGE, html: "<html><body>ok</body></html>" }));
+    expect(await res.json()).toMatchObject({ ok: true, matched: 1, capture: { captureId: "cap-1" } });
+    expect(importPageMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ url: PAGE, html: "<html><body>ok</body></html>", ownerId: USER.id, capture: {}, transport: "import" }));
     expect(res.headers.get("x-ratelimit-limit")).toBe(String(RULES.importPerUser.max));
+  });
+
+  it("passes validated capture metadata through and never an owner from the body", async () => {
+    const capture = { captureId: "cap_abc12345", capturedAt: "2026-03-14T05:59:00.000Z", transport: "handoff", finalUrl: PAGE };
+    const res = await post(JSON.stringify({ url: PAGE, html: "<p>ok</p>", capture }));
+    expect(res.status).toBe(200);
+    expect(importPageMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ ownerId: USER.id, capture, transport: "handoff" }));
+    const bad = await post(JSON.stringify({ url: PAGE, html: "<p>ok</p>", capture: { ownerId: "someone-else" } }));
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toMatchObject({ code: "INVALID_CAPTURE" });
+  });
+
+  it("maps capture refusals to 409 / 422", async () => {
+    importPageMock.mockResolvedValueOnce({ ok: false, code: "STALE_CAPTURE", message: "older", url: PAGE, capture: CAPTURE });
+    const stale = await post(JSON.stringify({ url: PAGE, html: "<p>" }));
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toMatchObject({ code: "STALE_CAPTURE", capture: { captureId: "cap-1" } });
+    importPageMock.mockResolvedValueOnce({ ok: false, code: "CAPTURE_IN_PROGRESS", message: "busy", url: PAGE });
+    expect((await post(JSON.stringify({ url: PAGE, html: "<p>" }))).status).toBe(409);
+    importPageMock.mockResolvedValueOnce({ ok: false, code: "CAPTURE_TIMING", message: "old", url: PAGE });
+    expect((await post(JSON.stringify({ url: PAGE, html: "<p>" }))).status).toBe(422);
+    importPageMock.mockResolvedValueOnce({ ok: false, code: "FINAL_URL_MISMATCH", message: "elsewhere", url: PAGE });
+    expect((await post(JSON.stringify({ url: PAGE, html: "<p>" }))).status).toBe(422);
   });
 
   it("maps service failures to 404 / 400 / 500", async () => {
@@ -98,6 +122,16 @@ describe("POST /api/import/receive (hand-over)", () => {
     expect((await form({ url: PAGE, html: "<p>" }, "https://ajptour.com")).status).toBe(200);
     expect((await form({ url: PAGE, html: "<p>" }, "https://www.smoothcomp.com")).status).toBe(200);
     expect((await form({ url: PAGE, html: "<p>" }, "https://tournament-watcher.vercel.app")).status).toBe(200);
+  });
+
+  it("carries capture id and time through to the parked payload", async () => {
+    const res = await form({ url: PAGE, html: "<p>hi</p>", captureId: "cap-123", capturedAt: "2026-03-14T05:59:00.000Z" }, "https://ajptour.com");
+    const page = await res.text();
+    const payload = /<script type="application\/json" id="p">([\s\S]*?)<\/script>/.exec(page)?.[1] ?? "";
+    expect(JSON.parse(payload)).toMatchObject({ url: PAGE, captureId: "cap-123", capturedAt: "2026-03-14T05:59:00.000Z" });
+    const plain = await form({ url: PAGE, html: "<p>hi</p>" }, "https://ajptour.com");
+    const plainPayload = /<script type="application\/json" id="p">([\s\S]*?)<\/script>/.exec(await plain.text())?.[1] ?? "";
+    expect(JSON.parse(plainPayload)).toMatchObject({ captureId: null, capturedAt: null });
   });
 
   it("returns a first-party page that parks the payload in sessionStorage and moves to /import, under a strict CSP", async () => {

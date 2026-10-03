@@ -12,9 +12,11 @@ import type { RefreshResult } from "@/lib/watch-service";
 
 type Props = { appOrigin: string; initialUrl: string };
 
+type CaptureSummary = { captureId: string; transport: string; capturedAt: string; completeness: string; replayed: boolean };
+
 type ImportResponse =
-  | { ok: true; url: string; matched: number; results: RefreshResult[]; checkedAt: string }
-  | { ok?: false; error: string; code: string; url?: string; candidates?: string[]; retryAfterSeconds?: number };
+  | { ok: true; url: string; matched: number; results: RefreshResult[]; checkedAt: string; capture?: CaptureSummary }
+  | { ok?: false; error: string; code: string; url?: string; candidates?: string[]; retryAfterSeconds?: number; capture?: CaptureSummary };
 
 type PreviewOk = Extract<ImportPreview, { ok: true }>;
 
@@ -40,6 +42,8 @@ export function ImportPage({ appOrigin, initialUrl }: Props) {
 
   const effectiveUrl = pending?.url ?? url;
   const effectiveHtml = pending?.html ?? html;
+  // One capture id per pasted page too, so a retried Apply replays instead of re-applying.
+  const [pastedCaptureId, setPastedCaptureId] = useState<string>(() => newCaptureId());
   const bookmarklet = useMemo(() => buildBookmarklet(appOrigin), [appOrigin]);
   const shortcutScript = useMemo(() => buildShortcutScript(appOrigin), [appOrigin]);
 
@@ -87,16 +91,25 @@ export function ImportPage({ appOrigin, initialUrl }: Props) {
     setError(null);
     setBusy(true);
     try {
-      const res = await fetch("/api/import", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: preview.url, html: effectiveHtml }) });
+      const capture = pending
+        ? { captureId: pending.captureId ?? pastedCaptureId, ...(pending.capturedAt ? { capturedAt: pending.capturedAt } : {}), finalUrl: pending.url, transport: "handoff" }
+        : { captureId: pastedCaptureId, transport: "import" };
+      const res = await fetch("/api/import", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: preview.url, html: effectiveHtml, capture }) });
       const body = (await res.json().catch(() => null)) as ImportResponse | null;
       if (!res.ok || !body || body.ok !== true) {
         setError(body && "error" in body ? body.error : `Import failed (${res.status}).`);
+        if (body && "code" in body && (body.code === "STALE_CAPTURE" || body.code === "CAPTURE_TIMING")) {
+          // This page can never apply; a fresh capture is needed.
+          if (pending) clearPendingImport();
+          setPreview(null);
+        }
         return;
       }
       setResult(body);
       setPreview(null);
       if (pending) clearPendingImport();
       setHtml("");
+      setPastedCaptureId(newCaptureId());
     } catch {
       setError("Network problem while importing. Try again.");
     } finally {
@@ -209,13 +222,17 @@ export function ImportPage({ appOrigin, initialUrl }: Props) {
 
       {result && (
         <section className="card p-4" aria-live="polite">
-          <p className="eyebrow">Imported</p>
+          <p className="eyebrow">{result.capture?.replayed ? "Already imported" : "Imported"}</p>
           <p className="mt-1 text-sm font-semibold text-ink">
-            Updated {result.results.filter((r) => r.status === "OK").length} of {result.matched} client{result.matched === 1 ? "" : "s"}
-            {result.results.filter((r) => r.status === "ATHLETE_NOT_FOUND").length > 0 ? `; ${result.results.filter((r) => r.status === "ATHLETE_NOT_FOUND").length} not found` : ""}
+            {result.capture?.replayed
+              ? `This capture was already applied to ${result.matched} client${result.matched === 1 ? "" : "s"}; nothing was applied twice.`
+              : `Updated ${result.results.filter((r) => r.status === "OK").length} of ${result.matched} client${result.matched === 1 ? "" : "s"}${result.results.filter((r) => r.status === "ATHLETE_NOT_FOUND").length > 0 ? `; ${result.results.filter((r) => r.status === "ATHLETE_NOT_FOUND").length} not found` : ""}`}
           </p>
           <p className="mt-0.5 break-all text-xs text-muted">{result.url}</p>
-          <p className="mt-0.5 text-xs text-muted">Imported at {new Date(result.checkedAt).toLocaleTimeString()} — snapshot, not live.</p>
+          <p className="mt-0.5 text-xs text-muted">
+            Captured {result.capture ? new Date(result.capture.capturedAt).toLocaleTimeString() : "—"} · imported {new Date(result.checkedAt).toLocaleTimeString()} — snapshot, not live.
+            {result.capture?.completeness === "partial" ? " The capture may be incomplete (more pages or rows existed)." : ""}
+          </p>
           <ul className="mt-3 divide-y divide-line">
             {result.results.map((r) => {
               const ok = r.status === "OK";
@@ -257,6 +274,15 @@ export function ImportPage({ appOrigin, initialUrl }: Props) {
       </section>
     </div>
   );
+}
+
+function newCaptureId(): string {
+  try {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  } catch {
+    // Older WebViews: fall through.
+  }
+  return `cap-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 function formatBytes(n: number): string {

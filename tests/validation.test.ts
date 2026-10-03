@@ -131,7 +131,15 @@ describe("parseImportRequest", () => {
   const url = "https://ajptour.com/en/event/1411/bracket/130617";
 
   it("accepts url + html and trims the url", () => {
-    expect(parseImportRequest({ url: ` ${url} `, html })).toEqual({ ok: true, url, html });
+    expect(parseImportRequest({ url: ` ${url} `, html })).toEqual({ ok: true, url, html, capture: {} });
+  });
+
+  it("accepts optional capture metadata and rejects unknown or owner-like fields in it", () => {
+    const capture = { captureId: "cap_12345678", capturedAt: "2026-03-14T05:59:00.000Z", transport: "handoff" };
+    expect(parseImportRequest({ url, html, capture })).toEqual({ ok: true, url, html, capture });
+    expect(parseImportRequest({ url, html, capture: { ownerId: "x" } })).toMatchObject({ ok: false, code: "INVALID_CAPTURE" });
+    expect(parseImportRequest({ url, html, capture: { transport: "service" } })).toMatchObject({ ok: false, code: "INVALID_CAPTURE" });
+    expect(parseImportRequest({ url, html, capture: "cap" })).toMatchObject({ ok: false, code: "INVALID_CAPTURE" });
   });
 
   it("rejects malformed bodies with a code", () => {

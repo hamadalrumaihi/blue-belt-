@@ -31,6 +31,12 @@ export const config = {
   challengeWaitMs: int("CHALLENGE_WAIT_MS", 35_000),
   maxConcurrency: int("MAX_CONCURRENCY", 2),
   maxHtmlBytes: int("MAX_HTML_BYTES", 3 * 1024 * 1024),
+  /** Bounded readiness: how long to wait for the app to hydrate a schedule after the challenge cleared. */
+  readyWaitMs: int("READY_WAIT_MS", 15_000),
+  /** Bounded expansion: extra pages (next / load more) and scroll passes (virtualised rows) per render. */
+  maxExpandPages: int("MAX_EXPAND_PAGES", 4),
+  maxScrollPasses: int("MAX_SCROLL_PASSES", 6),
+  maxFrames: int("MAX_FRAMES", 4),
   userAgent:
     process.env.USER_AGENT ??
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",

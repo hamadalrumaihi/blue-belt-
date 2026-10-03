@@ -23,7 +23,15 @@ describe("pending import helpers", () => {
     expect(parsePendingImport(null)).toBeNull();
     expect(parsePendingImport("{")).toBeNull();
     expect(parsePendingImport(JSON.stringify({ url: "https://a", html: 1 }))).toBeNull();
-    expect(parsePendingImport(JSON.stringify({ url: "https://a", html: "<p>", receivedAt: "t" }))).toEqual({ url: "https://a", html: "<p>", receivedAt: "t" });
+    expect(parsePendingImport(JSON.stringify({ url: "https://a", html: "<p>", receivedAt: "t" }))).toEqual({ url: "https://a", html: "<p>", receivedAt: "t", captureId: null, capturedAt: null });
+    expect(parsePendingImport(JSON.stringify({ url: "https://a", html: "<p>", receivedAt: "t", captureId: "cap-1", capturedAt: "2026-03-14T05:59:00.000Z" }))).toMatchObject({ captureId: "cap-1", capturedAt: "2026-03-14T05:59:00.000Z" });
+  });
+
+  it("the bookmarklet sends a capture id and the capture time with the page", () => {
+    const code = buildBookmarklet("https://app.example");
+    expect(code).toContain('i("captureId",c)');
+    expect(code).toContain('i("capturedAt",new Date().toISOString())');
+    expect(code).toContain("crypto.randomUUID");
   });
 
   it("guesses the page URL from canonical or og:url tags", () => {

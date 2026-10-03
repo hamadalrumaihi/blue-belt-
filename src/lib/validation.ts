@@ -2,6 +2,7 @@
  * Pure request / input validation helpers shared by Route Handlers, Server
  * Actions and tests. Nothing here touches the network or the database.
  */
+import { parseCaptureMeta, type CaptureMeta } from "./capture/envelope";
 
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -129,20 +130,22 @@ export function parseCronRequest(body: unknown): CronRequest {
   return { ok: true, all, limit, cursor, cooldownSeconds: Math.min(cooldownRaw, 3600) };
 }
 
-export type ImportRequest = { ok: true; url: string; html: string } | ValidationFailure;
+export type ImportRequest = { ok: true; url: string; html: string; capture: CaptureMeta } | ValidationFailure;
 
 /** Upper bound for a pasted / handed-over page (Vercel's request limit is 4.5 MB). */
 export const MAX_IMPORT_HTML_BYTES = 3 * 1024 * 1024;
 
 /**
  * Validates the body of POST /api/import: a source URL plus the HTML of that
- * page as the photographer's own browser rendered it. The URL policy
- * (https, allow-listed host) is enforced again by the import service.
+ * page as the photographer's own browser rendered it, and optional capture
+ * metadata (`capture`: id, capturedAt, finalUrl, transport, completeness).
+ * The URL policy (https, allow-listed host) is enforced again by the import
+ * service. Owner identity is never accepted from the body.
  */
 export function parseImportRequest(body: unknown): ImportRequest {
   if (body === undefined) return fail("INVALID_JSON", "Request body must be valid JSON.");
   if (!isPlainObject(body)) return fail("INVALID_BODY", "Request body must be a JSON object.");
-  const unknown = Object.keys(body).filter((k) => k !== "url" && k !== "html");
+  const unknown = Object.keys(body).filter((k) => k !== "url" && k !== "html" && k !== "capture");
   if (unknown.length) return fail("UNKNOWN_FIELD", `Unsupported field: ${unknown[0]}.`);
   const url = body.url;
   if (typeof url !== "string" || !url.trim()) return fail("INVALID_URL", "url must be a non-empty string.");
@@ -151,5 +154,7 @@ export function parseImportRequest(body: unknown): ImportRequest {
   if (typeof html !== "string" || !html.trim()) return fail("INVALID_HTML", "html must be the page's HTML.");
   if (html.length > MAX_IMPORT_HTML_BYTES) return fail("TOO_LARGE", "The page is too large to import (3 MB limit).");
   if (!html.includes("<")) return fail("INVALID_HTML", "html does not look like a web page.");
-  return { ok: true, url: url.trim(), html };
+  const capture = parseCaptureMeta(body.capture);
+  if (!capture.ok) return fail(capture.code, capture.error);
+  return { ok: true, url: url.trim(), html, capture: capture.meta };
 }

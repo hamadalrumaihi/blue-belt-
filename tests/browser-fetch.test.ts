@@ -61,7 +61,7 @@ describe("browserFetchHtml against the worker (MSW)", () => {
       }),
     );
     const result = await browserFetchHtml(TARGET, { sleep: noSleep });
-    expect(result).toEqual({ ok: true, html: "<html><body>rendered</body></html>", finalUrl: "https://ajptour.com/events/4471/brackets/88?tab=matches", status: 200, elapsedMs: 1234, attempts: 1 });
+    expect(result).toEqual({ ok: true, html: "<html><body>rendered</body></html>", finalUrl: "https://ajptour.com/events/4471/brackets/88?tab=matches", status: 200, elapsedMs: 1234, attempts: 1, completeness: "unknown" });
     expect(seen).toEqual([{ auth: `Bearer ${TOKEN}`, body: { url: TARGET.toString() } }]);
   });
 

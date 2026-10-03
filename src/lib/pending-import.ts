@@ -6,7 +6,7 @@
  */
 export const PENDING_IMPORT_KEY = "bbm:pending-import";
 
-export type PendingImport = { url: string; html: string; receivedAt: string };
+export type PendingImport = { url: string; html: string; receivedAt: string; captureId: string | null; capturedAt: string | null };
 
 const listeners = new Set<() => void>();
 
@@ -46,7 +46,13 @@ export function parsePendingImport(raw: string | null): PendingImport | null {
     if (!v || typeof v !== "object") return null;
     const o = v as Record<string, unknown>;
     if (typeof o.url !== "string" || typeof o.html !== "string") return null;
-    return { url: o.url, html: o.html, receivedAt: typeof o.receivedAt === "string" ? o.receivedAt : "" };
+    return {
+      url: o.url,
+      html: o.html,
+      receivedAt: typeof o.receivedAt === "string" ? o.receivedAt : "",
+      captureId: typeof o.captureId === "string" && o.captureId ? o.captureId : null,
+      capturedAt: typeof o.capturedAt === "string" && o.capturedAt ? o.capturedAt : null,
+    };
   } catch {
     return null;
   }
@@ -54,7 +60,9 @@ export function parsePendingImport(raw: string | null): PendingImport | null {
 
 /**
  * The bookmarklet that runs on the source page: posts the page's URL and
- * rendered HTML to the hand-over endpoint as a normal form submission.
+ * rendered HTML to the hand-over endpoint as a normal form submission,
+ * together with a fresh capture id and the capture time (so a retried Apply
+ * replays instead of re-applying, and a stale tab is refused as too old).
  * No popups, no CORS, works in Safari and Chrome on phones. The same code
  * is what an iOS Shortcut "Run JavaScript on Web Page" action runs.
  */
@@ -63,7 +71,8 @@ export function buildBookmarklet(appOrigin: string): string {
   const body =
     `var f=document.createElement("form");f.method="POST";f.enctype="multipart/form-data";f.action=${JSON.stringify(action)};f.style.display="none";` +
     `function i(n,v){var e=document.createElement("input");e.type="hidden";e.name=n;e.value=v;f.appendChild(e);}` +
-    `i("url",location.href);i("html",document.documentElement.outerHTML);document.body.appendChild(f);f.submit();`;
+    `var c=(self.crypto&&crypto.randomUUID)?crypto.randomUUID():"cap-"+Date.now()+"-"+Math.random().toString(36).slice(2,10);` +
+    `i("url",location.href);i("html",document.documentElement.outerHTML);i("captureId",c);i("capturedAt",new Date().toISOString());document.body.appendChild(f);f.submit();`;
   return `javascript:(function(){${body}})();`;
 }
 

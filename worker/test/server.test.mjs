@@ -125,6 +125,33 @@ describe("worker HTTP server", () => {
     assert.deepEqual(h.calls, [{ url: TARGET, opts: { waitForSelector: "table" } }]);
   });
 
+  test("passes readiness / completeness / pages / frames through, defaulting completeness to unknown", async () => {
+    h.setRender(async (url) => ({ ok: true, html: "<html><body><table><tr><td>Mat 1</td></tr></table></body></html>", finalUrl: url, status: 200, elapsedMs: 5, readiness: "SCHEDULE_FOUND", completeness: "partial", pages: 3, frames: 1 }));
+    const res = await h.render({ url: TARGET }, AUTH);
+    const body = await res.json();
+    assert.equal(body.readiness, "SCHEDULE_FOUND");
+    assert.equal(body.completeness, "partial");
+    assert.equal(body.pages, 3);
+    assert.equal(body.frames, 1);
+    h.setRender(async (url) => ({ ok: true, html: "<html></html>", finalUrl: url, status: 200, elapsedMs: 5 }));
+    const legacy = await (await h.render({ url: TARGET }, AUTH)).json();
+    assert.equal(legacy.completeness, "unknown");
+    assert.equal(legacy.readiness, null);
+    assert.equal(legacy.pages, 1);
+    h.setRender(async (url) => ({ ok: true, html: `<html><body><table><tr><td>Mat 3</td><td>10:40</td></tr></table></body></html>`, finalUrl: url, status: 200, elapsedMs: 12 }));
+  });
+
+  test("a page that never became ready is a 502 PAGE_NOT_READY carrying the readiness reason", async () => {
+    h.setRender(async () => ({ ok: false, code: "PAGE_NOT_READY", message: "The page showed a login form instead of a schedule.", readiness: "LOGIN_PAGE", status: 200, elapsedMs: 15000 }));
+    const res = await h.render({ url: TARGET }, AUTH);
+    assert.equal(res.status, 502);
+    const body = await res.json();
+    assert.equal(body.code, "PAGE_NOT_READY");
+    assert.equal(body.readiness, "LOGIN_PAGE");
+    assert.match(body.message, /login form/);
+    h.setRender(async (url) => ({ ok: true, html: `<html><body><table><tr><td>Mat 3</td><td>10:40</td></tr></table></body></html>`, finalUrl: url, status: 200, elapsedMs: 12 }));
+  });
+
   test("an overlong waitForSelector is ignored", async () => {
     h.calls.length = 0;
     await h.render({ url: TARGET, waitForSelector: "x".repeat(201) }, AUTH);

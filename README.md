@@ -183,6 +183,8 @@ Schema lives in `supabase/migrations/`:
 - `20260929000000_baseline_schema.sql` — canonical, idempotent baseline: every table with foreign keys, constraints, indexes, RLS policies and `updated_at` triggers. A clean project is reproduced with `supabase db push` (or by pasting the files into the SQL editor in order).
 - `20260929120000_tournament_watcher_v1.sql` — the original additive watcher columns.
 - `20261002150000_watcher_v2.sql` — source health, the atomic refresh RPC, persisted settings, the collaboration foundation, Telegram and payment tables.
+- `20261003000000_collaboration_coverage.sql`, `20261003010000_incidents.sql` — coverage board, collaborator functions, operational incidents.
+- `20261004000000_captures.sql` — the capture ledger (`photo_captures`): one row per capture of a source page, unique per owner + capture id. See [docs/captures.md](docs/captures.md).
 
 Core tables: **photo_events**, **photo_athletes** (with source health: `last_attempt_at`, `last_success_at`, `consecutive_failures`, `last_watch_status/code/message/strategy`, `last_source_status`, `last_final_url`, `last_elapsed_ms`, `refresh_version`, generated `name_key`), **photo_matches** (`identity_confidence` exact | probable | ambiguous), **photo_match_history**. Prepared tables: `photo_user_settings`, `photo_event_settings`, `photo_event_members`, `photo_telegram_links`, `photo_notification_subscriptions`, `photo_notification_deliveries`, `photo_bookings`, `photo_payment_attempts`, `photo_payment_events`.
 
@@ -288,6 +290,32 @@ With a proxy, set `LOCALE` and `TZ_ID` to match the exit country so the browser'
 4. `/import` (signed in) shows the URL and size, and one tap posts it to `POST /api/import`, which runs every active client whose `source_url` is that page through the usual adapters → refresh plan → `photo_apply_refresh` RPC → history → notifications. The `[watch]` log line carries `strategy: "import:table"` (or `import:embedded-json`, …).
 
 Safety: the hand-over accepts only `Origin`s on the allow-listed source hosts (or the app itself), is rate-limited per address and capped at 3 MB, and never auto-imports: the signed-in page asks for a tap first. `/api/import` requires the session like `/api/watch` and is rate-limited per user. A handed-over page that is still the challenge page is reported as `BROWSER_CHALLENGE` with a message to pass the check first. `/import` also accepts pasted HTML (desktop: view-source, select all, copy) and reads the page URL from its canonical tag.
+
+### Capture trust (Phase A)
+
+Every applied page, whatever brought it (import page, bookmarklet hand-over,
+the Windows agent, the render worker), is recorded in `photo_captures` with a
+client-stable capture id, the owner-neutral **source identity**, source and
+final URL, transport, captured / received / applied times, a content hash and a
+completeness label. The rules, with the tests that pin them, are in
+[docs/captures.md](docs/captures.md):
+
+- **Source identity** keeps the query parameters that select a bracket /
+  category / division and ignores presentation ones, so two brackets on one
+  path never merge and `?tab=2` never splits a page (`src/lib/capture/source-identity.ts`).
+- **Capture once, apply to all**: a batch refresh fetches each owner + source
+  once and parses it per athlete; captures are never shared across owners.
+- **Replay** of a capture id reports the earlier outcome instead of applying
+  twice; **out-of-order** captures older than the newest applied one are
+  refused (`STALE_CAPTURE`); implausible times (future, or older than 12 h)
+  are refused (`CAPTURE_TIMING`); a final URL that is another bracket is
+  refused (`FINAL_URL_MISMATCH`). Owner identity always comes from the
+  session or credential, never from the body.
+- The render worker now waits (bounded) for a **ready** page — not a
+  challenge, login, error page or empty app shell, and the page that was
+  asked for — then expands virtualised rows, "next / load more" pages and
+  same-origin frames within fixed bounds and labels the capture
+  `complete`, `partial` or `unknown` (`worker/src/readiness.mjs`).
 
 ### `CHALLENGE_NOT_CLEARED` — what it means and what to do
 

@@ -202,6 +202,34 @@ export type PhotoIncidentRow = {
   updated_at: string;
 };
 
+/** Phase A: capture ledger (one row per capture of a source page, per owner). */
+export type CaptureTransport = "import" | "handoff" | "agent" | "worker" | "http";
+export type CaptureCompleteness = "complete" | "partial" | "unknown";
+export type CaptureStatus = "received" | "applied" | "rejected";
+
+export type PhotoCaptureRow = {
+  id: string;
+  owner_id: string;
+  capture_id: string;
+  source_key: string;
+  source_url: string;
+  final_url: string | null;
+  transport: CaptureTransport;
+  captured_at: string;
+  received_at: string;
+  applied_at: string | null;
+  status: CaptureStatus;
+  reject_code: string | null;
+  content_hash: string;
+  bytes: number;
+  completeness: CaptureCompleteness;
+  athlete_count: number | null;
+  outcome: Json;
+  diagnostics: Json;
+  created_at: string;
+  updated_at: string;
+};
+
 // ---------------------------------------------------------------------------
 // Telegram notifications
 // ---------------------------------------------------------------------------
@@ -474,6 +502,15 @@ export type Database = {
           GeneratedCols | "event_id" | "source_host" | "athlete_count" | "status" | "first_seen_at" | "last_seen_at" | "resolved_at" | "occurrences"
         >;
         Update: Partial<PhotoIncidentRow>;
+        Relationships: [];
+      };
+      photo_captures: {
+        Row: PhotoCaptureRow;
+        Insert: Optional<
+          PhotoCaptureRow,
+          GeneratedCols | "final_url" | "transport" | "received_at" | "applied_at" | "status" | "reject_code" | "bytes" | "completeness" | "athlete_count" | "outcome" | "diagnostics"
+        >;
+        Update: Partial<PhotoCaptureRow>;
         Relationships: [];
       };
       photo_telegram_links: {

@@ -6,7 +6,8 @@ import { buildRefreshPlan, planToRpcArgs, type PlannedChange } from "./refresh-p
 import type { ApplyRefreshResult, Database, Json } from "./supabase/database.types";
 import { DEFAULT_TIMEZONE } from "./time";
 import type { AthleteRow, EventRow, MatchRow } from "./types";
-import { watchUrl } from "./watchers";
+import { sourceKey } from "./capture/source-identity";
+import { watchUrl, type PageCache } from "./watchers";
 import type { WatchCode, WatchDiagnostics, WatchResult, WatchStatus } from "./watchers/types";
 
 type Client = SupabaseClient<Database>;
@@ -48,6 +49,12 @@ export type RefreshOptions = {
    * (plan, RPC, history, notifications) is identical.
    */
   watch?: (athlete: AthleteRow, event: EventRow | null) => Promise<WatchResult>;
+  /**
+   * Shared fetch cache for one batch: the page behind a source is fetched
+   * once per owner + source identity and parsed per athlete. refreshAthletes
+   * creates one per batch; single refreshes run without it.
+   */
+  pageCache?: PageCache;
 };
 
 const STAGGER_MS = 350;
@@ -62,6 +69,7 @@ export async function refreshAthletes(supabase: Client, athletes: AthleteRow[], 
   const log = options.log ?? createLogger({ route: "refresh" });
   const results: RefreshResult[] = new Array(athletes.length);
   const stagger = options.staggerMs ?? STAGGER_MS;
+  const pageCache: PageCache = options.pageCache ?? new Map();
   let cursor = 0;
 
   async function worker() {
@@ -69,7 +77,7 @@ export async function refreshAthletes(supabase: Client, athletes: AthleteRow[], 
       const index = cursor++;
       const athlete = athletes[index];
       if (index > 0 && stagger > 0) await sleep(stagger);
-      results[index] = await refreshAthlete(supabase, athlete, athlete.event_id ? events.get(athlete.event_id) ?? null : null, { ...options, log });
+      results[index] = await refreshAthlete(supabase, athlete, athlete.event_id ? events.get(athlete.event_id) ?? null : null, { ...options, log, pageCache });
     }
   }
 
@@ -104,7 +112,7 @@ export async function refreshAthlete(supabase: Client, athlete: AthleteRow, even
     const timezone = event?.timezone ?? DEFAULT_TIMEZONE;
     const result = options.watch
       ? await options.watch(athlete, event)
-      : await watchUrl(athlete.source_url, { athleteName: athlete.name, timezone, eventDate: event?.event_date ?? null, now, log });
+      : await watchUrl(athlete.source_url, { athleteName: athlete.name, timezone, eventDate: event?.event_date ?? null, now, log, pageCache: options.pageCache, cacheKey: options.pageCache ? captureKey(athlete) : undefined });
     const plan = buildRefreshPlan(existing, result, checkedAt, timezone);
 
     const applied = await applyRefresh(supabase, {
@@ -213,7 +221,22 @@ function statusOf(a: Pick<AthleteRow, "last_watch_status">): RefreshResult["stat
 
 function diagJson(d: WatchDiagnostics | undefined): Json {
   if (!d) return {};
-  return { strategy: d.strategy, sourceStatus: d.sourceStatus, finalUrl: d.finalUrl, elapsedMs: Math.round(d.elapsedMs), workerCode: d.workerCode ?? null, attempts: d.attempts ?? null };
+  return {
+    strategy: d.strategy,
+    sourceStatus: d.sourceStatus,
+    finalUrl: d.finalUrl,
+    elapsedMs: Math.round(d.elapsedMs),
+    workerCode: d.workerCode ?? null,
+    attempts: d.attempts ?? null,
+    ...(d.completeness ? { completeness: d.completeness } : {}),
+    ...(d.readiness ? { readiness: d.readiness } : {}),
+    ...(d.shared ? { shared: true } : {}),
+  };
+}
+
+/** Owner-scoped capture key: the same page is never fetched once for two owners. */
+export function captureKey(a: Pick<AthleteRow, "owner_id" | "source_url">): string {
+  return `${a.owner_id}|${sourceKey(a.source_url) ?? a.source_url ?? ""}`;
 }
 
 /** Exposed for tests of the persistence plan without a database. */
