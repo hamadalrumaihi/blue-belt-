@@ -184,6 +184,24 @@ export type CollaboratorEventRow = {
   role: EventMemberRole;
 };
 
+/** Phase 3: operational incident tracking (first/last seen, open/resolved). */
+export type PhotoIncidentRow = {
+  id: string;
+  owner_id: string;
+  incident_key: string;
+  kind: string;
+  event_id: string | null;
+  source_host: string | null;
+  athlete_count: number;
+  status: "open" | "resolved";
+  first_seen_at: string;
+  last_seen_at: string;
+  resolved_at: string | null;
+  occurrences: number;
+  created_at: string;
+  updated_at: string;
+};
+
 // ---------------------------------------------------------------------------
 // Telegram notifications
 // ---------------------------------------------------------------------------
@@ -447,6 +465,15 @@ export type Database = {
           GeneratedCols | "photographer_id" | "videographer_id" | "photos_done_at" | "photos_done_by" | "videos_done_at" | "videos_done_by"
         >;
         Update: Partial<PhotoCoverageRow>;
+        Relationships: [];
+      };
+      photo_incidents: {
+        Row: PhotoIncidentRow;
+        Insert: Optional<
+          PhotoIncidentRow,
+          GeneratedCols | "event_id" | "source_host" | "athlete_count" | "status" | "first_seen_at" | "last_seen_at" | "resolved_at" | "occurrences"
+        >;
+        Update: Partial<PhotoIncidentRow>;
         Relationships: [];
       };
       photo_telegram_links: {

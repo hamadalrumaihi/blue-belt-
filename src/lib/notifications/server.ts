@@ -40,6 +40,10 @@ export async function notifyAfterRefresh(ctx: RefreshNotificationContext): Promi
     }
     if (!isTelegramEnabled()) return;
     if (!ctx.results.length) return;
+    // Enqueue operational incident / recovery messages first, then the sender
+    // flushes them alongside the match alerts.
+    const { runIncidentNotifier } = await import("./telegram/incidents-run");
+    await runIncidentNotifier(ctx);
     const { runTelegramNotifier } = await import("./telegram/notifier");
     await runTelegramNotifier(ctx);
   } catch (err) {
