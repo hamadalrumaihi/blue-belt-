@@ -283,9 +283,9 @@ describe("extract helpers", () => {
     const viaText = normalized({ athlete: null, raw: { text: "27 | Mat 1 | Marco Rossi | Hamad Al-Rumaihi" } });
     const viaRaw = normalized({ athlete: null, raw: { blue: "Hamad Al-Rumaihi" } });
     const other = normalized({ athlete: "Marco Rossi", opponent: "Khalid Noor", raw: { text: "Marco Rossi vs Khalid Noor" } });
-    expect(filterForAthlete([other, mine, viaText, viaRaw], ctx)).toEqual({ matches: [mine, viaText, viaRaw], filtered: true });
-    expect(filterForAthlete([other], ctx)).toEqual({ matches: [other], filtered: false });
-    expect(filterForAthlete([other], watchContext({ athleteName: null }))).toEqual({ matches: [other], filtered: false });
+    expect(filterForAthlete([other, mine, viaText, viaRaw], ctx)).toEqual({ matches: [mine, viaText, viaRaw], filtered: true, named: true });
+    expect(filterForAthlete([other], ctx)).toEqual({ matches: [other], filtered: false, named: true });
+    expect(filterForAthlete([other], watchContext({ athleteName: null }))).toEqual({ matches: [other], filtered: false, named: true });
   });
 
   it("sortMatches orders by explicit order, then match number, then time", () => {
@@ -298,5 +298,50 @@ describe("extract helpers", () => {
     const none = normalized({ scheduledAt: null });
     const sorted = sortMatches([none, late, num12, byOrder2, early, num5, byOrder1]);
     expect(sorted).toEqual([byOrder1, byOrder2, num5, num12, none, early, late]);
+  });
+});
+
+describe("athlete identification (Phase 1-A)", () => {
+  const ARABIC = "أحمد الرميحي";
+
+  it("normalizeName unifies Latin accents, punctuation and Arabic letter variants without emptying Arabic", () => {
+    expect(normalizeName("  João  Al-Rumaihi! ")).toBe("joao al rumaihi");
+    // Arabic keeps a non-empty key (ASCII-only filters would collapse it to "").
+    expect(normalizeName(ARABIC)).not.toBe("");
+    // tatweel, harakat and alef/yeh variants normalize to the same key.
+    expect(normalizeName("أحمد الرُّمَيحي")).toBe(normalizeName("احمد الرميحي"));
+    expect(normalizeName("اَحمد الرميحى")).toBe(normalizeName("أحمد الرميحي"));
+  });
+
+  it("matches an Arabic athlete across diacritic/alef variants but not an unrelated Arabic name", () => {
+    expect(mentionsAthlete("أحمد الرُّمَيحي", ARABIC)).toBe(true);
+    expect(mentionsAthlete("احمد الرميحى", ARABIC)).toBe(true);
+    expect(mentionsAthlete("خالد نور", ARABIC)).toBe(false);
+  });
+
+  it("finds the Arabic athlete's row in an Arabic bracket and reports OK", () => {
+    const result = ajpAdapter.parse(fixture("ajp-arabic-bracket"), watchContext({ athleteName: ARABIC, eventDate: "2026-03-14" }));
+    expect(result.status).toBe("OK");
+    expect(result.code).toBe("MATCHES_FOUND");
+    expect(result.matches).toHaveLength(1);
+    expect(result.matches[0]).toMatchObject({ mat: "Mat 3", opponent: "جواو سيلفا" });
+  });
+
+  it("returns ATHLETE_NOT_FOUND (not another athlete's row) for an unrelated SMALL bracket", () => {
+    const result = ajpAdapter.parse(fixture("ajp-unrelated-small"), watchContext({ athleteName: "Hamad Al-Rumaihi", eventDate: "2026-03-14" }));
+    expect(result.status).toBe("ATHLETE_NOT_FOUND");
+    expect(result.code).toBe("ATHLETE_NOT_FOUND");
+    expect(result.matches).toEqual([]);
+  });
+
+  it("returns ATHLETE_NOT_FOUND when an Arabic bracket does not name the athlete", () => {
+    const result = ajpAdapter.parse(fixture("ajp-arabic-bracket"), watchContext({ athleteName: "سعيد المنصوري", eventDate: "2026-03-14" }));
+    expect(result.status).toBe("ATHLETE_NOT_FOUND");
+  });
+
+  it("does not confuse two athletes who share given-name tokens (ambiguous common names)", () => {
+    // The page names Ali Hassan; tracking a different Ali must not match him.
+    const result = ajpAdapter.parse(fixture("ajp-bracket-table"), watchContext({ athleteName: "Ali Khan" }));
+    expect(result.status).toBe("ATHLETE_NOT_FOUND");
   });
 });

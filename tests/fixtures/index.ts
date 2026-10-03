@@ -5,6 +5,8 @@ export type FixtureName =
   | "ajp-bracket-table"
   | "ajp-embedded-json"
   | "smoothcomp-cards"
+  | "ajp-unrelated-small"
+  | "ajp-arabic-bracket"
   | "cloudflare-challenge"
   | "js-shell"
   | "schedule-unpublished";
