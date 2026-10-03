@@ -26,9 +26,14 @@ const TIME_BUDGET_MS = 240_000;
  * Body (optional):
  *   { all?: boolean, limit?: number, cursor?: athleteId, cooldownSeconds?: number }
  *
- * Athletes are ordered by (last_attempt_at nulls first, id) so each call
- * takes the stalest page; the response reports eligible / processed /
- * failed / skipped / remaining counts and the cursor for the next page.
+ * Athletes are paginated by a keyset on the immutable `id` (cursor = last id
+ * of the previous page, page = id > cursor). Ordering by `id` — not by
+ * `last_attempt_at`, which refresh overwrites — keeps pagination stable: a
+ * processed row cannot move within the ordering and make the next page skip or
+ * repeat clients. Over a full sweep every eligible athlete is refreshed once;
+ * the cooldown stops anyone from being re-fetched too soon. The response
+ * reports eligible / processed / failed / skipped / remaining counts and the
+ * cursor for the next page.
  */
 export async function POST(request: Request) {
   const { log, requestId } = requestLogger(request, "api/cron/refresh");
@@ -106,7 +111,9 @@ export async function POST(request: Request) {
   const statuses = processedResults.reduce<Record<string, number>>((acc, r) => ({ ...acc, [r.status]: (acc[r.status] ?? 0) + 1 }), {});
   const lastProcessed = page.athletes[index - 1]?.id ?? parsed.cursor;
   const unprocessedInPage = page.athletes.length - index;
-  const remaining = Math.max(0, (eligible ?? 0) - page.offset - index);
+  // Remaining is the eligible rows still ahead of the cursor in id order. This
+  // is a count on the immutable key, so processing cannot distort it.
+  const remaining = lastProcessed ? await countAfter(supabase, eventIds, lastProcessed) : 0;
   const cursor = remaining > 0 ? lastProcessed : null;
 
   log.info("cron.batch", { events: dueEvents.length, eligible, processed, failed, skipped, remaining, unprocessedInPage, changes, durationMs: Date.now() - started, statuses });
@@ -116,47 +123,32 @@ export async function POST(request: Request) {
   );
 }
 
-type Page = { ok: true; athletes: AthleteRow[]; offset: number } | { ok: false; error: string };
+type Page = { ok: true; athletes: AthleteRow[] } | { ok: false; error: string };
 
 /**
- * Keyset page over eligible athletes ordered by (last_attempt_at nulls first,
- * id). `cursor` is the last athlete id of the previous page; the page starts
- * after it in that order.
+ * Keyset page over eligible athletes ordered by the immutable `id`. `cursor`
+ * is the last athlete id of the previous page; the page is the rows with
+ * `id > cursor`. Because the order key never changes, a refresh in flight
+ * cannot move a row across the cursor, so no client is skipped or repeated.
  */
 async function loadPage(supabase: ReturnType<typeof createServiceClient>, eventIds: string[], limit: number, cursor: string | null): Promise<Page> {
-  const base = () => supabase.from("photo_athletes").select("*").eq("active", true).not("source_url", "is", null).in("event_id", eventIds);
-  let offset = 0;
-  if (cursor) {
-    // Resolve the cursor's position in the ordering (rank-based keyset: tolerant of
-    // last_attempt_at moving between calls because rows are ordered by attempt time).
-    const { data: anchor } = await base().eq("id", cursor).maybeSingle();
-    if (anchor) {
-      const anchorTime = anchor.last_attempt_at;
-      const { count } = anchorTime
-        ? await supabase
-            .from("photo_athletes")
-            .select("id", { count: "exact", head: true })
-            .eq("active", true)
-            .not("source_url", "is", null)
-            .in("event_id", eventIds)
-            .or(`last_attempt_at.is.null,last_attempt_at.lt.${anchorTime},and(last_attempt_at.eq.${anchorTime},id.lte.${cursor})`)
-        : await supabase
-            .from("photo_athletes")
-            .select("id", { count: "exact", head: true })
-            .eq("active", true)
-            .not("source_url", "is", null)
-            .in("event_id", eventIds)
-            .is("last_attempt_at", null)
-            .lte("id", cursor);
-      offset = count ?? 0;
-    }
-  }
-  const { data, error } = await base()
-    .order("last_attempt_at", { ascending: true, nullsFirst: true })
-    .order("id", { ascending: true })
-    .range(offset, offset + limit - 1);
+  let query = supabase.from("photo_athletes").select("*").eq("active", true).not("source_url", "is", null).in("event_id", eventIds);
+  if (cursor) query = query.gt("id", cursor);
+  const { data, error } = await query.order("id", { ascending: true }).limit(limit);
   if (error) return { ok: false, error: error.message };
-  return { ok: true, athletes: data ?? [], offset };
+  return { ok: true, athletes: data ?? [] };
+}
+
+/** Count of eligible athletes still ahead of `cursor` in id order. */
+async function countAfter(supabase: ReturnType<typeof createServiceClient>, eventIds: string[], cursor: string): Promise<number> {
+  const { count } = await supabase
+    .from("photo_athletes")
+    .select("id", { count: "exact", head: true })
+    .eq("active", true)
+    .not("source_url", "is", null)
+    .in("event_id", eventIds)
+    .gt("id", cursor);
+  return count ?? 0;
 }
 
 function authorized(request: Request): boolean {

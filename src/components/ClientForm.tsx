@@ -27,6 +27,7 @@ export function ClientForm({ action, events, initial, defaultEventId, defaultPla
   const [platform, setPlatform] = useState<string>(initial?.platform ?? defaultPlatform);
   const [url, setUrl] = useState(initial?.source_url ?? "");
   const [name, setName] = useState(initial?.name ?? "");
+  const [eventId, setEventId] = useState(initial?.event_id ?? defaultEventId ?? events[0]?.id ?? "");
   const [test, setTest] = useState<{ loading: boolean; result: WatchResult | null; error: string | null }>({ loading: false, result: null, error: null });
 
   function onUrlChange(value: string) {
@@ -38,10 +39,13 @@ export function ClientForm({ action, events, initial, defaultEventId, defaultPla
   async function testLink() {
     setTest({ loading: true, result: null, error: null });
     try {
+      // Resolve wall-clock times against the SELECTED event's timezone and
+      // date, so a "Test link" preview matches what a real refresh will store.
+      const ev = events.find((e) => e.id === eventId);
       const res = await fetch("/api/watch", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ url, athleteName: name || undefined }),
+        body: JSON.stringify({ url, athleteName: name || undefined, timezone: ev?.timezone || undefined, eventDate: ev?.event_date || undefined }),
       });
       const body = (await res.json()) as WatchResult | { error: string };
       if (!res.ok || "error" in body) throw new Error("error" in body ? body.error : "Test failed");
@@ -67,14 +71,14 @@ export function ClientForm({ action, events, initial, defaultEventId, defaultPla
           </label>
         )}
         <div className="grid gap-5 sm:grid-cols-2">
-          <FormField label="Phone" htmlFor="phone" required error={fe.phone}>
+          <FormField label="Phone" htmlFor="phone" error={fe.phone} hint="Optional">
             <input id="phone" name="phone" type="tel" inputMode="tel" className="input" defaultValue={initial?.phone ?? ""} autoComplete="tel" placeholder="+974 …" />
           </FormField>
-          <FormField label="Email" htmlFor="email" required error={fe.email}>
+          <FormField label="Email" htmlFor="email" error={fe.email} hint="Optional">
             <input id="email" name="email" type="email" inputMode="email" className="input" defaultValue={initial?.email ?? ""} autoComplete="email" />
           </FormField>
         </div>
-        <FormField label="Academy / Team" htmlFor="academy" required error={fe.academy}>
+        <FormField label="Academy / Team" htmlFor="academy" error={fe.academy} hint="Optional">
           <input id="academy" name="academy" className="input" defaultValue={initial?.academy ?? ""} autoComplete="organization" />
         </FormField>
       </section>
@@ -82,7 +86,7 @@ export function ClientForm({ action, events, initial, defaultEventId, defaultPla
       <section className="card space-y-5 p-5">
         <h2 className="text-sm font-extrabold uppercase tracking-wider text-muted">Tournament</h2>
         <FormField label="Event" htmlFor="event_id" required error={fe.event_id}>
-          <select id="event_id" name="event_id" className="input" defaultValue={initial?.event_id ?? defaultEventId ?? events[0]?.id ?? ""}>
+          <select id="event_id" name="event_id" className="input" value={eventId} onChange={(e) => setEventId(e.target.value)}>
             {!events.length && <option value="">Create an event first</option>}
             {events.map((e) => (
               <option key={e.id} value={e.id}>{e.name}{e.active ? "" : " (archived)"}</option>
@@ -137,6 +141,9 @@ export function ClientForm({ action, events, initial, defaultEventId, defaultPla
         </FormField>
         {initial?.id && (
           <label className="flex min-h-11 items-center gap-3 rounded-xl border border-line px-3">
+            {/* Sentinel: an unchecked checkbox submits nothing, so this marks the
+                control as present and lets the action read "unchecked" as paused. */}
+            <input type="hidden" name="active_present" value="1" />
             <input type="checkbox" name="active" className="h-5 w-5 accent-primary" defaultChecked={initial.active ?? true} value="on" />
             <span className="text-sm font-semibold text-ink">Actively tracked <span className="font-normal text-muted">(uncheck to pause refreshes)</span></span>
           </label>

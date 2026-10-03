@@ -67,16 +67,17 @@ export function parseGeneric(html: string, ctx: WatchContext, platform: "AJP" | 
     for (const [name, run] of strategies) {
       const found = run();
       if (!found.length) continue;
-      const { matches, filtered } = filterForAthlete(found, ctx);
-      // A page listing many competitors where none mention the athlete.
-      if (ctx.athleteName && !filtered && found.length > 3) {
+      const { matches, filtered, named } = filterForAthlete(found, ctx);
+      // The page names competitors but none is this athlete: never attribute an
+      // unrelated bracket's mat/time to the client, however few rows it has.
+      if (ctx.athleteName && !filtered && named) {
         return {
           ...base,
           status: "ATHLETE_NOT_FOUND",
           code: "ATHLETE_NOT_FOUND",
           matches: [],
           strategy: name,
-          message: `Found ${found.length} schedule rows but none mention ${ctx.athleteName}. Check the profile URL.`,
+          message: `Found ${found.length} schedule ${found.length === 1 ? "row" : "rows"} but none name ${ctx.athleteName}. Check the profile URL.`,
         };
       }
       return { ...base, status: "OK", code: "MATCHES_FOUND", matches: sortMatches(matches), strategy: name, message: title || undefined };

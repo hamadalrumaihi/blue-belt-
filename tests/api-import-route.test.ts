@@ -2,17 +2,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn() }));
-vi.mock("@/lib/import-service", () => ({ importPage: vi.fn() }));
+vi.mock("@/lib/import-service", () => ({ importPage: vi.fn(), previewImport: vi.fn() }));
 
 import { POST as receive } from "@/app/api/import/receive/route";
 import { POST, dynamic, maxDuration, runtime } from "@/app/api/import/route";
-import { importPage } from "@/lib/import-service";
+import { importPage, previewImport } from "@/lib/import-service";
 import { RULES, resetRateLimits } from "@/lib/rate-limit";
 import { createClient } from "@/lib/supabase/server";
 import { MAX_IMPORT_HTML_BYTES } from "@/lib/validation";
 
 const createClientMock = vi.mocked(createClient);
 const importPageMock = vi.mocked(importPage);
+const previewMock = vi.mocked(previewImport);
 const USER = { id: "user-1", email: "photographer@example.com" };
 const PAGE = "https://ajptour.com/en/event/1411/bracket/130617";
 
@@ -29,6 +30,8 @@ beforeEach(() => {
   install(USER);
   importPageMock.mockReset();
   importPageMock.mockResolvedValue({ ok: true, url: PAGE, matched: 1, results: [], checkedAt: "2026-03-14T06:00:00.000Z" });
+  previewMock.mockReset();
+  previewMock.mockResolvedValue({ ok: true, url: PAGE, capturedAt: "2026-03-14T06:00:00.000Z", found: 1, withMatches: 1, notFound: 0, rows: [] });
 });
 
 describe("POST /api/import", () => {
@@ -123,5 +126,26 @@ describe("POST /api/import/receive (hand-over)", () => {
     for (let i = 0; i < RULES.importReceivePerIp.max; i += 1) await form({ url: PAGE, html: "<p>" }, "https://ajptour.com", { "x-forwarded-for": "203.0.113.9" });
     expect((await form({ url: PAGE, html: "<p>" }, "https://ajptour.com", { "x-forwarded-for": "203.0.113.9" })).status).toBe(429);
     expect((await form({ url: PAGE, html: "<p>" }, "https://ajptour.com", { "x-forwarded-for": "203.0.113.10" })).status).toBe(200);
+  });
+});
+
+describe("POST /api/import?preview=1", () => {
+  function postPreview(body: string) {
+    return POST(new Request("http://localhost/api/import?preview=1", { method: "POST", body, headers: { "content-type": "application/json" } }));
+  }
+
+  it("calls previewImport, not importPage, and returns the preview", async () => {
+    const res = await postPreview(JSON.stringify({ url: PAGE, html: "<html><body>ok</body></html>" }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, found: 1, withMatches: 1 });
+    expect(previewMock).toHaveBeenCalledTimes(1);
+    expect(importPageMock).not.toHaveBeenCalled();
+  });
+
+  it("maps a challenge-page rejection to 422", async () => {
+    previewMock.mockResolvedValueOnce({ ok: false, code: "CHALLENGE_PAGE", message: "still the check page", url: PAGE });
+    const res = await postPreview(JSON.stringify({ url: PAGE, html: "<html>just a moment</html>" }));
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({ code: "CHALLENGE_PAGE" });
   });
 });

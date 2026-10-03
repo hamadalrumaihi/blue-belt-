@@ -44,14 +44,28 @@ export function pageTitle($: CheerioRoot): string {
   return $("title").first().text().replace(/\s+/g, " ").trim();
 }
 
+/**
+ * Script-aware name key. Latin accents are stripped (João → joao) and Arabic
+ * letter variants are unified so the same name written with or without
+ * diacritics, tatweel or alternate alef/yeh/teh-marbuta forms compares equal.
+ * Letters and numbers of ANY script survive, so an Arabic name keeps a
+ * non-empty identity instead of collapsing to "" the way an ASCII-only filter
+ * would. Returns a lower-cased, single-spaced key.
+ */
 export function normalizeName(value: string | null | undefined): string {
-  return (value ?? "")
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/[^a-z0-9 ]/gi, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toLowerCase();
+  let s = (value ?? "").normalize("NFKD");
+  // Combining marks: Latin accents and Arabic harakat both decompose to these.
+  s = s.replace(/\p{M}+/gu, "");
+  // Arabic orthographic unification (tatweel, alef/yeh/teh-marbuta, hamza carriers).
+  s = s
+    .replace(/ـ/g, "")
+    .replace(/[آأإٱ]/g, "ا")
+    .replace(/ى/g, "ي")
+    .replace(/ة/g, "ه")
+    .replace(/[ؤئ]/g, "ء");
+  // Keep letters/numbers of any script; everything else becomes a separator.
+  s = s.replace(/[^\p{L}\p{N}]+/gu, " ");
+  return s.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
 /** True when `text` mentions the athlete (full name, or all name tokens). */
@@ -199,10 +213,10 @@ export function matchesFromTables($: CheerioRoot, ctx: WatchContext): Normalized
 // an "A vs B" cell, and the match number in a "Match #" column. Header labels
 // are matched exactly (lower-cased) so prose columns are never mistaken.
 const COLUMN_RE = {
-  number: /^(?:(?:match|fight|bout)\s*)?(?:#|no\.?|number)$|^(?:match|fight|bout)$/,
-  red: /^(?:red|athlete ?1|competitor ?1|fighter ?1|player ?1|home)$/,
-  blue: /^(?:blue|athlete ?2|competitor ?2|fighter ?2|player ?2|away)$/,
-  opponent: /^opponent$/,
+  number: /^(?:(?:match|fight|bout)\s*)?(?:#|no\.?|number)$|^(?:match|fight|bout)$|^رقم/,
+  red: /^(?:red|athlete ?1|competitor ?1|fighter ?1|player ?1|home)$|^ال[أإآا]حمر$/,
+  blue: /^(?:blue|athlete ?2|competitor ?2|fighter ?2|player ?2|away)$|^ال[أإآا]زرق$/,
+  opponent: /^opponent$|^الخصم$/,
 };
 type ColumnMap = Partial<Record<keyof typeof COLUMN_RE, number>>;
 
@@ -419,18 +433,40 @@ export function dedupe(matches: NormalizedMatch[]): NormalizedMatch[] {
   return out;
 }
 
-/** Keeps only rows about the athlete when the page lists many competitors. */
-export function filterForAthlete(matches: NormalizedMatch[], ctx: WatchContext): { matches: NormalizedMatch[]; filtered: boolean } {
-  if (!ctx.athleteName) return { matches, filtered: false };
+/**
+ * Keeps only rows that positively identify the athlete.
+ *
+ * `named` reports whether the page actually carries competitor names (an
+ * opponent, or a two-name pairing in the row text/JSON). When it does and the
+ * athlete is not among them, the caller must treat the page as
+ * ATHLETE_NOT_FOUND rather than attributing an unrelated bracket's mat and
+ * time to this client — regardless of how few rows the page has. `named` is
+ * false only for athlete-centric pages that list a schedule without repeating
+ * competitor names, where absence cannot disconfirm identity.
+ */
+export function filterForAthlete(
+  matches: NormalizedMatch[],
+  ctx: WatchContext,
+): { matches: NormalizedMatch[]; filtered: boolean; named: boolean } {
+  const named = matches.some((m) => rowCarriesNames(m));
+  if (!ctx.athleteName) return { matches, filtered: false, named };
   const mine = matches.filter((m) => {
     const text = typeof m.raw.text === "string" ? m.raw.text : "";
     return (
       mentionsAthlete(m.athlete ?? "", ctx.athleteName) ||
+      mentionsAthlete(m.opponent ?? "", ctx.athleteName) ||
       mentionsAthlete(text, ctx.athleteName) ||
       mentionsAthlete(JSON.stringify(m.raw), ctx.athleteName)
     );
   });
-  return mine.length ? { matches: mine, filtered: true } : { matches, filtered: false };
+  return mine.length ? { matches: mine, filtered: true, named } : { matches, filtered: false, named };
+}
+
+/** True when a parsed row names competitors (so absence of the athlete is meaningful). */
+function rowCarriesNames(m: NormalizedMatch): boolean {
+  if (normalizeName(m.opponent).length > 0) return true;
+  const text = typeof m.raw.text === "string" ? m.raw.text : "";
+  return /\b(?:vs\.?|v\.|versus)\b/i.test(text);
 }
 
 /** Text hints that the organizer has not published the schedule yet. */

@@ -99,8 +99,8 @@ describe("buildRefreshPlan", () => {
         match_ref: 0,
       },
     ]);
-    // Both stored rows survive untouched apart from the re-stamp.
-    expect(plan.touchIds).toEqual([ROW_A, ROW_B]);
+    // Both stored rows survive and are not re-stamped (they were not seen).
+    expect(plan.touchIds).toEqual([]);
     expect(plan.preview.map((p) => ("id" in p ? p.id : `ref:${p.ref}`))).toEqual(["ref:0", ROW_A, ROW_B]);
   });
 
@@ -139,19 +139,21 @@ describe("buildRefreshPlan", () => {
     expect(isSuccessfulRead("REQUIRES_BROWSER_WATCHER")).toBe(false);
   });
 
-  it("NO_MATCHES touches existing rows but never deletes them", () => {
-    const existing = [matchRow({ id: ROW_A }), matchRow({ id: ROW_B })];
+  it("keeps existing rows on an empty read but does NOT re-stamp them as freshly verified", () => {
+    const existing = [matchRow({ id: ROW_A, last_checked_at: "old" }), matchRow({ id: ROW_B, last_checked_at: "old" })];
     for (const status of ["NO_MATCHES", "ATHLETE_NOT_FOUND"] as const) {
       const plan = buildRefreshPlan(existing, watchResult({ status, matches: [] }), CHECKED_AT);
       expect(plan.ok).toBe(true);
-      expect(plan.touchIds).toEqual([ROW_A, ROW_B]);
+      expect(plan.touchIds).toEqual([]);
       expect(plan.updates).toEqual([]);
       expect(plan.inserts).toEqual([]);
       expect(plan.history).toEqual([]);
       expect(plan.preview).toBe(existing);
+      // last_checked_at (last verified) is untouched: an empty read verified nothing.
+      expect(plan.preview.every((m) => "last_checked_at" in m && m.last_checked_at === "old")).toBe(true);
     }
     // An OK result with zero rows behaves the same way.
-    expect(buildRefreshPlan(existing, watchResult({ status: "OK", matches: [] }), CHECKED_AT).touchIds).toEqual([ROW_A, ROW_B]);
+    expect(buildRefreshPlan(existing, watchResult({ status: "OK", matches: [] }), CHECKED_AT).touchIds).toEqual([]);
   });
 
   it("records mat / time / opponent / status changes against the matched row", () => {
@@ -167,11 +169,12 @@ describe("buildRefreshPlan", () => {
     expect(plan.updates[0].patch).toMatchObject({ mat: "Mat 3", opponent: "Khalid Noor", status: "on_mat", last_changed_at: CHECKED_AT });
   });
 
-  it("rows the source no longer lists are only re-stamped", () => {
+  it("keeps rows the source no longer lists as last-known, without re-verifying them", () => {
     const stored = [matchRow({ id: ROW_A, external_match_id: "9012" }), matchRow({ id: ROW_B, external_match_id: "9027", last_checked_at: "old" })];
     const plan = buildRefreshPlan(stored, watchResult({ matches: [normalized({ externalMatchId: "9012" })] }), CHECKED_AT);
-    expect(plan.touchIds).toEqual([ROW_B]);
-    expect(plan.preview[1]).toMatchObject({ id: ROW_B, last_checked_at: CHECKED_AT });
+    // ROW_A was seen (updated); ROW_B was not, so it keeps its old last_checked_at.
+    expect(plan.touchIds).toEqual([]);
+    expect(plan.preview[1]).toMatchObject({ id: ROW_B, last_checked_at: "old" });
   });
 
   it("describeParsed", () => {
@@ -233,7 +236,7 @@ describe("planToRpcArgs", () => {
     const stored = matchRow({ id: ROW_A, external_match_id: "9012", mat: "Mat 1", opponent: "João Silva", scheduled_at: "2026-03-14T07:40:00.000Z" });
     const plan = buildRefreshPlan([stored, matchRow({ id: ROW_B, external_match_id: "9099" })], watchResult({ matches: [normalized({ externalMatchId: "9012" }), normalized({ externalMatchId: "9027", opponent: "Marco Rossi" })] }), CHECKED_AT);
     const args = planToRpcArgs(plan);
-    expect(args.p_touch_ids).toEqual([ROW_B]);
+    expect(args.p_touch_ids).toEqual([]);
     expect(args.p_updates).toEqual([{ id: ROW_A, patch: plan.updates[0].patch }]);
     expect(args.p_inserts).toEqual(plan.inserts);
     const history = args.p_history as Array<Record<string, unknown>>;
