@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { importPage } from "@/lib/import-service";
+import { importPage, previewImport } from "@/lib/import-service";
 import { requestLogger } from "@/lib/log";
 import { rateLimit, rateLimitHeaders, RULES } from "@/lib/rate-limit";
 import { createClient } from "@/lib/supabase/server";
@@ -10,7 +10,8 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 /**
- * POST /api/import  { url, html }
+ * POST /api/import         { url, html }  applies the page to its clients.
+ * POST /api/import?preview=1 { url, html } previews the outcome, persisting nothing.
  *
  * Applies a page the signed-in photographer fetched in their own browser
  * (where they passed the site's bot check as a person) to the clients that
@@ -48,10 +49,27 @@ export async function POST(request: Request) {
     );
   }
 
-  const outcome = await importPage(supabase, { url: parsed.url, html: parsed.html, log });
+  const preview = new URL(request.url).searchParams.get("preview") === "1";
+  const outcome = preview
+    ? await previewImport(supabase, { url: parsed.url, html: parsed.html, log })
+    : await importPage(supabase, { url: parsed.url, html: parsed.html, log });
   if (!outcome.ok) {
-    const status = outcome.code === "QUERY_FAILED" ? 500 : outcome.code === "NO_ATHLETES" ? 404 : 400;
+    const status = failureStatus(outcome.code);
     return NextResponse.json({ error: outcome.message, code: outcome.code, url: outcome.url, candidates: outcome.candidates ?? [] }, { status, headers: { ...headers, ...rateLimitHeaders(limit) } });
   }
   return NextResponse.json(outcome, { headers: { ...headers, ...rateLimitHeaders(limit) } });
+}
+
+/** HTTP status for an import failure code. */
+function failureStatus(code: string): number {
+  switch (code) {
+    case "QUERY_FAILED":
+      return 500;
+    case "NO_ATHLETES":
+      return 404;
+    case "CHALLENGE_PAGE":
+      return 422;
+    default:
+      return 400;
+  }
 }

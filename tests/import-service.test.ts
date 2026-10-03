@@ -132,3 +132,49 @@ describe("importPage", () => {
     expect(out.results[0].diagnostics?.strategy).toBe("import:table");
   });
 });
+
+describe("previewImport (no persistence)", () => {
+  it("reports per-client outcome without calling refreshAthletes", async () => {
+    const a1 = athleteRow({ id: "22222222-2222-4222-8222-000000000001", name: "Hamad Al Rumaihi", source_url: PAGE });
+    const a2 = athleteRow({ id: "22222222-2222-4222-8222-000000000002", name: "Someone Else", source_url: PAGE });
+    const event = eventRow({ timezone: "Asia/Qatar", event_date: "2026-03-14" });
+    const fake = fakeSupabase({ athletes: [a1, a2], events: [event] });
+    const { previewImport } = await import("@/lib/import-service");
+    const out = await previewImport(fake.client, { url: PAGE, html: fixture("ajp-bracket-table"), now: NOW });
+    expect(out.ok).toBe(true);
+    if (!out.ok) throw new Error("expected ok");
+    expect(out.found).toBe(2);
+    expect(out.withMatches).toBe(1);
+    expect(out.notFound).toBe(1);
+    expect(out.rows.map((r) => [r.name, r.status])).toEqual([
+      ["Hamad Al Rumaihi", "OK"],
+      ["Someone Else", "ATHLETE_NOT_FOUND"],
+    ]);
+    expect(out.capturedAt).toBe(NOW.toISOString());
+    expect(refreshMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a handed-over challenge page before touching the database", async () => {
+    const fake = fakeSupabase({ athletes: [athleteRow({ source_url: PAGE })] });
+    const { previewImport } = await import("@/lib/import-service");
+    const out = await previewImport(fake.client, { url: PAGE, html: fixture("cloudflare-challenge"), now: NOW });
+    expect(out).toMatchObject({ ok: false, code: "CHALLENGE_PAGE" });
+    expect(fake.calls).toHaveLength(0);
+  });
+
+  it("reports NO_ATHLETES with the tracked pages when nothing matches", async () => {
+    const fake = fakeSupabase({ athletes: [athleteRow({ source_url: "https://ajptour.com/en/event/1/bracket/9" })] });
+    const { previewImport } = await import("@/lib/import-service");
+    const out = await previewImport(fake.client, { url: PAGE, html: "<html><body>x</body></html>", now: NOW });
+    expect(out).toMatchObject({ ok: false, code: "NO_ATHLETES", candidates: ["https://ajptour.com/en/event/1/bracket/9"] });
+  });
+});
+
+describe("importPage rejects a challenge page", () => {
+  it("does not apply when the handed-over HTML is still the bot check", async () => {
+    const fake = fakeSupabase({ athletes: [athleteRow({ source_url: PAGE })] });
+    const out = await importPage(fake.client, { url: PAGE, html: fixture("cloudflare-challenge"), now: NOW });
+    expect(out).toMatchObject({ ok: false, code: "CHALLENGE_PAGE" });
+    expect(refreshMock).not.toHaveBeenCalled();
+  });
+});

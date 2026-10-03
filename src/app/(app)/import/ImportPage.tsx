@@ -7,6 +7,7 @@ import { CheckIcon } from "@/components/icons";
 import { watchStateCopy } from "@/components/watchStateCopy";
 import { buildBookmarklet, buildShortcutScript, clearPendingImport, parsePendingImport, readPendingImport, subscribePendingImport, urlFromHtml } from "@/lib/pending-import";
 import { cn } from "@/lib/utils";
+import type { ImportPreview, ImportPreviewRow } from "@/lib/import-service";
 import type { RefreshResult } from "@/lib/watch-service";
 
 type Props = { appOrigin: string; initialUrl: string };
@@ -14,6 +15,8 @@ type Props = { appOrigin: string; initialUrl: string };
 type ImportResponse =
   | { ok: true; url: string; matched: number; results: RefreshResult[]; checkedAt: string }
   | { ok?: false; error: string; code: string; url?: string; candidates?: string[]; retryAfterSeconds?: number };
+
+type PreviewOk = Extract<ImportPreview, { ok: true }>;
 
 const serverSnapshot = () => null;
 
@@ -31,6 +34,7 @@ export function ImportPage({ appOrigin, initialUrl }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [candidates, setCandidates] = useState<string[]>([]);
+  const [preview, setPreview] = useState<PreviewOk | null>(null);
   const [result, setResult] = useState<Extract<ImportResponse, { ok: true }> | null>(null);
   const [copied, setCopied] = useState<"bookmarklet" | "shortcut" | null>(null);
 
@@ -39,24 +43,58 @@ export function ImportPage({ appOrigin, initialUrl }: Props) {
   const bookmarklet = useMemo(() => buildBookmarklet(appOrigin), [appOrigin]);
   const shortcutScript = useMemo(() => buildShortcutScript(appOrigin), [appOrigin]);
 
-  async function submit() {
+  function targetOrError(): { url: string; html: string } | null {
+    const targetUrl = (effectiveUrl || urlFromHtml(effectiveHtml) || "").trim();
+    if (!targetUrl) {
+      setError("Enter the page URL (the bracket or athlete page the clients use as their source).");
+      return null;
+    }
+    if (!effectiveHtml.trim()) {
+      setError("Paste the page's HTML, or send the page from your browser with the bookmarklet.");
+      return null;
+    }
+    return { url: targetUrl, html: effectiveHtml };
+  }
+
+  /** Step 1: preview the outcome without persisting anything. */
+  async function runPreview() {
     setError(null);
     setCandidates([]);
     setResult(null);
-    const targetUrl = (effectiveUrl || urlFromHtml(effectiveHtml) || "").trim();
-    if (!targetUrl) return setError("Enter the page URL (the bracket or athlete page the clients use as their source).");
-    if (!effectiveHtml.trim()) return setError("Paste the page's HTML, or send the page from your browser with the bookmarklet.");
+    setPreview(null);
+    const t = targetOrError();
+    if (!t) return;
     setBusy(true);
     try {
-      const res = await fetch("/api/import", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: targetUrl, html: effectiveHtml }) });
-      const body = (await res.json().catch(() => null)) as ImportResponse | null;
-      if (!res.ok || !body || body.ok !== true) {
-        const msg = body && "error" in body ? body.error : `Import failed (${res.status}).`;
-        setError(msg);
+      const res = await fetch("/api/import?preview=1", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(t) });
+      const body = (await res.json().catch(() => null)) as ImportPreview | { error: string; code: string; candidates?: string[] } | null;
+      if (!res.ok || !body || !("ok" in body) || body.ok !== true) {
+        setError(body && "error" in body ? body.error : `Preview failed (${res.status}).`);
         if (body && "candidates" in body && Array.isArray(body.candidates)) setCandidates(body.candidates);
         return;
       }
+      setPreview(body);
+    } catch {
+      setError("Network problem while reading the page. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Step 2: apply the previewed page to its clients. */
+  async function apply() {
+    if (!preview) return;
+    setError(null);
+    setBusy(true);
+    try {
+      const res = await fetch("/api/import", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: preview.url, html: effectiveHtml }) });
+      const body = (await res.json().catch(() => null)) as ImportResponse | null;
+      if (!res.ok || !body || body.ok !== true) {
+        setError(body && "error" in body ? body.error : `Import failed (${res.status}).`);
+        return;
+      }
       setResult(body);
+      setPreview(null);
       if (pending) clearPendingImport();
       setHtml("");
     } catch {
@@ -94,7 +132,7 @@ export function ImportPage({ appOrigin, initialUrl }: Props) {
     <div className="space-y-4">
       <section className="card p-4">
         <p className="eyebrow">Why this exists</p>
-        <p className="mt-1 text-sm text-muted">When the source site asks for a human check (CAPTCHA) the app cannot read it for you. Open the page yourself, pass the check, then hand the page over here. The schedule is read from what your browser already loaded; nothing is fetched by the server.</p>
+        <p className="mt-1 text-sm text-muted">Your browser can open this page, but our automatic worker is blocked by the site&rsquo;s security check. Import the schedule you can see to update your clients. The data is a snapshot from the moment you capture it, not a live connection, so re-import when you need fresh times.</p>
       </section>
 
       {pending ? (
@@ -103,8 +141,8 @@ export function ImportPage({ appOrigin, initialUrl }: Props) {
           <p className="mt-1 break-all text-sm font-semibold text-ink">{pending.url}</p>
           <p className="mt-1 text-xs text-muted">{formatBytes(pending.html.length)} of HTML{pending.receivedAt ? ` · received ${new Date(pending.receivedAt).toLocaleTimeString()}` : ""}</p>
           <div className="mt-3 flex flex-wrap gap-2">
-            <button type="button" className="btn-primary" onClick={submit} disabled={busy}>{busy ? "Importing…" : "Import this page"}</button>
-            <button type="button" className="btn-ghost" onClick={() => clearPendingImport()} disabled={busy}>Discard</button>
+            <button type="button" className="btn-primary" onClick={runPreview} disabled={busy}>{busy ? "Reading…" : "Preview import"}</button>
+            <button type="button" className="btn-ghost" onClick={() => { clearPendingImport(); setPreview(null); }} disabled={busy}>Discard</button>
           </div>
         </section>
       ) : (
@@ -119,7 +157,7 @@ export function ImportPage({ appOrigin, initialUrl }: Props) {
             </FormField>
             <div className="flex flex-wrap gap-2">
               <button type="button" className="btn-secondary" onClick={pasteFromClipboard} disabled={busy}>Paste from clipboard</button>
-              <button type="button" className="btn-primary" onClick={submit} disabled={busy}>{busy ? "Importing…" : "Import"}</button>
+              <button type="button" className="btn-primary" onClick={runPreview} disabled={busy}>{busy ? "Reading…" : "Preview import"}</button>
             </div>
           </div>
         </section>
@@ -139,10 +177,45 @@ export function ImportPage({ appOrigin, initialUrl }: Props) {
         </div>
       )}
 
+      {preview && (
+        <section className="card border-2 border-primary p-4" aria-live="polite">
+          <p className="eyebrow">Preview — nothing saved yet</p>
+          <p className="mt-1 text-sm font-semibold text-ink">
+            {preview.found} client{preview.found === 1 ? "" : "s"} on this page · {preview.withMatches} with matches
+            {preview.notFound > 0 ? ` · ${preview.notFound} not found` : ""}
+          </p>
+          <p className="mt-0.5 break-all text-xs text-muted">{preview.url}</p>
+          <p className="mt-0.5 text-xs text-muted">Captured {new Date(preview.capturedAt).toLocaleTimeString()} — snapshot, not live.</p>
+          <ul className="mt-3 divide-y divide-line">
+            {preview.rows.map((r: ImportPreviewRow) => {
+              const ok = r.status === "OK";
+              return (
+                <li key={r.athleteId} className="flex items-start gap-3 py-2">
+                  <span className={cn("mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold", ok ? "bg-success/15 text-success" : "bg-amber-50 text-amber-700")} aria-hidden>{ok ? <CheckIcon size={14} /> : "!"}</span>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold text-ink">{r.name}{r.eventName ? <span className="font-normal text-muted"> · {r.eventName}</span> : null}</p>
+                    <p className="text-xs text-muted">{ok ? `${r.matches} match${r.matches === 1 ? "" : "es"} found` : watchStateCopy(r.status, r.message, r.code)}</p>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button type="button" className="btn-primary" onClick={apply} disabled={busy}>{busy ? "Applying…" : `Apply to ${preview.found} client${preview.found === 1 ? "" : "s"}`}</button>
+            <button type="button" className="btn-ghost" onClick={() => setPreview(null)} disabled={busy}>Cancel</button>
+          </div>
+        </section>
+      )}
+
       {result && (
         <section className="card p-4" aria-live="polite">
           <p className="eyebrow">Imported</p>
-          <p className="mt-1 text-sm text-muted">{result.matched} client{result.matched === 1 ? "" : "s"} updated from <span className="break-all">{result.url}</span></p>
+          <p className="mt-1 text-sm font-semibold text-ink">
+            Updated {result.results.filter((r) => r.status === "OK").length} of {result.matched} client{result.matched === 1 ? "" : "s"}
+            {result.results.filter((r) => r.status === "ATHLETE_NOT_FOUND").length > 0 ? `; ${result.results.filter((r) => r.status === "ATHLETE_NOT_FOUND").length} not found` : ""}
+          </p>
+          <p className="mt-0.5 break-all text-xs text-muted">{result.url}</p>
+          <p className="mt-0.5 text-xs text-muted">Imported at {new Date(result.checkedAt).toLocaleTimeString()} — snapshot, not live.</p>
           <ul className="mt-3 divide-y divide-line">
             {result.results.map((r) => {
               const ok = r.status === "OK";
