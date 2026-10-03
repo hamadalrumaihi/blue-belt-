@@ -46,10 +46,14 @@ export function buildRefreshPlan(existing: MatchRow[], result: WatchResult, chec
   const empty: RefreshPlan = { ok, updates: [], inserts: [], history: [], touchIds: [], preview: existing, ambiguous: 0 };
 
   // Any non-OK outcome keeps what we know. A successful read with no rows
-  // (schedule not published yet) also keeps the previous rows: the organiser
-  // may have temporarily unpublished, and the user controls deletion.
+  // (schedule not published yet, or athlete not found) also keeps the previous
+  // rows: the organiser may have temporarily unpublished, and the user controls
+  // deletion. Crucially it does NOT re-stamp the kept rows' last_checked_at: an
+  // empty read did not verify those matches, so their freshness must keep
+  // reflecting the last time each was actually seen. (athlete-level
+  // last_attempt_at / last_success_at still record that the source was read.)
   if (!ok || result.status !== "OK" || !result.matches.length) {
-    return ok ? { ...empty, touchIds: existing.map((m) => m.id) } : empty;
+    return empty;
   }
 
   const pool = [...existing];
@@ -90,8 +94,10 @@ export function buildRefreshPlan(existing: MatchRow[], result: WatchResult, chec
     }
   }
 
-  plan.touchIds = pool.map((m) => m.id);
-  plan.preview.push(...pool.map((m) => ({ ...m, last_checked_at: checkedAt })));
+  // Rows the source no longer lists were not seen in this read, so they are
+  // kept as last-known WITHOUT advancing last_checked_at (which means "last
+  // verified"). They age into Stale on their own, truthfully.
+  plan.preview.push(...pool);
   return plan;
 }
 
