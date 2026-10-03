@@ -341,9 +341,40 @@ Colour language: green = healthy/upcoming, amber = approaching, orange = very so
 - **Alerts** are announced once per threshold crossing (30 → 15 → 5 → GO TO MAT) through `aria-live` regions (assertive for danger, polite otherwise); banners stay until dismissed.
 - **Settings** are cached per device in localStorage and synced to `photo_user_settings` so another device starts from the same preferences.
 
+## Collaboration and coverage
+
+A photographer (event owner) can invite collaborators to an event and assign
+each client to a photographer and/or a videographer:
+
+- **Invite / remove** collaborators by email on the event page (they need an
+  account already; `SUPABASE_SERVICE_ROLE_KEY` resolves the email server-side).
+- **Assign** a photographer / videographer per client on the client page.
+- **Photos done** and **Video done** are separate, independently togglable,
+  timestamped and attributed; tapping again undoes them. Completion is kept
+  apart from the competition match status and is never cleared by a refresh.
+- **Collaborators** see only `/coverage`: their events and the clients assigned
+  to them, with mat, time, opponent and status — never phone, email, academy,
+  package or notes. Removing a collaborator clears their assignments and stops
+  their reads and writes immediately.
+
+This is enforced in Postgres, not just the UI: collaborators reach data only
+through SECURITY DEFINER functions (`photo_collaborator_board`,
+`photo_collaborator_events`, `photo_set_coverage_done`) scoped to
+`auth.uid()`; existing table policies are unchanged. See
+`supabase/migrations/20261003000000_collaboration_coverage.sql` and the
+authorization test `supabase/tests/coverage_rls.test.sql`.
+
 ## Notifications and payments
 
 - **Telegram** (grammY) is implemented behind `TELEGRAM_ENABLED=1` + `TELEGRAM_BOT_TOKEN`; see [docs/telegram.md](docs/telegram.md). In-app alerts are independent of it.
+- **Operational alerts.** Besides match alerts, Telegram now reports operational
+  incidents (Cloudflare challenge, worker unavailable, source timeout, athlete
+  not found, parse/persist errors) with the reason, last-verified time, whether
+  previous data was retained, a next action, an app link and a correlation id,
+  plus a recovery message when the incident clears. Shared-source failures are
+  grouped and each incident notifies once (`photo_incidents` +
+  `src/lib/notifications/incidents.ts`). Set `NEXT_PUBLIC_SITE_URL` so the
+  messages can link back to the app.
 - **MyFatoorah** is prepared behind `PAYMENTS_MYFATOORAH_ENABLED=1` (state machine, webhook signature verification, idempotent webhook deliveries, reconciliation); no checkout, invoices or Pic-Time integration exist, and paid bookings never create clients automatically. See [docs/payments.md](docs/payments.md).
 
 ## Testing and CI
@@ -364,7 +395,9 @@ npm run build
 - The parser has only been exercised on synthetic AJP-style markup and the public listing pages. Tune it against a real schedule page once the worker can see one.
 - In-app auto-refresh runs only while the app is open; the worker's scheduler + `/api/cron/refresh` covers locked phones once the service-role key and secrets are set.
 - Settings (timezone fallback, refresh interval, default platform, show completed, notification toggles, pinned event) are stored per device in `localStorage`, not in Supabase.
-- Single-owner model. RLS is per `owner_id`; team accounts would add a membership table and widen the policies.
+- Coverage completion is tracked per client per kind (Photos / Video), not per individual match; per-match completion is a possible future refinement.
+- Operational alerts notify on first occurrence and recovery; a reminder cadence for long-running incidents and an in-app "failed deliveries" view are not yet built.
+- Match freshness is now truthful per match (a match's "checked" time only advances when it is actually seen in a read); provenance labels (automatic / import / manual / last-known) are not yet persisted.
 - No payments, bookings, galleries, invoices or Pic-Time integration by design.
 
 ---
