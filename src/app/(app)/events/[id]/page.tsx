@@ -15,6 +15,8 @@ import { getEvent, listAthletes, listHistory } from "@/lib/queries";
 import { formatEventDate } from "@/lib/time";
 import { EventClientsList } from "./EventClientsList";
 import { EventDangerZone } from "./EventDangerZone";
+import { EventTeam } from "./EventTeam";
+import { loadEventTeam } from "@/lib/collaborator";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +31,7 @@ export default async function EventDetailPage({ params }: PageProps<"/events/[id
   const event = await getEvent(id);
   if (!event) notFound();
 
-  const [athletes, history] = await Promise.all([listAthletes(id), listHistory({ eventId: id, limit: 30 })]);
+  const [athletes, history, team] = await Promise.all([listAthletes(id), listHistory({ eventId: id, limit: 30 }), loadEventTeam(id)]);
   const ranked = rankAthletes(athletes);
   const matchCount = athletes.reduce((n, a) => n + a.matches.length, 0);
   const next = ranked.find((r) => r.match && r.eta.bucket !== "COMPLETE" && r.eta.bucket !== "UNKNOWN");
@@ -76,6 +78,8 @@ export default async function EventDetailPage({ params }: PageProps<"/events/[id
               <ChangeHistory entries={history} timezone={event.timezone} />
               {history.length > 0 && <Link href={`/history?event=${event.id}`} className="btn-ghost mt-2 w-full text-primary">View full history</Link>}
             </section>
+
+            <EventTeam eventId={event.id} members={team} />
 
             <EventDangerZone eventId={event.id} eventName={event.name} clients={athletes.length} matches={matchCount} />
           </div>

@@ -137,6 +137,53 @@ export type PhotoEventMemberRow = {
   created_at: string;
 };
 
+/** Phase 4: per-client photo/video coverage assignment and completion. */
+export type PhotoCoverageRow = {
+  id: string;
+  owner_id: string;
+  event_id: string;
+  athlete_id: string;
+  photographer_id: string | null;
+  videographer_id: string | null;
+  photos_done_at: string | null;
+  photos_done_by: string | null;
+  videos_done_at: string | null;
+  videos_done_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Row shape of public.photo_collaborator_board (operational fields only). */
+export type CollaboratorBoardRow = {
+  athlete_id: string;
+  athlete_name: string;
+  division: string | null;
+  belt: string | null;
+  source_url: string | null;
+  assigned_photo: boolean;
+  assigned_video: boolean;
+  photos_done_at: string | null;
+  videos_done_at: string | null;
+  match_id: string | null;
+  mat: string | null;
+  opponent: string | null;
+  scheduled_at: string | null;
+  estimated_at: string | null;
+  status: string | null;
+  match_order: number | null;
+};
+
+/** Row shape of public.photo_collaborator_events. */
+export type CollaboratorEventRow = {
+  event_id: string;
+  name: string;
+  venue: string | null;
+  event_date: string | null;
+  timezone: string;
+  platform: string;
+  role: EventMemberRole;
+};
+
 // ---------------------------------------------------------------------------
 // Telegram notifications
 // ---------------------------------------------------------------------------
@@ -393,6 +440,15 @@ export type Database = {
         Update: Partial<PhotoEventMemberRow>;
         Relationships: [];
       };
+      photo_coverage: {
+        Row: PhotoCoverageRow;
+        Insert: Optional<
+          PhotoCoverageRow,
+          GeneratedCols | "photographer_id" | "videographer_id" | "photos_done_at" | "photos_done_by" | "videos_done_at" | "videos_done_by"
+        >;
+        Update: Partial<PhotoCoverageRow>;
+        Relationships: [];
+      };
       photo_telegram_links: {
         Row: PhotoTelegramLinkRow;
         Insert: Optional<PhotoTelegramLinkRow, GeneratedCols | "chat_id" | "chat_title" | "link_code" | "link_code_expires_at" | "linked_at" | "enabled">;
@@ -487,6 +543,22 @@ export type Database = {
       photo_ensure_owner_policies: {
         Args: { p_table: string };
         Returns: undefined;
+      };
+      photo_is_event_member: {
+        Args: { p_event_id: string };
+        Returns: boolean;
+      };
+      photo_collaborator_events: {
+        Args: Record<string, never>;
+        Returns: CollaboratorEventRow[];
+      };
+      photo_collaborator_board: {
+        Args: { p_event_id: string };
+        Returns: CollaboratorBoardRow[];
+      };
+      photo_set_coverage_done: {
+        Args: { p_athlete_id: string; p_kind: string; p_done: boolean };
+        Returns: PhotoCoverageRow;
       };
     };
     Enums: Record<string, never>;
