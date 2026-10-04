@@ -8,12 +8,14 @@
 do $$
 declare
   v_owner uuid;
-  v_other uuid := '00000000-0000-4000-8000-0000000000bb';
+  v_other uuid;
   v_count int;
   v_id uuid;
 begin
   select owner_id into v_owner from public.photo_events limit 1;
   if v_owner is null then raise exception 'seed an event owner before running'; end if;
+  select id into v_other from auth.users where id <> v_owner order by created_at limit 1;
+  if v_other is null then raise exception 'this test needs a second auth.users row (any other account)'; end if;
 
   insert into public.photo_captures (owner_id, capture_id, source_key, source_url, captured_at, content_hash, bytes, status)
     values (v_owner, 'cap-rls-1', 'ajptour.com|/event/1/bracket/2', 'https://ajptour.com/en/event/1/bracket/2', now(), 'h1', 10, 'applied')

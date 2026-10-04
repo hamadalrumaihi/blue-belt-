@@ -63,8 +63,8 @@ begin
   end if;
 
   v_is_owner := exists (select 1 from public.photo_events e where e.id = v.event_id and e.owner_id = auth.uid());
-  if p_kind = 'photo' and not (v_is_owner or v.photographer_id = auth.uid()) then raise exception 'not authorized for photo coverage' using errcode = '42501'; end if;
-  if p_kind = 'video' and not (v_is_owner or v.videographer_id = auth.uid()) then raise exception 'not authorized for video coverage' using errcode = '42501'; end if;
+  if p_kind = 'photo' and not (v_is_owner or (v.photographer_id is not distinct from auth.uid())) then raise exception 'not authorized for photo coverage' using errcode = '42501'; end if;
+  if p_kind = 'video' and not (v_is_owner or (v.videographer_id is not distinct from auth.uid())) then raise exception 'not authorized for video coverage' using errcode = '42501'; end if;
 
   -- Replay: the same command id was already applied for this owner.
   select * into v_prev from public.photo_coverage_commands c where c.owner_id = v.owner_id and c.command_id = p_command_id;

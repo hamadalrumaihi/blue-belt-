@@ -10,7 +10,7 @@ declare
   v_owner uuid;
   v_event uuid;
   v_athlete uuid;
-  v_outsider uuid := '00000000-0000-4000-8000-0000000000cc';
+  v_outsider uuid;
   v_cmd uuid := gen_random_uuid();
   v_cmd2 uuid := gen_random_uuid();
   v_res jsonb;
@@ -18,6 +18,8 @@ declare
 begin
   select owner_id into v_owner from public.photo_events limit 1;
   if v_owner is null then raise exception 'seed an event owner before running'; end if;
+  select id into v_outsider from auth.users where id <> v_owner order by created_at limit 1;
+  if v_outsider is null then raise exception 'this test needs a second auth.users row (any other account)'; end if;
   insert into public.photo_events (owner_id, name, platform, timezone) values (v_owner, 'TEST EVENT (rollback)', 'AJP', 'Asia/Qatar') returning id into v_event;
   insert into public.photo_athletes (owner_id, event_id, name, platform, active) values (v_owner, v_event, 'Test Athlete', 'AJP', true) returning id into v_athlete;
 
@@ -48,6 +50,12 @@ begin
   begin
     v_res := public.photo_apply_coverage_command(gen_random_uuid(), v_athlete, 'photo', true, null, false);
     raise exception 'FAIL outsider applied a coverage command';
+  exception when sqlstate '42501' then null;
+  end;
+  -- Regression (2026-10-04): with NO photographer assigned, the old check was NULL and let anyone through.
+  begin
+    perform public.photo_set_coverage_done(v_athlete, 'photo', true);
+    raise exception 'FAIL outsider completed unassigned coverage via photo_set_coverage_done';
   exception when sqlstate '42501' then null;
   end;
 

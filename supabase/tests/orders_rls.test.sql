@@ -8,13 +8,15 @@ do $$
 declare
   v_owner uuid;
   v_event uuid;
-  v_collab uuid := '00000000-0000-4000-8000-0000000000dd';
+  v_collab uuid;
   v_res jsonb;
   v_order uuid;
   v_count int;
 begin
   select owner_id into v_owner from public.photo_events limit 1;
   if v_owner is null then raise exception 'seed an event owner before running'; end if;
+  select id into v_collab from auth.users where id <> v_owner order by created_at limit 1;
+  if v_collab is null then raise exception 'this test needs a second auth.users row (any other account)'; end if;
   insert into public.photo_events (owner_id, name, platform, timezone) values (v_owner, 'TEST EVENT (rollback)', 'AJP', 'Asia/Qatar') returning id into v_event;
   insert into public.photo_event_members (event_id, user_id, role, invited_by) values (v_event, v_collab, 'photographer', v_owner);
 

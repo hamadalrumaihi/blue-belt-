@@ -1,10 +1,15 @@
 # Delivery report — phases A–F (improvement program, round 2)
 
-Branch `claude/hopeful-wright-t7jlm9`, six local commits on top of the
-reviewed `775879d` (PR #14). Nothing has been pushed, no hosted migration
-applied, nothing activated — those need the explicit go-ahead listed at the
-end, because production (Vercel) deploys from this branch and the new code
-depends on the new schema.
+Branch `claude/hopeful-wright-t7jlm9` on top of the reviewed `775879d`
+(PR #14). **Update 2026-10-04 (authorized "apply and push")**: all seven
+additive migrations are applied to `nuujdewnkovtdvlbfzdx` and verified; the
+branch is pushed and open as draft PR
+[hamadalrumaihi/blue-belt-#15](https://github.com/hamadalrumaihi/blue-belt-/pull/15);
+the live SQL tests `captures_rls`, `coverage_commands`, `deliveries_claim`
+and `orders_rls` all passed against the hosted database (`ROLLBACK_OK`). Running
+them found and fixed a real authorization bug (see A/C rows and
+`20261004060000_coverage_authz_null_fix.sql`). Feature flags
+(`ORDERS_INTAKE_ENABLED`, payments) remain off.
 
 ## 1. Status ledger
 
@@ -17,23 +22,23 @@ real source. **Blocked**: cannot be completed from here, with the dependency.
 | # | Item | Implemented | Locally verified | Live verified | Blocked / notes |
 | --- | --- | --- | --- | --- | --- |
 | A1 | Source identity preserving bracket / category params (`src/lib/capture/source-identity.ts`) | ✅ | ✅ | — | — |
-| A2 | Capture ledger `photo_captures`: capture-id replay, out-of-order refusal, timing plausibility, final-URL check, redacted diagnostics | ✅ | ✅ | ❌ | migration `20261004000000` not applied (authorization) |
+| A2 | Capture ledger `photo_captures`: capture-id replay, out-of-order refusal, timing plausibility, final-URL check, redacted diagnostics | ✅ | ✅ | ✅ schema + RLS (`captures_rls` live) | end-to-end import after deploy still to observe |
 | A3 | Capture once per owner+source in batch refreshes | ✅ | ✅ | — | — |
 | A4 | Worker bounded readiness + expansion with complete/partial/unknown | ✅ | ✅ (unit; no real browser in this sandbox) | ❌ | live source still serves an interactive challenge to the worker |
 | A5 | Bookmarklet / hand-over carry capture id + time; Import page replay / stale hints | ✅ | ✅ | ❌ | needs deploy |
-| B1 | Capture credentials (hash, expiry, revoke, event scope) + Settings card | ✅ | ✅ | ❌ | migration `20261004010000` |
+| B1 | Capture credentials (hash, expiry, revoke, event scope) + Settings card | ✅ | ✅ | ✅ schema | create one in Settings after deploy |
 | B2 | `POST /api/capture`, `GET /api/capture/jobs`, `POST /api/capture/heartbeat` | ✅ | ✅ | ❌ | needs deploy + credential |
 | B3 | Windows agent (`/agent`): session, one-minute jobs, spool, replay, backoff, pause on human check, clean stop | ✅ | ✅ (fake app; no Windows/Chrome here) | ❌ | needs a laptop at an event |
-| C1 | Offline coverage commands (persist-before-send, exact-ack delete, conflict) + `photo_apply_coverage_command` | ✅ | ✅ | ❌ | migration `20261004020000` |
-| C2 | Owner manual mat/time corrections with provenance, lifetime, explicit supersede | ✅ | ✅ | ❌ | same migration (re-creates `photo_apply_refresh`) |
-| D1 | Lease-based claim RPC + independent runner (`/api/cron/deliveries`, worker tick) | ✅ | ✅ | ❌ | migration `20261004030000`; worker env `DELIVERY_SECONDS` |
+| C1 | Offline coverage commands (persist-before-send, exact-ack delete, conflict) + `photo_apply_coverage_command` | ✅ | ✅ | ✅ RPC (`coverage_commands` live) | **bug fixed live**: unassigned kind let any user through (`photo_set_coverage_done` too) |
+| C2 | Owner manual mat/time corrections with provenance, lifetime, explicit supersede | ✅ | ✅ | ✅ schema (`photo_apply_refresh` re-created) | UI after deploy |
+| D1 | Lease-based claim RPC + independent runner (`/api/cron/deliveries`, worker tick) | ✅ | ✅ | ✅ RPC (`deliveries_claim` live) | worker needs a redeploy to pick up `DELIVERY_SECONDS` default |
 | D2 | 15/5-min reminders independent of captures, [Match]/[Orders]/[System] prefixes, dry run in tests | ✅ | ✅ | ❌ | — |
-| E1 | Orders intake contract + `POST /api/orders/intake` + `photo_record_order` (atomic outbox) | ✅ | ✅ (synthetic fixtures) | ❌ | migration `20261004040000`; **real Pic-Time payload never seen** — mapping is a proposal |
+| E1 | Orders intake contract + `POST /api/orders/intake` + `photo_record_order` (atomic outbox) | ✅ | ✅ (synthetic fixtures) | ✅ RPC + RLS (`orders_rls` live) | flag off; **real Pic-Time payload never seen** — mapping is a proposal |
 | E2 | Owner-only `/orders` pages, offline-payment confirmation, RLS test | ✅ | ✅ | ❌ | — |
 | F1 | Regressions (invalid-before-valid, failed→success, late failure, signature≠paid, unmatched invoice, isolation) | ✅ | ✅ | — | — |
-| F2 | Atomic `photo_apply_payment_transition` + confirmation job `/api/cron/payments` | ✅ | ✅ | ❌ | migration `20261004050000`; production payments **off** by design |
+| F2 | Atomic `photo_apply_payment_transition` + confirmation job `/api/cron/payments` | ✅ | ✅ | ✅ schema | production payments **off** by design |
 | F3 | Fulfilment | shipped **disabled** | ✅ | — | dependency: verified Pic-Time order-approval integration |
-| S | SQL isolation / concurrency tests (`supabase/tests/*.sql`) | ✅ written | ❌ not executed here | ❌ | need a disposable Postgres with one seeded owner |
+| S | SQL isolation / concurrency tests (`supabase/tests/*.sql`) | ✅ | ✅ | ✅ 4 of 5 run live (`ROLLBACK_OK`); `coverage_rls` unchanged from PR #14 | tests need two `auth.users` rows |
 
 ## 2. What changed (per phase)
 
@@ -55,7 +60,14 @@ supabase/migrations/20261004020000_coverage_commands_and_overrides.sql
 supabase/migrations/20261004030000_delivery_runner.sql
 supabase/migrations/20261004040000_orders_intake.sql
 supabase/migrations/20261004050000_payment_transition_rpc.sql
+supabase/migrations/20261004060000_coverage_authz_null_fix.sql   (added after the live SQL tests)
 ```
+
+**Applied 2026-10-04** to `nuujdewnkovtdvlbfzdx` through the Supabase MCP in
+statement groups (the `drop constraint if exists` on the deliveries status
+check ran without the earlier hang). Verified: 3 new tables, 5 functions
+present, override / lease / order columns present, status check includes
+`sending`.
 
 - Supabase CLI present in the sandbox: `npx supabase --version` → `2.119.0`.
   Normal path: `supabase link --project-ref nuujdewnkovtdvlbfzdx && supabase db push`
@@ -138,11 +150,11 @@ than before (capture-once).
    (dependency named); production payments and reconciliation calls (flags
    off); real Pic-Time payload mapping (proposal + synthetic fixtures until a
    Zap test run shows the true fields).
-4. **Blocked, needs you**: (a) authorization to apply the six additive
-   migrations to `nuujdewnkovtdvlbfzdx`; (b) authorization to push this
-   branch (auto-deploys production) — in that order; (c) a Windows laptop +
-   event to live-verify the agent; (d) a Pic-Time test order through Zapier;
-   (e) MyFatoorah test-portal run per the activation procedure.
+4. **Blocked, needs you**: (a) ~~apply migrations~~ done; (b) ~~push~~ done
+   (draft PR #15); (c) a Windows laptop + event to live-verify the agent;
+   (d) a Pic-Time test order through Zapier; (e) MyFatoorah test-portal run
+   per the activation procedure; (f) redeploy the Railway worker so the
+   delivery tick starts, and set `NEXT_PUBLIC_SITE_URL` on Vercel.
 5. **Risks**: the delivery runner replaces inline sending — until the worker
    has `DELIVERY_SECONDS` (default on when `SCHEDULE_SECONDS` is set) or
    another cron calls `/api/cron/deliveries`, retries and reminders wait and

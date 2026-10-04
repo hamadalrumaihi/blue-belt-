@@ -77,12 +77,12 @@ begin
   if not found then raise exception 'no coverage for athlete' using errcode='P0002'; end if;
   v_is_owner := exists (select 1 from public.photo_events e where e.id = v.event_id and e.owner_id = auth.uid());
   if p_kind = 'photo' then
-    if not (v_is_owner or v.photographer_id = auth.uid()) then raise exception 'not authorized for photo coverage' using errcode='42501'; end if;
+    if not (v_is_owner or (v.photographer_id is not distinct from auth.uid())) then raise exception 'not authorized for photo coverage' using errcode='42501'; end if;
     update public.photo_coverage set photos_done_at = case when p_done then now() else null end,
       photos_done_by = case when p_done then auth.uid() else null end, updated_at = now()
       where athlete_id = p_athlete_id returning * into v;
   else
-    if not (v_is_owner or v.videographer_id = auth.uid()) then raise exception 'not authorized for video coverage' using errcode='42501'; end if;
+    if not (v_is_owner or (v.videographer_id is not distinct from auth.uid())) then raise exception 'not authorized for video coverage' using errcode='42501'; end if;
     update public.photo_coverage set videos_done_at = case when p_done then now() else null end,
       videos_done_by = case when p_done then auth.uid() else null end, updated_at = now()
       where athlete_id = p_athlete_id returning * into v;
