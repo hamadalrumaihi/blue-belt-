@@ -11,7 +11,10 @@ import { createHash, randomBytes } from "node:crypto";
  */
 
 export const TOKEN_PREFIX = "bbmc";
-const TOKEN_RE = /^bbmc_[A-Za-z0-9]{8}_[A-Za-z0-9]{40}$/;
+/** Orders intake credentials (Zapier → Pic-Time orders) carry a different prefix so a mix-up is visible. */
+export const ORDERS_TOKEN_PREFIX = "bbmo";
+export type CredentialKind = "capture" | "orders";
+const TOKEN_RE = /^bbm[co]_[A-Za-z0-9]{8}_[A-Za-z0-9]{40}$/;
 const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
 export type CredentialStateInput = { expires_at: string; revoked_at: string | null; scope_source_keys: string[] | null };
@@ -24,10 +27,15 @@ function randomString(length: number): string {
   return out;
 }
 
-export function generateCaptureToken(): { token: string; prefix: string; hash: string } {
-  const prefix = `${TOKEN_PREFIX}_${randomString(8)}`;
+export function generateCaptureToken(kind: CredentialKind = "capture"): { token: string; prefix: string; hash: string } {
+  const prefix = `${kind === "orders" ? ORDERS_TOKEN_PREFIX : TOKEN_PREFIX}_${randomString(8)}`;
   const token = `${prefix}_${randomString(40)}`;
   return { token, prefix, hash: hashCaptureToken(token) };
+}
+
+/** The kind a token's prefix claims (the stored row's kind is what is enforced). */
+export function tokenKind(token: string): CredentialKind {
+  return token.startsWith(`${ORDERS_TOKEN_PREFIX}_`) ? "orders" : "capture";
 }
 
 export function hashCaptureToken(token: string): string {

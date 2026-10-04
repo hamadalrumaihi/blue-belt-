@@ -431,6 +431,20 @@ authorization test `supabase/tests/coverage_rls.test.sql`.
   history entry when the source itself changes that field.
   `src/lib/manual-correction.ts`, `tests/manual-correction.test.ts`.
 
+## Orders (Pic-Time via Zapier, Phase E)
+
+Feature-flagged (`ORDERS_INTAKE_ENABLED=1`) JSON intake at
+`POST /api/orders/intake`, authenticated with an **orders intake credential**
+(`bbmo_…`, Settings → Orders intake) — distinct from payment-provider webhooks
+and from the capture agent's credentials. It records the order atomically with
+its **[Orders]** Telegram outbox row (`photo_record_order`), dedupes Zap
+retries by `(owner, source, externalRef)`, never invents prices, and stores
+Fawran / bank-transfer / cash orders as **"Order placed — payment not yet
+confirmed"** until the owner confirms by hand. Owner-only `/orders` list and
+detail pages; buyers stay apart from tracked athletes; collaborators cannot
+read orders (RLS test). Proposed contract, Zapier field mapping and synthetic
+fixtures: [docs/orders-intake.md](docs/orders-intake.md).
+
 ## Notifications and payments
 
 - **Telegram** (grammY) is implemented behind `TELEGRAM_ENABLED=1` + `TELEGRAM_BOT_TOKEN`; see [docs/telegram.md](docs/telegram.md). In-app alerts are independent of it.

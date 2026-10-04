@@ -13,6 +13,7 @@ export async function CaptureAgentSection() {
     data: { user },
   } = await supabase.auth.getUser();
   const now = new Date();
-  const state = user ? await loadCaptureAgentState(supabase, user.id, now) : EMPTY_CAPTURE_AGENT_STATE;
+  const all = user ? await loadCaptureAgentState(supabase, user.id, now) : EMPTY_CAPTURE_AGENT_STATE;
+  const state = { ...all, credentials: all.credentials.filter((c) => c.kind === "capture") };
   return <CaptureAgentSettings configured={isServiceClientConfigured()} state={state} now={now.toISOString()} />;
 }

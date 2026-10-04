@@ -1,0 +1,13 @@
+{
+  "_fixture": "SYNTHETIC — shaped after the proposed contract in docs/orders-intake.md, NOT a real Pic-Time payload",
+  "source": "pictime",
+  "orderNumber": "PT-2026-000124",
+  "buyerName": "Khalid Al-Thani",
+  "buyerPhone": "+974 5555 0101",
+  "galleryName": "Qatar National Pro 2026",
+  "items": [{ "title": "Digital download — single match", "qty": "1", "price": "120" }],
+  "total": "120.00",
+  "currency": "QAR",
+  "paymentMethod": "Fawran (offline transfer)",
+  "paymentStatus": "Paid"
+}

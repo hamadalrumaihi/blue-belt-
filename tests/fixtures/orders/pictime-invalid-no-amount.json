@@ -1,0 +1,6 @@
+{
+  "_fixture": "SYNTHETIC — an order notification without an amount must be refused (prices are never invented)",
+  "source": "pictime",
+  "externalRef": "PT-2026-000125",
+  "buyer": { "name": "No Amount" }
+}

@@ -6,7 +6,7 @@ import type { Database, PhotoCaptureCredentialRow } from "@/lib/supabase/databas
 import { createServiceClient, isServiceClientConfigured } from "@/lib/supabase/service";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { findCredentialByToken } from "./credential-store";
-import { parseCaptureBearer } from "./credentials";
+import { parseCaptureBearer, type CredentialKind } from "./credentials";
 
 /**
  * Shared front door for the machine-intake routes (/api/capture/*): resolves
@@ -16,7 +16,7 @@ import { parseCaptureBearer } from "./credentials";
  */
 export type IntakeContext = { supabase: SupabaseClient<Database>; credential: PhotoCaptureCredentialRow; log: Logger; headers: Record<string, string>; now: Date };
 
-export async function authenticateIntake(request: Request, route: string, requestId: string, log: Logger = createLogger({ route })): Promise<{ ok: true; ctx: IntakeContext } | { ok: false; response: NextResponse }> {
+export async function authenticateIntake(request: Request, route: string, requestId: string, log: Logger = createLogger({ route }), requiredKind: CredentialKind = "capture"): Promise<{ ok: true; ctx: IntakeContext } | { ok: false; response: NextResponse }> {
   const headers = { "cache-control": "no-store", "x-request-id": requestId };
   const now = new Date();
   const fail = (status: number, code: string, error: string, extra: Record<string, string> = {}) => ({ ok: false as const, response: NextResponse.json({ error, code }, { status, headers: { ...headers, ...extra } }) });
@@ -37,6 +37,10 @@ export async function authenticateIntake(request: Request, route: string, reques
     log.warn("capture.auth_rejected", { reason: lookup.reason });
     if (lookup.reason === "UNKNOWN") return fail(401, "UNAUTHORIZED", "Unknown capture credential.");
     return fail(401, lookup.reason === "expired" ? "CREDENTIAL_EXPIRED" : "CREDENTIAL_REVOKED", lookup.reason === "expired" ? "This capture credential has expired. Create a new one in Settings." : "This capture credential was revoked.");
+  }
+  if ((lookup.credential.kind ?? "capture") !== requiredKind) {
+    log.warn("capture.auth_rejected", { reason: "wrong_kind", kind: lookup.credential.kind });
+    return fail(403, "WRONG_CREDENTIAL_KIND", requiredKind === "orders" ? "This endpoint needs an orders intake credential (bbmo_…)." : "This endpoint needs a capture credential (bbmc_…).");
   }
   const limit = rateLimit(`capture:${lookup.credential.id}`, RULES.capturePerCredential);
   if (!limit.ok) return fail(429, "RATE_LIMITED", `Too many captures. Try again in ${limit.retryAfterSeconds}s.`, rateLimitHeaders(limit));

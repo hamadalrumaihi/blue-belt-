@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { generateCaptureToken } from "@/lib/capture/credentials";
+import { generateCaptureToken, type CredentialKind } from "@/lib/capture/credentials";
 import { sourceKey } from "@/lib/capture/source-identity";
 import { createClient } from "@/lib/supabase/server";
 import { isUuid } from "@/lib/validation";
@@ -16,13 +16,17 @@ export type CredentialActionResult = { ok: true } | { ok: false; error: string }
 export type CreateCredentialResult = { ok: true; token: string; expiresAt: string; name: string } | { ok: false; error: string };
 
 export const MAX_CREDENTIAL_DAYS = 14;
+/** Orders intake credentials live in a Zap and are rotated less often. */
+export const MAX_ORDERS_CREDENTIAL_DAYS = 365;
 
-export async function createCaptureCredential(input: { name: string; days: number; eventId?: string | null }): Promise<CreateCredentialResult> {
+export async function createCaptureCredential(input: { name: string; days: number; eventId?: string | null; kind?: CredentialKind }): Promise<CreateCredentialResult> {
+  const kind: CredentialKind = input.kind === "orders" ? "orders" : "capture";
   const name = String(input.name ?? "").trim().slice(0, 60);
-  if (!name) return { ok: false, error: "Give the credential a name (e.g. the laptop it runs on)." };
+  if (!name) return { ok: false, error: kind === "orders" ? "Give the credential a name (e.g. “Zapier — Pic-Time orders”)." : "Give the credential a name (e.g. the laptop it runs on)." };
   const days = Number(input.days);
-  if (!Number.isInteger(days) || days < 1 || days > MAX_CREDENTIAL_DAYS) return { ok: false, error: `Expiry must be between 1 and ${MAX_CREDENTIAL_DAYS} days.` };
-  const eventId = input.eventId ?? null;
+  const maxDays = kind === "orders" ? MAX_ORDERS_CREDENTIAL_DAYS : MAX_CREDENTIAL_DAYS;
+  if (!Number.isInteger(days) || days < 1 || days > maxDays) return { ok: false, error: `Expiry must be between 1 and ${maxDays} days.` };
+  const eventId = kind === "orders" ? null : input.eventId ?? null;
   if (eventId !== null && !isUuid(eventId)) return { ok: false, error: "Invalid event." };
 
   const supabase = await createClient();
@@ -40,9 +44,9 @@ export async function createCaptureCredential(input: { name: string; days: numbe
     scopeSourceKeys = [...new Set((athletes ?? []).map((a) => sourceKey(a.source_url)).filter((k): k is string => Boolean(k)))];
   }
 
-  const { token, prefix, hash } = generateCaptureToken();
+  const { token, prefix, hash } = generateCaptureToken(kind);
   const expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
-  const { error } = await supabase.from("photo_capture_credentials").insert({ owner_id: user.id, name, token_hash: hash, token_prefix: prefix, scope_source_keys: scopeSourceKeys, scope_event_id: eventId, expires_at: expiresAt });
+  const { error } = await supabase.from("photo_capture_credentials").insert({ owner_id: user.id, name, kind, token_hash: hash, token_prefix: prefix, scope_source_keys: scopeSourceKeys, scope_event_id: eventId, expires_at: expiresAt });
   if (error) return { ok: false, error: error.message };
   revalidatePath("/settings");
   return { ok: true, token, expiresAt, name };

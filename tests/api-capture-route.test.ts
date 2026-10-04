@@ -33,6 +33,7 @@ function credential(overrides: Partial<PhotoCaptureCredentialRow> = {}): PhotoCa
     id: "cccccccc-0000-4000-8000-000000000001",
     owner_id: OWNER,
     name: "Event laptop",
+    kind: "capture",
     token_hash: "h",
     token_prefix: "bbmc_xxxxxxxx",
     scope_source_keys: null,
@@ -99,6 +100,14 @@ describe("POST /api/capture (machine intake)", () => {
     expect((await capture(post("/api/capture", body, "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.sig"))).status).toBe(401);
     findMock.mockResolvedValueOnce({ ok: false, reason: "UNKNOWN" });
     expect((await capture(post("/api/capture", body))).status).toBe(401);
+    expect(importMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses an orders intake credential on the capture endpoints", async () => {
+    findMock.mockResolvedValueOnce({ ok: true, credential: credential({ kind: "orders" }) });
+    const res = await capture(post("/api/capture", body));
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: "WRONG_CREDENTIAL_KIND" });
     expect(importMock).not.toHaveBeenCalled();
   });
 

@@ -1,0 +1,16 @@
+{
+  "_fixture": "SYNTHETIC — shaped after the proposed contract in docs/orders-intake.md, NOT a real Pic-Time payload",
+  "source": "pictime",
+  "externalRef": "PT-2026-000123",
+  "placedAt": "2026-03-14T06:12:00Z",
+  "buyer": { "name": "Fatima Al-Kuwari", "email": "Fatima@example.com", "phone": "+974 5555 0100" },
+  "gallery": { "name": "Qatar National Pro 2026", "id": "g_8812" },
+  "items": [
+    { "name": "Digital download — full match set", "quantity": 1, "unitAmount": 250, "sku": "DL-FULL" },
+    { "name": "Print 20x30", "quantity": 2, "unitAmount": 60 }
+  ],
+  "amount": { "value": 370, "currency": "QAR" },
+  "payment": { "method": "Credit card", "state": "Paid", "reference": "ch_synthetic_01" },
+  "notes": "Please include the podium shot.",
+  "athleteNameHint": "Hamad Al Rumaihi"
+}

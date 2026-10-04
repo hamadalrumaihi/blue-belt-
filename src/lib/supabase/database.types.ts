@@ -242,6 +242,8 @@ export type PhotoCaptureCredentialRow = {
   id: string;
   owner_id: string;
   name: string;
+  /** capture (Windows agent) | orders (Zapier / Pic-Time intake). */
+  kind: "capture" | "orders";
   token_hash: string;
   token_prefix: string;
   scope_source_keys: string[] | null;
@@ -392,6 +394,22 @@ export type PhotoOrderRow = {
   paid_at: string | null;
   approved_in_pictime_at: string | null;
   metadata: Json;
+  /** Phase E: intake provenance and payment situation (separate from the lifecycle `status`). */
+  source: string;
+  external_ref: string | null;
+  payment_method: string;
+  payment_state: string;
+  payment_reference: string | null;
+  payment_reported_state: string | null;
+  items: Json;
+  placed_at: string | null;
+  received_at: string | null;
+  buyer_note: string | null;
+  athlete_name_hint: string | null;
+  raw: Json;
+  payment_confirmed_at: string | null;
+  payment_confirmed_by: string | null;
+  fulfilled_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -546,7 +564,7 @@ export type Database = {
         Row: PhotoCaptureCredentialRow;
         Insert: Optional<
           PhotoCaptureCredentialRow,
-          GeneratedCols | "scope_source_keys" | "scope_event_id" | "revoked_at" | "last_used_at" | "use_count" | "last_heartbeat_at" | "agent_version" | "agent_status"
+          GeneratedCols | "kind" | "scope_source_keys" | "scope_event_id" | "revoked_at" | "last_used_at" | "use_count" | "last_heartbeat_at" | "agent_version" | "agent_status"
         >;
         Update: Partial<PhotoCaptureCredentialRow>;
         Relationships: [];
@@ -640,6 +658,21 @@ export type Database = {
           | "paid_at"
           | "approved_in_pictime_at"
           | "metadata"
+          | "source"
+          | "external_ref"
+          | "payment_method"
+          | "payment_state"
+          | "payment_reference"
+          | "payment_reported_state"
+          | "items"
+          | "placed_at"
+          | "received_at"
+          | "buyer_note"
+          | "athlete_name_hint"
+          | "raw"
+          | "payment_confirmed_at"
+          | "payment_confirmed_by"
+          | "fulfilled_at"
         >;
         Update: Partial<PhotoOrderRow>;
         Relationships: [];
@@ -674,6 +707,10 @@ export type Database = {
       photo_claim_notification_deliveries: {
         Args: { p_channel: string; p_limit: number; p_lease_seconds: number; p_worker: string; p_owner_id?: string | null };
         Returns: PhotoNotificationDeliveryRow[];
+      };
+      photo_record_order: {
+        Args: { p_owner_id: string; p_order: Json; p_delivery?: Json | null };
+        Returns: Json;
       };
       photo_apply_coverage_command: {
         Args: { p_command_id: string; p_athlete_id: string; p_kind: string; p_done: boolean; p_expected_done_at: string | null; p_force?: boolean };

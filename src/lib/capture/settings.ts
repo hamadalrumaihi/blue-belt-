@@ -8,6 +8,7 @@ type Client = SupabaseClient<Database>;
 export type CredentialView = {
   id: string;
   name: string;
+  kind: "capture" | "orders";
   prefix: string;
   state: CredentialState;
   expiresAt: string;
@@ -39,6 +40,7 @@ export async function loadCaptureAgentState(supabase: Client, ownerId: string, n
     return {
       id: r.id,
       name: r.name,
+      kind: r.kind ?? "capture",
       prefix: r.token_prefix,
       state: credentialState(r, now),
       expiresAt: r.expires_at,
