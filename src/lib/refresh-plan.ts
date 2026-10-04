@@ -1,4 +1,5 @@
 import { detectChanges, mergeMatch, type DetectedChange } from "./changes";
+import { CLEAR_OVERRIDE, overrideSuperseded } from "./manual-correction";
 import { takeMatching } from "./match-identity";
 import type { IdentityConfidence, Json } from "./supabase/database.types";
 import { DEFAULT_TIMEZONE } from "./time";
@@ -64,7 +65,24 @@ export function buildRefreshPlan(existing: MatchRow[], result: WatchResult, chec
 
     if (identity.kind === "match") {
       const previous = identity.row;
-      const patch = withConfidence(mergeMatch(previous, parsed, checkedAt), confidenceFor(previous, identity.confidence));
+      let patch = withConfidence(mergeMatch(previous, parsed, checkedAt), confidenceFor(previous, identity.confidence));
+      // An owner's manual correction is never silently overwritten: it is
+      // carried forward unless the SOURCE changed the corrected field, in which
+      // case it is dropped explicitly with its own history entry.
+      const superseded = overrideSuperseded(previous, { mat: parsed.mat, scheduledAt: parsed.scheduledAt });
+      if (superseded.mat || superseded.time) {
+        const keepMat = !superseded.mat && Boolean(previous.override_mat);
+        const keepTime = !superseded.time && Boolean(previous.override_scheduled_at);
+        patch = keepMat || keepTime
+          ? { ...patch, override_mat: keepMat ? previous.override_mat : null, override_scheduled_at: keepTime ? previous.override_scheduled_at : null }
+          : { ...patch, ...CLEAR_OVERRIDE };
+        plan.history.push({
+          change_type: "OVERRIDE_SUPERSEDED",
+          old_value: { value: superseded.mat ? previous.override_mat : previous.override_scheduled_at, label: superseded.mat ? `Manual ${previous.override_mat}` : `Manual ${describeTime(previous.override_scheduled_at, timezone)}` },
+          new_value: { value: superseded.mat ? parsed.mat : parsed.scheduledAt, label: superseded.mat ? `Source now says ${parsed.mat}` : `Source now says ${describeTime(parsed.scheduledAt, timezone)}` },
+          match_id: previous.id,
+        });
+      }
       plan.updates.push({ id: previous.id, patch });
       plan.preview.push({ ...previous, ...patch });
       for (const c of detectChanges(previous, parsed, timezone)) plan.history.push({ ...c, match_id: previous.id });
@@ -110,6 +128,13 @@ function confidenceFor(previous: MatchRow, matched: Exclude<IdentityConfidence, 
 
 function withConfidence(patch: Omit<MatchPatch, "identity_confidence">, identity_confidence: IdentityConfidence): MatchPatch {
   return { ...patch, identity_confidence };
+}
+
+function describeTime(iso: string | null, timezone: string): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return new Intl.DateTimeFormat("en-GB", { timeZone: timezone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(d);
 }
 
 export function describeParsed(m: NormalizedMatch, timezone: string): string {

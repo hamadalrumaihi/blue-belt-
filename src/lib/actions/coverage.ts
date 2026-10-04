@@ -51,6 +51,50 @@ export async function setCoverageDone(athleteId: string, kind: CoverageKind, don
   return { ok: true };
 }
 
+export type CoverageCommandInput = { commandId: string; athleteId: string; kind: CoverageKind; done: boolean; expectedDoneAt: string | null; force?: boolean };
+export type CoverageCommandResult =
+  | { ok: true; state: "saved"; doneAt: string | null; photosDoneAt: string | null; videosDoneAt: string | null; replayed?: boolean }
+  | { ok: false; state: "conflict"; serverDoneAt: string | null; error: string; photosDoneAt: string | null; videosDoneAt: string | null }
+  | { ok: false; state: "failed"; error: string; retryable: boolean };
+
+/**
+ * Applies one desired-state coverage command from the offline queue. The
+ * database re-checks the session and the assignment on every call, applies
+ * idempotently by command id, and reports a conflict when someone else
+ * changed the same kind since the client looked (unless forced).
+ */
+export async function applyCoverageCommand(input: CoverageCommandInput): Promise<CoverageCommandResult> {
+  if (!isUuid(input.commandId)) return { ok: false, state: "failed", error: "Invalid command id.", retryable: false };
+  if (!isUuid(input.athleteId)) return { ok: false, state: "failed", error: "Invalid client id.", retryable: false };
+  if (input.kind !== "photo" && input.kind !== "video") return { ok: false, state: "failed", error: "Invalid coverage kind.", retryable: false };
+  if (typeof input.done !== "boolean") return { ok: false, state: "failed", error: "done must be a boolean.", retryable: false };
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, state: "failed", error: "You are signed out.", retryable: false };
+
+  const { data, error } = await supabase.rpc("photo_apply_coverage_command", {
+    p_command_id: input.commandId,
+    p_athlete_id: input.athleteId,
+    p_kind: input.kind,
+    p_done: input.done,
+    p_expected_done_at: input.expectedDoneAt,
+    p_force: Boolean(input.force),
+  });
+  if (error) {
+    const authz = /not authorized|not signed in|no coverage|42501|P0002/i.test(error.message);
+    return { ok: false, state: "failed", error: friendly(error.message), retryable: !authz };
+  }
+  const o = (data && typeof data === "object" && !Array.isArray(data) ? data : {}) as Record<string, unknown>;
+  const photosDoneAt = typeof o.photos_done_at === "string" ? o.photos_done_at : null;
+  const videosDoneAt = typeof o.videos_done_at === "string" ? o.videos_done_at : null;
+  revalidatePath(`/clients/${input.athleteId}`);
+  revalidatePath("/coverage");
+  if (o.ok === true) {
+    return { ok: true, state: "saved", doneAt: input.kind === "photo" ? photosDoneAt : videosDoneAt, photosDoneAt, videosDoneAt, replayed: o.replayed === true };
+  }
+  return { ok: false, state: "conflict", serverDoneAt: typeof o.current_done_at === "string" ? o.current_done_at : null, error: "Someone else changed this since you looked.", photosDoneAt, videosDoneAt };
+}
+
 /** Owner-only: assign (or clear) the photographer and/or videographer for a client. */
 export async function assignCoverage(athleteId: string, input: { photographerId?: string | null; videographerId?: string | null }): Promise<CoverageResult> {
   if (!isUuid(athleteId)) return { ok: false, error: "Invalid client id." };

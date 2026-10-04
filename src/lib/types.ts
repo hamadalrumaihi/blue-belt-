@@ -51,7 +51,9 @@ export type ChangeType =
   | "ORDER_CHANGE"
   | "MATCH_NUMBER_CHANGE"
   | "MATCH_FOUND"
-  | "IDENTITY_AMBIGUOUS";
+  | "IDENTITY_AMBIGUOUS"
+  | "MANUAL_CORRECTION"
+  | "OVERRIDE_SUPERSEDED";
 
 export function isPlatform(value: string): value is Platform {
   return value === "AJP" || value === "SMOOTHCOMP" || value === "OTHER";

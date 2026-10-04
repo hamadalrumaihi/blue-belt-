@@ -87,6 +87,14 @@ export function mergeMatch(previous: MatchRow | null, next: NormalizedMatch, now
       athlete: next.athlete,
       ...next.raw,
     },
+    // A refresh carries the owner's correction forward untouched; refresh-plan
+    // clears it explicitly when the source itself changes the corrected field.
+    override_mat: previous?.override_mat ?? null,
+    override_scheduled_at: previous?.override_scheduled_at ?? null,
+    override_by: previous?.override_by ?? null,
+    override_at: previous?.override_at ?? null,
+    override_reason: previous?.override_reason ?? null,
+    override_until: previous?.override_until ?? null,
   };
 }
 
@@ -100,6 +108,8 @@ export const CHANGE_LABEL: Record<ChangeType, string> = {
   MATCH_NUMBER_CHANGE: "Match number change",
   MATCH_FOUND: "Match found",
   IDENTITY_AMBIGUOUS: "Needs review (similar matches)",
+  MANUAL_CORRECTION: "Manual correction",
+  OVERRIDE_SUPERSEDED: "Manual correction superseded by the source",
 };
 
 export function isChangeType(value: string): value is ChangeType {

@@ -1,5 +1,9 @@
+import { effectiveMatch } from "./manual-correction";
 import type { AthleteWithMatches, MatchRow, MatchStatus } from "./types";
 import { isMatchStatus } from "./types";
+
+/** A match row with the owner's active corrections applied and labelled. */
+export type EffectiveMatch = MatchRow & { manual?: { mat: boolean; time: boolean } };
 
 /**
  * The visual/priority bucket shown to the photographer.
@@ -104,9 +108,11 @@ export function computeEta(match: MatchRow | null | undefined, now: Date = new D
  * Picks the match that matters right now for an athlete: an on-mat match,
  * else the soonest not-complete match, else the latest completed one.
  */
-export function pickCurrentMatch(matches: MatchRow[], now: Date = new Date()): MatchRow | null {
+export function pickCurrentMatch(matches: MatchRow[], now: Date = new Date()): EffectiveMatch | null {
   if (!matches.length) return null;
-  const scored = matches.map((m) => ({ m, eta: computeEta(m, now) }));
+  // Rank and show the EFFECTIVE values: an owner's manual mat/time correction
+  // decides where the photographer goes, labelled as manual.
+  const scored = matches.map((m) => effectiveMatch(m, now)).map((m) => ({ m, eta: computeEta(m, now) }));
   scored.sort((a, b) => a.eta.priority - b.eta.priority || tieBreak(a.m, b.m));
   return scored[0].m;
 }
@@ -120,7 +126,7 @@ function tieBreak(a: MatchRow, b: MatchRow): number {
 
 export type AthleteEta = {
   athlete: AthleteWithMatches;
-  match: MatchRow | null;
+  match: EffectiveMatch | null;
   eta: Eta;
 };
 

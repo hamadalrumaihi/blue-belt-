@@ -407,6 +407,30 @@ through SECURITY DEFINER functions (`photo_collaborator_board`,
 `supabase/migrations/20261003000000_collaboration_coverage.sql` and the
 authorization test `supabase/tests/coverage_rls.test.sql`.
 
+### Offline completion and manual corrections (Phase C)
+
+- **Photos done / Video done work offline.** A tap records a desired-state
+  command (`{athlete, kind, done, expectedDoneAt, commandId}`) in
+  `localStorage` *before* anything is sent; a sync loop replays commands one
+  at a time through `applyCoverageCommand` → `photo_apply_coverage_command`,
+  which re-checks the session and assignment, applies idempotently by command
+  id (`photo_coverage_commands` log) and reports a **conflict** when someone
+  else changed the same kind since the client looked. A command is removed
+  only when the ack names its id and it is still the live command for that
+  athlete + kind, so a late ack can never delete a newer tap. UI states:
+  *Pending sync*, *Saved*, *Failed — will retry*, *Conflict* (apply mine /
+  keep theirs). `src/lib/offline/coverage-queue.ts`, `tests/coverage-queue.test.ts`,
+  `supabase/tests/coverage_commands.test.sql`.
+- **Owner manual mat / time corrections.** On a client's page the owner can
+  correct the mat and/or time (reason optional). The correction is stored in
+  `override_*` columns beside the source values, attributed and timestamped,
+  expires at the end of the event day by default, is labelled **Manual**
+  wherever the match is shown, and drives ranking/ETA. An automatic capture
+  never silently overwrites it: it is carried forward while the source still
+  says what it said, and dropped explicitly with an `OVERRIDE_SUPERSEDED`
+  history entry when the source itself changes that field.
+  `src/lib/manual-correction.ts`, `tests/manual-correction.test.ts`.
+
 ## Notifications and payments
 
 - **Telegram** (grammY) is implemented behind `TELEGRAM_ENABLED=1` + `TELEGRAM_BOT_TOKEN`; see [docs/telegram.md](docs/telegram.md). In-app alerts are independent of it.

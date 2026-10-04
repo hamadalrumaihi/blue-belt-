@@ -94,6 +94,13 @@ export type PhotoMatchRow = {
   last_changed_at: string | null;
   raw_snapshot: Json;
   identity_confidence: IdentityConfidence;
+  /** Owner manual correction (Phase C): source values above stay untouched. */
+  override_mat: string | null;
+  override_scheduled_at: string | null;
+  override_by: string | null;
+  override_at: string | null;
+  override_reason: string | null;
+  override_until: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -478,6 +485,12 @@ export type Database = {
           | "last_changed_at"
           | "raw_snapshot"
           | "identity_confidence"
+          | "override_mat"
+          | "override_scheduled_at"
+          | "override_by"
+          | "override_at"
+          | "override_reason"
+          | "override_until"
         >;
         Update: Partial<PhotoMatchRow>;
         Relationships: [];
@@ -652,6 +665,10 @@ export type Database = {
       photo_set_coverage_done: {
         Args: { p_athlete_id: string; p_kind: string; p_done: boolean };
         Returns: PhotoCoverageRow;
+      };
+      photo_apply_coverage_command: {
+        Args: { p_command_id: string; p_athlete_id: string; p_kind: string; p_done: boolean; p_expected_done_at: string | null; p_force?: boolean };
+        Returns: Json;
       };
     };
     Enums: Record<string, never>;

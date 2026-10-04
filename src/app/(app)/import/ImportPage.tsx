@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState, useSyncExternalStore } from "react";
 import { FormError, FormField } from "@/components/FormField";
+import { useNow } from "@/hooks/useNow";
 import { CheckIcon } from "@/components/icons";
 import { watchStateCopy } from "@/components/watchStateCopy";
 import { buildBookmarklet, buildShortcutScript, clearPendingImport, parsePendingImport, readPendingImport, subscribePendingImport, urlFromHtml } from "@/lib/pending-import";
@@ -30,6 +31,8 @@ const serverSnapshot = () => null;
 export function ImportPage({ appOrigin, initialUrl }: Props) {
   const pendingRaw = useSyncExternalStore(subscribePendingImport, readPendingImport, serverSnapshot);
   const pending = useMemo(() => parsePendingImport(pendingRaw), [pendingRaw]);
+  const now = useNow(30_000);
+  const pendingStale = Boolean(pending?.capturedAt && now && now.getTime() - new Date(pending.capturedAt).getTime() > 10 * 60_000);
 
   const [url, setUrl] = useState(initialUrl);
   const [html, setHtml] = useState("");
@@ -152,7 +155,10 @@ export function ImportPage({ appOrigin, initialUrl }: Props) {
         <section className="card border-2 border-primary p-4" aria-live="polite">
           <p className="eyebrow">Page received from your browser</p>
           <p className="mt-1 break-all text-sm font-semibold text-ink">{pending.url}</p>
-          <p className="mt-1 text-xs text-muted">{formatBytes(pending.html.length)} of HTML{pending.receivedAt ? ` · received ${new Date(pending.receivedAt).toLocaleTimeString()}` : ""}</p>
+          <p className="mt-1 text-xs text-muted">{formatBytes(pending.html.length)} of HTML{pending.capturedAt ? ` · captured ${new Date(pending.capturedAt).toLocaleTimeString()}` : pending.receivedAt ? ` · received ${new Date(pending.receivedAt).toLocaleTimeString()}` : ""}</p>
+          {pendingStale && (
+            <p className="mt-1 rounded-lg bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-800">This page was captured more than 10 minutes ago. Mats and times may have moved since; re-send the page if you can.</p>
+          )}
           <div className="mt-3 flex flex-wrap gap-2">
             <button type="button" className="btn-primary" onClick={runPreview} disabled={busy}>{busy ? "Reading…" : "Preview import"}</button>
             <button type="button" className="btn-ghost" onClick={() => { clearPendingImport(); setPreview(null); }} disabled={busy}>Discard</button>
