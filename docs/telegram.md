@@ -55,47 +55,83 @@ phone numbers:
 
 The bot replies with short plain-text messages and never logs update bodies.
 
-## Delivery and retries
+## Delivery: producers and the independent runner
 
-`notifyAfterRefresh` (`src/lib/notifications/server.ts`) runs after every
-persisted batch refresh, both from `POST /api/watch` (user client) and
-`POST /api/cron/refresh` (service client). When Telegram is enabled it lazily
-imports the notifier (`src/lib/notifications/telegram/notifier.ts`), which:
+Producing and sending are separate.
 
-1. Rebuilds the alert list with the same pure `buildAlerts` the in-app banners
-   use (ranked ETAs + the history rows produced by this refresh). Only
-   `GO_TO_MAT`, `ON_MAT`, `MAT_CHANGE`, `MOVED_EARLIER` and `MOVED_LATER`
-   (15+ minutes) are eligible; 30/15/5-minute thresholds stay in-app.
-2. Groups alerts by owner, loads the owner's enabled link (`chat_id` set) and
-   subscriptions. A per-event row wins over the global row for that event;
-   kinds not in the row's `kinds` are dropped.
-3. Inserts one `photo_notification_deliveries` row per alert with
-   `ON CONFLICT DO NOTHING` on `(owner_id, channel, alert_key)`. The key is the
-   alert id for ranked alerts (`go:<matchId>`, `on-mat:<matchId>`) and
-   `hist:<change_type>:<match_id>:<old>><new>` for history-derived ones, so
-   the same alert is never sent twice even across retries and concurrent
-   refreshes. A status flip to `on_mat` shares the `on-mat:<matchId>` key.
-4. Selects the due rows for that owner (`status in (pending, failed)`,
-   `attempts < 3`, `next_attempt_at <= now`), claims each one by bumping
-   `attempts` (a concurrent refresh that already bumped it skips the row) and
-   sends it with `bot.api.sendMessage` (HTML: bold title, body, mat · time).
-5. Marks the row `sent`, or on failure:
-   - transient (429, 5xx, network): stays `pending` with `next_attempt_at`
-     = now + 30 s, then 2 min (respecting `retry_after` on 429); after the
-     third failed attempt it becomes `failed`. Due rows are picked up by the
-     next refresh for that owner.
-   - permanent (403 bot blocked, 400 chat not found): `failed` immediately and
-     the link is disabled so no further messages are attempted; other 4xx
-     (for example a malformed message) are `failed` without touching the link.
+**Producers** only write rows to `photo_notification_deliveries` (one per
+owner / channel / alert key — the `ON CONFLICT DO NOTHING` dedupe):
+
+- *Match alerts* — `runTelegramNotifier` (`src/lib/notifications/telegram/notifier.ts`)
+  runs after every persisted refresh, rebuilds the alert list with the same
+  pure `buildAlerts` the in-app banners use, filters by the owner's enabled
+  link and subscription kinds, and enqueues `GO_TO_MAT`, `ON_MAT`,
+  `MAT_CHANGE`, `MOVED_EARLIER`, `MOVED_LATER`. Keys: `go:<matchId>`,
+  `on-mat:<matchId>`, `hist:<change_type>:<match_id>:<old>><new>`.
+- *Pre-match reminders* — `enqueueReminders` (`src/lib/notifications/reminders-run.ts`)
+  runs on the runner's clock tick, not on captures: from the matches already
+  stored it plans `REMIND_15` / `REMIND_5` (leads configurable with
+  `TELEGRAM_REMINDER_MINUTES`, default `15,5`; each kind can be switched off
+  per owner in Settings). Key: `remind:<lead>:<matchId>:<target rounded to 5 min>`,
+  so a one-minute shuffle does not repeat a reminder and a real move produces
+  one for the new time (honest at-least-once). Owner manual corrections count.
+- *Operational incidents and recoveries* — `runIncidentNotifier` (grouped by
+  owner / kind / event / source host, see "Operational alerts").
+- *Orders* (Phase E) use the same table with the `orders` category.
+
+Every message carries a category prefix in its bold title: **[Match]**,
+**[Orders]** or **[System]**.
+
+**The runner** (`src/lib/notifications/delivery-runner.ts`) is the only thing
+that calls `sendMessage`:
+
+1. `photo_claim_notification_deliveries` atomically claims up to N due rows
+   (`FOR UPDATE SKIP LOCKED`), marks them `sending`, counts the attempt and
+   sets a 60 s lease. Due = `pending`/`failed` with `next_attempt_at <= now()`
+   (null = terminal), or `sending` with an expired lease (a runner died).
+2. Per owner it loads the enabled link once; rows whose owner has no enabled
+   link are marked `skipped`.
+3. Sends with >= 1.1 s spacing per chat. Outcomes: `sent`; transient
+   (429 / 5xx / network) -> `pending` with backoff 30 s, 2 min, then `failed`
+   after the third attempt (respecting `retry_after`); permanent 403 / "chat not
+   found" -> `failed` and the link disabled; other 4xx -> `failed`.
+4. On a 429 the batch stops and the rest of the claim is **released**
+   (attempt uncounted, due again in 30 s).
+
+It runs from two places, both bounded, neither a `setInterval` in a request
+module:
+
+- **`POST /api/cron/deliveries`** (`Authorization: Bearer <CRON_SECRET>`):
+  plans reminders, then drains batches of 25 until nothing is due, a batch
+  was rate limited, or 45 s passed. The Railway worker process ticks it every
+  `DELIVERY_SECONDS` (default 30 when `SCHEDULE_SECONDS` is set; see
+  `worker/src/scheduler.mjs`). Any other cron can call it; two overlapping
+  runs are safe.
+- **A per-owner kick** right after a user's own refresh enqueued rows
+  (`limit 10`, same claim RPC), so a GO TO MAT leaves immediately instead of
+  waiting for the next tick.
+
+In tests (`NODE_ENV=test` / Vitest) and with `TELEGRAM_DRY_RUN=1` the default
+sender never contacts Telegram: messages are logged by size and counted as
+sent, so no production chat receives test traffic. There are no hard-coded
+chat ids, topics or group ids anywhere; the only destination is the owner's
+linked `chat_id`.
+
+Tests: `tests/notifications/delivery-runner.test.ts` (claim, lease expiry,
+backoff, release on 429, link disable, dry run), `tests/notifications/reminders.test.ts`,
+`tests/api-cron-deliveries.test.ts`, `supabase/tests/deliveries_claim.test.sql`,
+`worker/test/scheduler.test.mjs`.
 
 A notifier error is logged (`notify.failed`) and never fails the refresh.
 
 ## Limitations
 
-- Alerts fire only when a refresh runs: a browser with the app open, or the
-  cron route. There is no independent scheduler for notifications.
-- Retries also piggyback on refreshes; with nothing refreshing, a transiently
-  failed message waits until the next refresh for that owner.
+- Delivery needs the runner to tick: the Railway worker with `SCHEDULE_SECONDS`
+  (and so `DELIVERY_SECONDS`) set, or another cron calling
+  `/api/cron/deliveries`. Without it, only the per-owner kick after a user's
+  own refresh sends anything, and retries / reminders wait.
+- Reminders cover matches whose target time is known; a match with no time
+  cannot be reminded.
 - One linked chat per owner (the first link row). Group chats work as long as
   the bot is a member; privacy mode is irrelevant because only commands are read.
 - Per-event subscription rows are supported by the notifier and the

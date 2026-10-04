@@ -434,6 +434,16 @@ authorization test `supabase/tests/coverage_rls.test.sql`.
 ## Notifications and payments
 
 - **Telegram** (grammY) is implemented behind `TELEGRAM_ENABLED=1` + `TELEGRAM_BOT_TOKEN`; see [docs/telegram.md](docs/telegram.md). In-app alerts are independent of it.
+- **Independent delivery runner (Phase D).** Producers (match alerts after a
+  refresh, clock-driven 15/5-minute pre-match reminders, grouped incidents and
+  recoveries, orders) only enqueue rows; the runner claims due rows atomically
+  (`photo_claim_notification_deliveries`, lease + `SKIP LOCKED`), sends with
+  per-chat spacing and backoff, releases the claim on a rate limit and
+  recovers a crashed runner's leases. It runs as the bounded
+  `POST /api/cron/deliveries` job ticked by the Railway process every
+  `DELIVERY_SECONDS`, plus a small per-owner kick after a user's own refresh.
+  Messages carry **[Match] / [Orders] / [System]** prefixes; tests and
+  `TELEGRAM_DRY_RUN=1` never contact Telegram.
 - **Operational alerts.** Besides match alerts, Telegram now reports operational
   incidents (Cloudflare challenge, worker unavailable, source timeout, athlete
   not found, parse/persist errors) with the reason, last-verified time, whether

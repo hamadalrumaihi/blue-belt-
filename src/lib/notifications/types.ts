@@ -10,7 +10,9 @@ export type AlertKind =
   | "ON_MAT"
   | "MAT_CHANGE"
   | "MOVED_EARLIER"
-  | "MOVED_LATER";
+  | "MOVED_LATER"
+  | "REMIND_15"
+  | "REMIND_5";
 
 /**
  * A single actionable alert. In V1 these render as in-app banners; the same

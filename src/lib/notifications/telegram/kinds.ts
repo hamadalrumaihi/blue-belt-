@@ -5,7 +5,7 @@ import type { AlertKind } from "@/lib/notifications/types";
  * (notifier, actions) and the Settings UI, so this module stays free of
  * server-only imports. Threshold alerts (30/15/5 min) stay in-app only.
  */
-export const TELEGRAM_ALERT_KINDS = ["GO_TO_MAT", "ON_MAT", "MAT_CHANGE", "MOVED_EARLIER", "MOVED_LATER"] as const satisfies readonly AlertKind[];
+export const TELEGRAM_ALERT_KINDS = ["GO_TO_MAT", "ON_MAT", "MAT_CHANGE", "MOVED_EARLIER", "MOVED_LATER", "REMIND_15", "REMIND_5"] as const satisfies readonly AlertKind[];
 
 export type TelegramAlertKind = (typeof TELEGRAM_ALERT_KINDS)[number];
 
@@ -15,7 +15,20 @@ export const TELEGRAM_KIND_LABELS: Record<TelegramAlertKind, string> = {
   MAT_CHANGE: "Mat change",
   MOVED_EARLIER: "Moved earlier",
   MOVED_LATER: "Moved later (15+ min)",
+  REMIND_15: "Reminder 15 min before",
+  REMIND_5: "Reminder 5 min before",
 };
+
+/** Message category prefix: who should read it first. */
+export type MessageCategory = "match" | "orders" | "system";
+
+export const CATEGORY_LABEL: Record<MessageCategory, string> = { match: "Match", orders: "Orders", system: "System" };
+
+export function categoryForKind(kind: string): MessageCategory {
+  if (kind.startsWith("INCIDENT_") || kind.startsWith("RECOVERY_") || kind.startsWith("SYSTEM_")) return "system";
+  if (kind.startsWith("ORDER_") || kind.startsWith("PAYMENT_")) return "orders";
+  return "match";
+}
 
 export function isTelegramAlertKind(value: unknown): value is TelegramAlertKind {
   return typeof value === "string" && (TELEGRAM_ALERT_KINDS as readonly string[]).includes(value);

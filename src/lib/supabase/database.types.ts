@@ -285,7 +285,7 @@ export type PhotoNotificationSubscriptionRow = {
   updated_at: string;
 };
 
-export type DeliveryStatus = "pending" | "sent" | "failed" | "skipped";
+export type DeliveryStatus = "pending" | "sending" | "sent" | "failed" | "skipped";
 
 export type PhotoNotificationDeliveryRow = {
   id: number;
@@ -301,6 +301,11 @@ export type PhotoNotificationDeliveryRow = {
   last_error: string | null;
   next_attempt_at: string | null;
   sent_at: string | null;
+  /** Phase D: lease-based claim by the delivery runner. */
+  leased_until: string | null;
+  lease_owner: string | null;
+  /** match | orders | system — the message prefix. */
+  category: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -571,7 +576,7 @@ export type Database = {
         Row: PhotoNotificationDeliveryRow;
         Insert: Optional<
           PhotoNotificationDeliveryRow,
-          GeneratedCols | "athlete_id" | "match_id" | "payload" | "status" | "attempts" | "last_error" | "next_attempt_at" | "sent_at"
+          GeneratedCols | "athlete_id" | "match_id" | "payload" | "status" | "attempts" | "last_error" | "next_attempt_at" | "sent_at" | "leased_until" | "lease_owner" | "category"
         >;
         Update: Partial<PhotoNotificationDeliveryRow>;
         Relationships: [];
@@ -665,6 +670,10 @@ export type Database = {
       photo_set_coverage_done: {
         Args: { p_athlete_id: string; p_kind: string; p_done: boolean };
         Returns: PhotoCoverageRow;
+      };
+      photo_claim_notification_deliveries: {
+        Args: { p_channel: string; p_limit: number; p_lease_seconds: number; p_worker: string; p_owner_id?: string | null };
+        Returns: PhotoNotificationDeliveryRow[];
       };
       photo_apply_coverage_command: {
         Args: { p_command_id: string; p_athlete_id: string; p_kind: string; p_done: boolean; p_expected_done_at: string | null; p_force?: boolean };
