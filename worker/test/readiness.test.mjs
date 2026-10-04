@@ -22,7 +22,7 @@ describe("assessReadiness", () => {
   });
 
   test("HTTP error statuses are never ready", () => {
-    assert.deepEqual(assess({ status: 503 }), { ready: false, reason: "HTTP_ERROR", hasSchedule: false, terminal: true });
+    assert.deepEqual(assess({ status: 503 }), { ready: false, reason: "HTTP_ERROR", hasSchedule: false, terminal: true, redirected: false });
     assert.equal(assess({ status: 404, html: "<html><body>Not found</body></html>" }).reason, "HTTP_ERROR");
   });
 
@@ -39,12 +39,15 @@ describe("assessReadiness", () => {
     assert.equal(r.terminal, false);
   });
 
-  test("a page that landed elsewhere than requested (another event) is not trusted", () => {
+  test("a redirect to another path is reported, not failed: the content still decides, and the app checks the landed URL", () => {
     const r = assess({ finalUrl: "https://ajptour.com/en/event/9999/bracket/1" });
-    assert.equal(r.ready, false);
-    assert.equal(r.reason, "WRONG_PAGE");
-    // A locale redirect of the same page is fine.
-    assert.equal(assess({ finalUrl: "https://ajptour.com/ar/event/1411/bracket/130617/" }).ready, true);
+    assert.equal(r.ready, true);
+    assert.equal(r.reason, "SCHEDULE_FOUND");
+    assert.equal(r.redirected, true);
+    // A locale redirect of the same page is not even a redirect for this purpose.
+    const locale = assess({ finalUrl: "https://ajptour.com/ar/event/1411/bracket/130617/" });
+    assert.equal(locale.ready, true);
+    assert.equal(locale.redirected, false);
   });
 
   test("an unpublished-schedule page is ready but empty", () => {

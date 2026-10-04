@@ -7,8 +7,12 @@
  * Verdicts:
  *   ready + hasSchedule      a schedule structure is present
  *   ready + !hasSchedule     a real page that says the schedule is not out yet
- *   !ready, terminal         waiting cannot help (HTTP error, wrong page, login, error page, challenge)
+ *   !ready, terminal         waiting cannot help (HTTP error, login, error page, challenge)
  *   !ready, !terminal        the app has not hydrated yet; keep waiting (bounded)
+ * `redirected` is set when the browser landed on a different path than it was
+ * asked for (same allow-listed host, already checked by the HTTP layer). It is
+ * reported, not failed: canonical-URL redirects are normal, and the app checks
+ * the landed URL against the client's source identity itself.
  */
 
 const CHALLENGE_RE = /just a moment|attention required|cf-chl|challenge-platform|_cf_chl_opt|enable javascript and cookies to continue/i;
@@ -23,23 +27,23 @@ export function assessReadiness({ html, status, finalUrl, requestedUrl }) {
   const text = typeof html === "string" ? html : "";
   if (typeof status === "number" && status >= 400) return verdict(false, "HTTP_ERROR", false, true);
   if (CHALLENGE_RE.test(text.slice(0, 30_000))) return verdict(false, "CHALLENGE", false, true);
-  if (requestedUrl && finalUrl && !samePage(requestedUrl, finalUrl)) return verdict(false, "WRONG_PAGE", false, true);
+  const redirected = Boolean(requestedUrl && finalUrl && !samePage(requestedUrl, finalUrl));
 
   const hasSchedule = hasScheduleStructure(text);
-  if (hasSchedule) return verdict(true, "SCHEDULE_FOUND", true, true);
+  if (hasSchedule) return verdict(true, "SCHEDULE_FOUND", true, true, redirected);
 
-  if (LOGIN_RE.test(text)) return verdict(false, "LOGIN_PAGE", false, true);
-  if (ERROR_TITLE_RE.test(text) || ERROR_BODY_RE.test(text)) return verdict(false, "ERROR_PAGE", false, true);
+  if (LOGIN_RE.test(text)) return verdict(false, "LOGIN_PAGE", false, true, redirected);
+  if (ERROR_TITLE_RE.test(text) || ERROR_BODY_RE.test(text)) return verdict(false, "ERROR_PAGE", false, true, redirected);
 
   const visible = visibleText(text);
-  if (NOT_PUBLISHED_RE.test(visible)) return verdict(true, "NO_SCHEDULE_YET", false, true);
-  if (visible.length < 300 && /<script/i.test(text)) return verdict(false, "UNHYDRATED", false, false);
+  if (NOT_PUBLISHED_RE.test(visible)) return verdict(true, "NO_SCHEDULE_YET", false, true, redirected);
+  if (visible.length < 300 && /<script/i.test(text)) return verdict(false, "UNHYDRATED", false, false, redirected);
   // Real content, but nothing that looks like a schedule: let the app's parser decide.
-  return verdict(true, "NO_SCHEDULE_STRUCTURE", false, true);
+  return verdict(true, "NO_SCHEDULE_STRUCTURE", false, true, redirected);
 }
 
-function verdict(ready, reason, hasSchedule, terminal) {
-  return { ready, reason, hasSchedule, terminal };
+function verdict(ready, reason, hasSchedule, terminal, redirected = false) {
+  return { ready, reason, hasSchedule, terminal, redirected };
 }
 
 /** Tables with several data rows, repeated card-like blocks or embedded schedule JSON. */

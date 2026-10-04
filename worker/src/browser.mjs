@@ -185,7 +185,6 @@ async function renderOnce(url, waitForSelector, started) {
 
 const NOT_READY_MESSAGE = {
   HTTP_ERROR: "The source returned an error status.",
-  WRONG_PAGE: "The browser ended on a different page than the one requested.",
   LOGIN_PAGE: "The page showed a login form instead of a schedule.",
   ERROR_PAGE: "The source showed an error page.",
   UNHYDRATED: "The page never rendered its schedule (empty application shell).",

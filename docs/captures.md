@@ -98,10 +98,13 @@ until the page is ready, a terminal verdict is reached or `READY_WAIT_MS`
 | `NO_SCHEDULE_YET` | real page saying the schedule is not published | ready, empty |
 | `NO_SCHEDULE_STRUCTURE` | real content, nothing schedule-like | ready; the app's parser decides |
 | `UNHYDRATED` | empty app shell with scripts | keep waiting (bounded) |
-| `HTTP_ERROR` / `CHALLENGE` / `WRONG_PAGE` / `LOGIN_PAGE` / `ERROR_PAGE` | terminal | `PAGE_NOT_READY` (502) with `readiness` |
+| `HTTP_ERROR` / `CHALLENGE` / `LOGIN_PAGE` / `ERROR_PAGE` | terminal | `PAGE_NOT_READY` (502) with `readiness` |
 
-`WRONG_PAGE` compares the landed URL to the requested one by host + path
-(locale-insensitive); a redirect to another event is never captured.
+A redirect to a different path on the same allow-listed host is reported
+(`redirected: true`), not failed: canonical-URL redirects are normal. The
+HTTP layer still enforces the host allow-list on the landed URL, and the
+import path refuses a final URL whose source identity differs
+(`FINAL_URL_MISMATCH`).
 
 When a schedule is present the worker then **expands** within bounds:
 scrolls to the bottom until the height settles (`MAX_SCROLL_PASSES`, 6),
