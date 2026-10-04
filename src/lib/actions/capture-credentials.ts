@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { generateCaptureToken, type CredentialKind } from "@/lib/capture/credentials";
+import { generateCaptureToken, MAX_CREDENTIAL_DAYS, MAX_ORDERS_CREDENTIAL_DAYS, type CredentialKind } from "@/lib/capture/credentials";
 import { sourceKey } from "@/lib/capture/source-identity";
 import { createClient } from "@/lib/supabase/server";
 import { isUuid } from "@/lib/validation";
@@ -15,9 +15,7 @@ import { isUuid } from "@/lib/validation";
 export type CredentialActionResult = { ok: true } | { ok: false; error: string };
 export type CreateCredentialResult = { ok: true; token: string; expiresAt: string; name: string } | { ok: false; error: string };
 
-export const MAX_CREDENTIAL_DAYS = 14;
-/** Orders intake credentials live in a Zap and are rotated less often. */
-export const MAX_ORDERS_CREDENTIAL_DAYS = 365;
+// Limits live in capture/credentials.ts: a "use server" module may export only async functions.
 
 export async function createCaptureCredential(input: { name: string; days: number; eventId?: string | null; kind?: CredentialKind }): Promise<CreateCredentialResult> {
   const kind: CredentialKind = input.kind === "orders" ? "orders" : "capture";

@@ -474,11 +474,21 @@ fixtures: [docs/orders-intake.md](docs/orders-intake.md).
 npm run typecheck   # next typegen + tsc
 npm run lint        # eslint
 npm test            # vitest: parsers (fixtures), time/DST, validation, identity, plans, alerts, API 400s, worker client (MSW)
-npm run test:worker # worker: node --test (HTTP contract, URL policy, config); browser integration with BBM_WORKER_BROWSER_TESTS=1
+npm run test:worker # worker: node --test (HTTP contract, URL policy, config, readiness, scheduler); browser integration with BBM_WORKER_BROWSER_TESTS=1
+npm run test:agent  # Windows capture agent: node --test (schedule, spool, config, one full tick against a fake app)
+npm run check       # all of the above except the build
 npm run build
 ```
 
-`.github/workflows/ci.yml` runs type-check, lint, unit tests and the build with placeholder public Supabase values (no secrets), plus the worker checks and the browser integration test in the Playwright container. `supabase/tests/rls.test.sql` is a pgTAP suite for the RLS invariant (needs a local Supabase stack; not part of CI).
+`.github/workflows/ci.yml` runs type-check, lint, unit tests and the build with placeholder public Supabase values (no secrets), plus the worker and agent checks and the browser integration test in the Playwright container.
+
+**Database tests** (`supabase/tests/*.sql`) run against a real Postgres, not
+mocks: `rls.test.sql` (pgTAP, `supabase test db`) plus DO-block tests you
+paste into psql against a disposable database — each ends with
+`ERROR: ROLLBACK_OK: …` on success and rolls everything back:
+`coverage_rls`, `captures_rls`, `coverage_commands`, `deliveries_claim`,
+`orders_rls`. They need one seeded owner (`photo_events`) to run. Not part
+of CI (no hosted database there).
 
 ## Current limitations
 

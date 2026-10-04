@@ -14,6 +14,9 @@ export const TOKEN_PREFIX = "bbmc";
 /** Orders intake credentials (Zapier → Pic-Time orders) carry a different prefix so a mix-up is visible. */
 export const ORDERS_TOKEN_PREFIX = "bbmo";
 export type CredentialKind = "capture" | "orders";
+/** Capture credentials (event laptop) are short-lived; orders credentials live in a Zap and rotate less often. */
+export const MAX_CREDENTIAL_DAYS = 14;
+export const MAX_ORDERS_CREDENTIAL_DAYS = 365;
 const TOKEN_RE = /^bbm[co]_[A-Za-z0-9]{8}_[A-Za-z0-9]{40}$/;
 const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
