@@ -57,6 +57,24 @@ jobs:
       - run: node --check src/*.mjs
       - run: npm test
 
+  agent:
+    name: Capture agent (syntax + unit tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: agent
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: node --check src/*.mjs
+      - run: npm test
+
   worker-browser:
     name: Worker (real Chromium integration test)
     runs-on: ubuntu-latest

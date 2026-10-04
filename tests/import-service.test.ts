@@ -199,11 +199,30 @@ describe("importPage", () => {
     expect(JSON.stringify(row.diagnostics)).not.toContain("<");
   });
 
-  it("owner identity comes from the caller, never from the page or the body", async () => {
-    const fake = fakeSupabase({ athletes: [athleteRow({ source_url: PAGE })], events: [eventRow()] });
+  it("owner identity comes from the caller, never from the page or the body, and only that owner's clients are touched", async () => {
+    const mine = athleteRow({ id: "22222222-2222-4222-8222-000000000001", source_url: PAGE, owner_id: "owner-from-session" });
+    const theirs = athleteRow({ id: "22222222-2222-4222-8222-000000000002", source_url: PAGE, owner_id: "someone-else" });
+    const fake = fakeSupabase({ athletes: [mine, theirs], events: [eventRow()] });
     okRefresh();
-    await importPage(fake.client, { url: PAGE, html: fixture("ajp-bracket-table"), ownerId: "owner-from-session", now: NOW });
+    const out = await importPage(fake.client, { url: PAGE, html: fixture("ajp-bracket-table"), ownerId: "owner-from-session", now: NOW });
+    expect(out).toMatchObject({ ok: true, matched: 1 });
+    expect(refreshMock.mock.calls[0][1].map((a) => a.id)).toEqual([mine.id]);
     expect(fake.captures[0].owner_id).toBe("owner-from-session");
+    // The owner filter is an explicit query predicate (the service client has no RLS).
+    expect(fake.calls.some((c) => c.table === "photo_athletes" && c.op === "eq" && c.args[0] === "owner_id" && c.args[1] === "owner-from-session")).toBe(true);
+    // An owner with no client on this page gets NO_ATHLETES even though another owner has one.
+    const other = fakeSupabase({ athletes: [theirs], events: [eventRow()] });
+    expect(await importPage(other.client, { url: PAGE, html: "<p>x</p>", ownerId: "owner-from-session", now: NOW })).toMatchObject({ ok: false, code: "NO_ATHLETES" });
+  });
+
+  it("an event-scoped capture only touches that event's clients", async () => {
+    const inEvent = athleteRow({ id: "22222222-2222-4222-8222-000000000001", source_url: PAGE, event_id: "33333333-3333-4333-8333-333333333333" });
+    const elsewhere = athleteRow({ id: "22222222-2222-4222-8222-000000000002", source_url: PAGE, event_id: "33333333-3333-4333-8333-000000000009" });
+    const fake = fakeSupabase({ athletes: [inEvent, elsewhere], events: [eventRow()] });
+    okRefresh();
+    const out = await importPage(fake.client, { url: PAGE, html: fixture("ajp-bracket-table"), ownerId: OWNER, eventId: "33333333-3333-4333-8333-333333333333", now: NOW });
+    expect(out).toMatchObject({ ok: true, matched: 1 });
+    expect(refreshMock.mock.calls[0][1].map((a) => a.id)).toEqual([inEvent.id]);
   });
 
   it("replays a capture id that was already applied without refreshing again (no duplicate history)", async () => {

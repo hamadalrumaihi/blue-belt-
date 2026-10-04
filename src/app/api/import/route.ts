@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { importPage, previewImport } from "@/lib/import-service";
+import { failureStatus, importPage, previewImport } from "@/lib/import-service";
 import { requestLogger } from "@/lib/log";
 import { rateLimit, rateLimitHeaders, RULES } from "@/lib/rate-limit";
 import { createClient } from "@/lib/supabase/server";
@@ -59,23 +59,4 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: outcome.message, code: outcome.code, url: outcome.url, candidates: outcome.candidates ?? [], ...(capture ? { capture } : {}) }, { status, headers: { ...headers, ...rateLimitHeaders(limit) } });
   }
   return NextResponse.json(outcome, { headers: { ...headers, ...rateLimitHeaders(limit) } });
-}
-
-/** HTTP status for an import failure code. */
-export function failureStatus(code: string): number {
-  switch (code) {
-    case "QUERY_FAILED":
-      return 500;
-    case "NO_ATHLETES":
-      return 404;
-    case "CHALLENGE_PAGE":
-    case "CAPTURE_TIMING":
-    case "FINAL_URL_MISMATCH":
-      return 422;
-    case "STALE_CAPTURE":
-    case "CAPTURE_IN_PROGRESS":
-      return 409;
-    default:
-      return 400;
-  }
 }

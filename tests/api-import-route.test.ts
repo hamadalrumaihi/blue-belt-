@@ -2,7 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn() }));
-vi.mock("@/lib/import-service", () => ({ importPage: vi.fn(), previewImport: vi.fn() }));
+vi.mock("@/lib/import-service", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/import-service")>("@/lib/import-service");
+  return { failureStatus: actual.failureStatus, importPage: vi.fn(), previewImport: vi.fn() };
+});
 
 import { POST as receive } from "@/app/api/import/receive/route";
 import { POST, dynamic, maxDuration, runtime } from "@/app/api/import/route";

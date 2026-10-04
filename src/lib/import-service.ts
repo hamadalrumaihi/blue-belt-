@@ -71,6 +71,8 @@ export type ImportInput = {
   capture?: CaptureMeta;
   /** Transport to record when the client did not say (route default). */
   transport?: CaptureTransport;
+  /** Restrict to one event's clients (credential scope). */
+  eventId?: string | null;
   now?: Date;
   log?: Logger;
 };
@@ -78,13 +80,22 @@ export type ImportInput = {
 /** Bounded scan of the owner's tracked clients when matching a page to them. */
 const MAX_ACTIVE_ATHLETES = 500;
 
-/** Loads the active clients whose source URL is `url`, plus their events. */
+/**
+ * Loads the active clients whose source URL is `url`, plus their events.
+ * `scope.ownerId` is always applied explicitly (RLS also applies for session
+ * clients; the service client used by machine intake has no RLS, so the
+ * filter is what keeps one owner's capture away from another's clients).
+ */
 async function clientsForPage(
   supabase: Client,
   url: string,
   log: Logger,
+  scope: { ownerId?: string; eventId?: string | null } = {},
 ): Promise<{ ok: true; athletes: AthleteRow[]; events: Map<string, EventRow> } | { ok: false; code: ImportFailureCode; message: string; candidates?: string[] }> {
-  const { data: rows, error } = await supabase.from("photo_athletes").select("*").eq("active", true).limit(MAX_ACTIVE_ATHLETES);
+  let query = supabase.from("photo_athletes").select("*").eq("active", true);
+  if (scope.ownerId) query = query.eq("owner_id", scope.ownerId);
+  if (scope.eventId) query = query.eq("event_id", scope.eventId);
+  const { data: rows, error } = await query.limit(MAX_ACTIVE_ATHLETES);
   if (error) {
     log.error("import.query_failed", { error: error.message });
     return { ok: false, code: "QUERY_FAILED", message: "Could not load clients." };
@@ -187,7 +198,7 @@ export async function importPage(supabase: Client, input: ImportInput): Promise<
     return { ok: false, code: "FINAL_URL_MISMATCH", message: "The page the browser ended on is not the requested bracket. Open the client's source URL directly and capture again.", url };
   }
 
-  const loaded = await clientsForPage(supabase, url, log);
+  const loaded = await clientsForPage(supabase, url, log, { ownerId: input.ownerId, eventId: input.eventId ?? null });
   if (!loaded.ok) return { ok: false, code: loaded.code, message: loaded.message, url, candidates: loaded.candidates };
   const { athletes, events } = loaded;
 
@@ -237,6 +248,25 @@ export async function importPage(supabase: Client, input: ImportInput): Promise<
 
 /** Shape of a capture envelope exposed for tests / other transports. */
 export type { CaptureEnvelope };
+
+/** HTTP status for an import / capture failure code (shared by /api/import and /api/capture). */
+export function failureStatus(code: string): number {
+  switch (code) {
+    case "QUERY_FAILED":
+      return 500;
+    case "NO_ATHLETES":
+      return 404;
+    case "CHALLENGE_PAGE":
+    case "CAPTURE_TIMING":
+    case "FINAL_URL_MISMATCH":
+      return 422;
+    case "STALE_CAPTURE":
+    case "CAPTURE_IN_PROGRESS":
+      return 409;
+    default:
+      return 400;
+  }
+}
 
 /** Same source identity (host, path and bracket-selecting params; see capture/source-identity). */
 export function samePage(a: string | null | undefined, b: string | null | undefined): boolean {

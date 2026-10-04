@@ -185,6 +185,7 @@ Schema lives in `supabase/migrations/`:
 - `20261002150000_watcher_v2.sql` — source health, the atomic refresh RPC, persisted settings, the collaboration foundation, Telegram and payment tables.
 - `20261003000000_collaboration_coverage.sql`, `20261003010000_incidents.sql` — coverage board, collaborator functions, operational incidents.
 - `20261004000000_captures.sql` — the capture ledger (`photo_captures`): one row per capture of a source page, unique per owner + capture id. See [docs/captures.md](docs/captures.md).
+- `20261004010000_capture_credentials.sql` — `photo_capture_credentials`: hashed, expiring, revocable machine-intake credentials with the agent's heartbeat. See [docs/windows-agent.md](docs/windows-agent.md).
 
 Core tables: **photo_events**, **photo_athletes** (with source health: `last_attempt_at`, `last_success_at`, `consecutive_failures`, `last_watch_status/code/message/strategy`, `last_source_status`, `last_final_url`, `last_elapsed_ms`, `refresh_version`, generated `name_key`), **photo_matches** (`identity_confidence` exact | probable | ambiguous), **photo_match_history**. Prepared tables: `photo_user_settings`, `photo_event_settings`, `photo_event_members`, `photo_telegram_links`, `photo_notification_subscriptions`, `photo_notification_deliveries`, `photo_bookings`, `photo_payment_attempts`, `photo_payment_events`.
 
@@ -316,6 +317,20 @@ completeness label. The rules, with the tests that pin them, are in
   asked for — then expands virtualised rows, "next / load more" pages and
   same-origin frames within fixed bounds and labels the capture
   `complete`, `partial` or `unknown` (`worker/src/readiness.mjs`).
+
+### Windows event-session agent (Phase B)
+
+When the automatic worker is blocked and the photographer cannot keep sending
+pages by hand, a small long-running agent on the event laptop (`/agent`) keeps
+each bracket page open in a real browser window and posts it once a minute to
+a **separate machine-intake endpoint**, `POST /api/capture` (JSON), with
+`GET /api/capture/jobs` for its job list and `POST /api/capture/heartbeat`.
+It authenticates with a revocable, expiring, owner/event-scoped **capture
+credential** created in Settings → Capture agent — never the service-role key.
+The HTML form hand-over (`/api/import/receive`) and the signed-in import page
+are unchanged. Durable spool, capture-id replay, backoff with `Retry-After`,
+pause on a human check and a clean stop are built in. Setup, start/stop and
+recovery: [docs/windows-agent.md](docs/windows-agent.md).
 
 ### `CHALLENGE_NOT_CLEARED` — what it means and what to do
 

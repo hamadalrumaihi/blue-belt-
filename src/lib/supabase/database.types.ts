@@ -230,6 +230,26 @@ export type PhotoCaptureRow = {
   updated_at: string;
 };
 
+/** Phase B: machine-intake credentials (token hash only) with agent heartbeat. */
+export type PhotoCaptureCredentialRow = {
+  id: string;
+  owner_id: string;
+  name: string;
+  token_hash: string;
+  token_prefix: string;
+  scope_source_keys: string[] | null;
+  scope_event_id: string | null;
+  expires_at: string;
+  revoked_at: string | null;
+  last_used_at: string | null;
+  use_count: number;
+  last_heartbeat_at: string | null;
+  agent_version: string | null;
+  agent_status: Json;
+  created_at: string;
+  updated_at: string;
+};
+
 // ---------------------------------------------------------------------------
 // Telegram notifications
 // ---------------------------------------------------------------------------
@@ -502,6 +522,15 @@ export type Database = {
           GeneratedCols | "event_id" | "source_host" | "athlete_count" | "status" | "first_seen_at" | "last_seen_at" | "resolved_at" | "occurrences"
         >;
         Update: Partial<PhotoIncidentRow>;
+        Relationships: [];
+      };
+      photo_capture_credentials: {
+        Row: PhotoCaptureCredentialRow;
+        Insert: Optional<
+          PhotoCaptureCredentialRow,
+          GeneratedCols | "scope_source_keys" | "scope_event_id" | "revoked_at" | "last_used_at" | "use_count" | "last_heartbeat_at" | "agent_version" | "agent_status"
+        >;
+        Update: Partial<PhotoCaptureCredentialRow>;
         Relationships: [];
       };
       photo_captures: {
