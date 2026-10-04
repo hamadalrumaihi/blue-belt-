@@ -62,7 +62,10 @@ describe("POST /api/orders/intake", () => {
     vi.stubEnv("ORDERS_INTAKE_ENABLED", "0");
     expect((await post(fixture("pictime-card-paid"))).status).toBe(404);
     vi.stubEnv("ORDERS_INTAKE_ENABLED", "1");
-    expect((await post(fixture("pictime-card-paid"), null)).status).toBe(401);
+    const missing = await post(fixture("pictime-card-paid"), null);
+    expect(missing.status).toBe(401);
+    // The 401 must name the orders prefix (bbmo_), not the generic capture one.
+    expect((await missing.json()).error).toContain("bbmo_");
     findMock.mockResolvedValueOnce({ ok: true, credential: credential("capture") });
     const wrong = await post(fixture("pictime-card-paid"));
     expect(wrong.status).toBe(403);

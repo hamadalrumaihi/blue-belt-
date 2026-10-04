@@ -26,17 +26,24 @@ export async function authenticateIntake(request: Request, route: string, reques
   const probe = rateLimit(`capture-auth:${ip}`, RULES.captureAuthPerIp);
   if (!probe.ok) return fail(429, "RATE_LIMITED", "Too many attempts.", rateLimitHeaders(probe));
 
+  // Name the credential this endpoint actually wants, so an orders route says
+  // bbmo_ and a capture route says bbmc_ (the generic "capture / bbmc_" wording
+  // misled an integrator setting up the orders webhook).
+  const kindNoun = requiredKind === "orders" ? "orders intake" : "capture";
+  const kindArticle = requiredKind === "orders" ? "An" : "A";
+  const kindPrefix = requiredKind === "orders" ? "bbmo_" : "bbmc_";
+
   const token = parseCaptureBearer(request.headers.get("authorization"));
   if (!token) {
     log.warn("capture.auth_rejected", { reason: "missing" });
-    return fail(401, "UNAUTHORIZED", "A capture credential is required (Authorization: Bearer bbmc_…).");
+    return fail(401, "UNAUTHORIZED", `${kindArticle} ${kindNoun} credential is required (Authorization: Bearer ${kindPrefix}…).`);
   }
   const supabase = createServiceClient();
   const lookup = await findCredentialByToken(supabase, token, now);
   if (!lookup.ok) {
     log.warn("capture.auth_rejected", { reason: lookup.reason });
-    if (lookup.reason === "UNKNOWN") return fail(401, "UNAUTHORIZED", "Unknown capture credential.");
-    return fail(401, lookup.reason === "expired" ? "CREDENTIAL_EXPIRED" : "CREDENTIAL_REVOKED", lookup.reason === "expired" ? "This capture credential has expired. Create a new one in Settings." : "This capture credential was revoked.");
+    if (lookup.reason === "UNKNOWN") return fail(401, "UNAUTHORIZED", `Unknown ${kindNoun} credential.`);
+    return fail(401, lookup.reason === "expired" ? "CREDENTIAL_EXPIRED" : "CREDENTIAL_REVOKED", lookup.reason === "expired" ? `This ${kindNoun} credential has expired. Create a new one in Settings.` : `This ${kindNoun} credential was revoked.`);
   }
   if ((lookup.credential.kind ?? "capture") !== requiredKind) {
     log.warn("capture.auth_rejected", { reason: "wrong_kind", kind: lookup.credential.kind });
