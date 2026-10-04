@@ -10,6 +10,8 @@ const ALLOWED: Array<[PaymentStatus, PaymentStatus]> = [
   ["disputed", "refunded"],
   ["disputed", "paid"],
   ["failed", "pending"],
+  ["failed", "paid"],
+  ["failed", "cancelled"],
 ];
 
 describe("transition table", () => {
@@ -50,5 +52,11 @@ describe("applyTransition", () => {
     expect(applyTransition("refunded", "paid", now)).toEqual({ ok: false, reason: "illegal_transition" });
     expect(applyTransition("cancelled", "paid", now)).toEqual({ ok: false, reason: "illegal_transition" });
     expect(applyTransition("paid", "paid", now)).toEqual({ ok: false, reason: "same_status" });
+    // A late FAILED after paid never regresses the booking.
+    expect(applyTransition("paid", "failed", now)).toEqual({ ok: false, reason: "illegal_transition" });
+  });
+
+  it("failed -> paid (customer retried the same invoice) sets paid_at", () => {
+    expect(applyTransition("failed", "paid", now)).toEqual({ ok: true, columns: { status: "paid", payment_status_updated_at: now.toISOString(), paid_at: now.toISOString() } });
   });
 });

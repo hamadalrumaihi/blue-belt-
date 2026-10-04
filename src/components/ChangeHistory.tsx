@@ -26,6 +26,8 @@ const DOT: Record<string, string> = {
   MATCH_NUMBER_CHANGE: "bg-primary",
   MATCH_FOUND: "bg-success",
   IDENTITY_AMBIGUOUS: "bg-amber-500",
+  MANUAL_CORRECTION: "bg-primary",
+  OVERRIDE_SUPERSEDED: "bg-amber-500",
 };
 
 function labelOf(v: unknown): string {
@@ -87,6 +89,8 @@ function sentence(type: string | null): string {
     case "ORDER_CHANGE": return "match order changed";
     case "MATCH_NUMBER_CHANGE": return "match number changed";
     case "MATCH_FOUND": return "match found";
+    case "MANUAL_CORRECTION": return "corrected by the owner";
+    case "OVERRIDE_SUPERSEDED": return "manual correction superseded by the source";
     default: return "updated";
   }
 }

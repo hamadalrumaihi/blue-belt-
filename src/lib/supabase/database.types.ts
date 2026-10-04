@@ -94,6 +94,13 @@ export type PhotoMatchRow = {
   last_changed_at: string | null;
   raw_snapshot: Json;
   identity_confidence: IdentityConfidence;
+  /** Owner manual correction (Phase C): source values above stay untouched. */
+  override_mat: string | null;
+  override_scheduled_at: string | null;
+  override_by: string | null;
+  override_at: string | null;
+  override_reason: string | null;
+  override_until: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -202,6 +209,56 @@ export type PhotoIncidentRow = {
   updated_at: string;
 };
 
+/** Phase A: capture ledger (one row per capture of a source page, per owner). */
+export type CaptureTransport = "import" | "handoff" | "agent" | "worker" | "http";
+export type CaptureCompleteness = "complete" | "partial" | "unknown";
+export type CaptureStatus = "received" | "applied" | "rejected";
+
+export type PhotoCaptureRow = {
+  id: string;
+  owner_id: string;
+  capture_id: string;
+  source_key: string;
+  source_url: string;
+  final_url: string | null;
+  transport: CaptureTransport;
+  captured_at: string;
+  received_at: string;
+  applied_at: string | null;
+  status: CaptureStatus;
+  reject_code: string | null;
+  content_hash: string;
+  bytes: number;
+  completeness: CaptureCompleteness;
+  athlete_count: number | null;
+  outcome: Json;
+  diagnostics: Json;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Phase B: machine-intake credentials (token hash only) with agent heartbeat. */
+export type PhotoCaptureCredentialRow = {
+  id: string;
+  owner_id: string;
+  name: string;
+  /** capture (Windows agent) | orders (Zapier / Pic-Time intake). */
+  kind: "capture" | "orders";
+  token_hash: string;
+  token_prefix: string;
+  scope_source_keys: string[] | null;
+  scope_event_id: string | null;
+  expires_at: string;
+  revoked_at: string | null;
+  last_used_at: string | null;
+  use_count: number;
+  last_heartbeat_at: string | null;
+  agent_version: string | null;
+  agent_status: Json;
+  created_at: string;
+  updated_at: string;
+};
+
 // ---------------------------------------------------------------------------
 // Telegram notifications
 // ---------------------------------------------------------------------------
@@ -230,7 +287,7 @@ export type PhotoNotificationSubscriptionRow = {
   updated_at: string;
 };
 
-export type DeliveryStatus = "pending" | "sent" | "failed" | "skipped";
+export type DeliveryStatus = "pending" | "sending" | "sent" | "failed" | "skipped";
 
 export type PhotoNotificationDeliveryRow = {
   id: number;
@@ -246,6 +303,11 @@ export type PhotoNotificationDeliveryRow = {
   last_error: string | null;
   next_attempt_at: string | null;
   sent_at: string | null;
+  /** Phase D: lease-based claim by the delivery runner. */
+  leased_until: string | null;
+  lease_owner: string | null;
+  /** match | orders | system — the message prefix. */
+  category: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -332,6 +394,22 @@ export type PhotoOrderRow = {
   paid_at: string | null;
   approved_in_pictime_at: string | null;
   metadata: Json;
+  /** Phase E: intake provenance and payment situation (separate from the lifecycle `status`). */
+  source: string;
+  external_ref: string | null;
+  payment_method: string;
+  payment_state: string;
+  payment_reference: string | null;
+  payment_reported_state: string | null;
+  items: Json;
+  placed_at: string | null;
+  received_at: string | null;
+  buyer_note: string | null;
+  athlete_name_hint: string | null;
+  raw: Json;
+  payment_confirmed_at: string | null;
+  payment_confirmed_by: string | null;
+  fulfilled_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -430,6 +508,12 @@ export type Database = {
           | "last_changed_at"
           | "raw_snapshot"
           | "identity_confidence"
+          | "override_mat"
+          | "override_scheduled_at"
+          | "override_by"
+          | "override_at"
+          | "override_reason"
+          | "override_until"
         >;
         Update: Partial<PhotoMatchRow>;
         Relationships: [];
@@ -476,6 +560,24 @@ export type Database = {
         Update: Partial<PhotoIncidentRow>;
         Relationships: [];
       };
+      photo_capture_credentials: {
+        Row: PhotoCaptureCredentialRow;
+        Insert: Optional<
+          PhotoCaptureCredentialRow,
+          GeneratedCols | "kind" | "scope_source_keys" | "scope_event_id" | "revoked_at" | "last_used_at" | "use_count" | "last_heartbeat_at" | "agent_version" | "agent_status"
+        >;
+        Update: Partial<PhotoCaptureCredentialRow>;
+        Relationships: [];
+      };
+      photo_captures: {
+        Row: PhotoCaptureRow;
+        Insert: Optional<
+          PhotoCaptureRow,
+          GeneratedCols | "final_url" | "transport" | "received_at" | "applied_at" | "status" | "reject_code" | "bytes" | "completeness" | "athlete_count" | "outcome" | "diagnostics"
+        >;
+        Update: Partial<PhotoCaptureRow>;
+        Relationships: [];
+      };
       photo_telegram_links: {
         Row: PhotoTelegramLinkRow;
         Insert: Optional<PhotoTelegramLinkRow, GeneratedCols | "chat_id" | "chat_title" | "link_code" | "link_code_expires_at" | "linked_at" | "enabled">;
@@ -492,7 +594,7 @@ export type Database = {
         Row: PhotoNotificationDeliveryRow;
         Insert: Optional<
           PhotoNotificationDeliveryRow,
-          GeneratedCols | "athlete_id" | "match_id" | "payload" | "status" | "attempts" | "last_error" | "next_attempt_at" | "sent_at"
+          GeneratedCols | "athlete_id" | "match_id" | "payload" | "status" | "attempts" | "last_error" | "next_attempt_at" | "sent_at" | "leased_until" | "lease_owner" | "category"
         >;
         Update: Partial<PhotoNotificationDeliveryRow>;
         Relationships: [];
@@ -556,6 +658,21 @@ export type Database = {
           | "paid_at"
           | "approved_in_pictime_at"
           | "metadata"
+          | "source"
+          | "external_ref"
+          | "payment_method"
+          | "payment_state"
+          | "payment_reference"
+          | "payment_reported_state"
+          | "items"
+          | "placed_at"
+          | "received_at"
+          | "buyer_note"
+          | "athlete_name_hint"
+          | "raw"
+          | "payment_confirmed_at"
+          | "payment_confirmed_by"
+          | "fulfilled_at"
         >;
         Update: Partial<PhotoOrderRow>;
         Relationships: [];
@@ -586,6 +703,22 @@ export type Database = {
       photo_set_coverage_done: {
         Args: { p_athlete_id: string; p_kind: string; p_done: boolean };
         Returns: PhotoCoverageRow;
+      };
+      photo_claim_notification_deliveries: {
+        Args: { p_channel: string; p_limit: number; p_lease_seconds: number; p_worker: string; p_owner_id?: string | null };
+        Returns: PhotoNotificationDeliveryRow[];
+      };
+      photo_apply_payment_transition: {
+        Args: { p_booking_id: string; p_expected_status: string; p_columns: Json; p_attempt?: Json | null; p_event_row_id?: number | null; p_processing_result?: string | null; p_delivery?: Json | null };
+        Returns: Json;
+      };
+      photo_record_order: {
+        Args: { p_owner_id: string; p_order: Json; p_delivery?: Json | null };
+        Returns: Json;
+      };
+      photo_apply_coverage_command: {
+        Args: { p_command_id: string; p_athlete_id: string; p_kind: string; p_done: boolean; p_expected_done_at: string | null; p_force?: boolean };
+        Returns: Json;
       };
     };
     Enums: Record<string, never>;

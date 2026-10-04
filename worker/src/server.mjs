@@ -82,12 +82,13 @@ export function createServer(deps = {}) {
           reqLog.warn("render.redirect_blocked", { host: target.hostname, path: target.pathname, landedHost: safeHost(result.finalUrl), elapsedMs });
           return json(res, 502, { ok: false, code: "REDIRECT_BLOCKED", message: "Page redirected outside the allow-listed hosts.", status: result.status ?? null, elapsedMs, strategy: "browser" });
         }
-        reqLog.info("render.ok", { host: target.hostname, path: target.pathname, status: result.status ?? null, bytes: result.html.length, elapsedMs, landedPath: landed.url.pathname });
-        return json(res, 200, { ok: true, html: result.html, finalUrl: landed.url.toString(), status: result.status ?? null, elapsedMs, strategy: "browser", fetchedAt: new Date().toISOString() });
+        const completeness = result.completeness === "complete" || result.completeness === "partial" ? result.completeness : "unknown";
+        reqLog.info("render.ok", { host: target.hostname, path: target.pathname, status: result.status ?? null, bytes: result.html.length, elapsedMs, landedPath: landed.url.pathname, readiness: result.readiness, completeness, pages: result.pages, frames: result.frames });
+        return json(res, 200, { ok: true, html: result.html, finalUrl: landed.url.toString(), status: result.status ?? null, elapsedMs, strategy: "browser", fetchedAt: new Date().toISOString(), readiness: result.readiness ?? null, completeness, pages: result.pages ?? 1, frames: result.frames ?? 0 });
       }
 
-      reqLog.info("render.failed", { host: target.hostname, path: target.pathname, code: result.code, challengeKind: result.challengeKind, status: result.status ?? null, elapsedMs });
-      return json(res, 502, { ok: false, code: result.code, message: result.message, challengeKind: result.challengeKind, status: result.status ?? null, elapsedMs, strategy: "browser", fetchedAt: new Date().toISOString() });
+      reqLog.info("render.failed", { host: target.hostname, path: target.pathname, code: result.code, challengeKind: result.challengeKind, readiness: result.readiness, status: result.status ?? null, elapsedMs });
+      return json(res, 502, { ok: false, code: result.code, message: result.message, challengeKind: result.challengeKind, readiness: result.readiness, status: result.status ?? null, elapsedMs, strategy: "browser", fetchedAt: new Date().toISOString() });
     }
 
     return json(res, 404, { ok: false, code: "NOT_FOUND", message: "Unknown route." });

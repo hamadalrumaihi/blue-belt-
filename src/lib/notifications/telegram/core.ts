@@ -1,6 +1,6 @@
 import type { AppAlert } from "@/lib/notifications/types";
 import type { ChangeValue, DetectedChange } from "@/lib/changes";
-import { isTelegramAlertKind, type TelegramAlertKind } from "./kinds";
+import { CATEGORY_LABEL, isTelegramAlertKind, type MessageCategory, type TelegramAlertKind } from "./kinds";
 
 /**
  * Pure helpers for the Telegram channel: dedupe keys, message formatting,
@@ -48,6 +48,14 @@ export function formatTelegramMessage(alert: Pick<AppAlert, "title" | "body" | "
   const meta = [details.mat ?? alert.mat, details.time].filter((v): v is string => Boolean(v && v.trim()));
   if (meta.length) lines.push(escapeHtml(meta.join(" · ")));
   return lines.join("\n");
+}
+
+/** Puts the category tag ([Match] / [Orders] / [System]) at the start of the message's bold title. */
+export function withCategory(html: string, category: MessageCategory): string {
+  const tag = `[${CATEGORY_LABEL[category]}]`;
+  if (html.startsWith(`<b>${tag}`) || html.startsWith(`<b>${tag}`)) return html;
+  if (html.startsWith("<b>")) return `<b>${tag} ${html.slice(3)}`;
+  return `<b>${tag}</b> ${html}`;
 }
 
 /** Milliseconds to wait before the next attempt, or null when no attempts remain. */

@@ -41,3 +41,8 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 worker/node_modules
+
+# supabase cli scratch
+supabase/.temp
+agent/node_modules
+agent/agent.env

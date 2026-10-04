@@ -17,7 +17,22 @@ export type WatchOptions = {
   now?: Date;
   /** Request-scoped logger (carries the correlation id). */
   log?: Logger;
+  /**
+   * Capture-once: when several clients of ONE owner watch the same source,
+   * the batch passes a shared map and a key (owner + source identity). The
+   * page is fetched once per key and parsed per athlete. Keys always include
+   * the owner, so a capture is never shared across owners.
+   */
+  pageCache?: PageCache;
+  cacheKey?: string;
 };
+
+export type PageCache = Map<string, Promise<FetchStage>>;
+
+/** Outcome of the fetch step, before any athlete-specific parsing. */
+export type FetchStage =
+  | { ok: true; html: string; finalUrl: string; sourceStatus: number | null; prefix: "http" | "browser"; attempts?: number; elapsedMs: number; completeness?: WatchDiagnostics["completeness"]; readiness?: string }
+  | { ok: false; result: Omit<WatchResult, "athlete"> };
 
 /**
  * Validates, fetches and parses a source URL. Never throws: every failure
@@ -48,6 +63,8 @@ export async function watchUrl(rawUrl: string | null | undefined, options: Watch
     elapsedMs: result.diagnostics?.elapsedMs ?? Date.now() - started,
     attempts: result.diagnostics?.attempts,
     workerCode: result.diagnostics?.workerCode,
+    completeness: result.diagnostics?.completeness,
+    shared: result.diagnostics?.shared,
     detail: result.message,
   });
   return result;
@@ -134,9 +151,9 @@ async function watchUrlInner(rawUrl: string | null | undefined, options: WatchOp
     return { platform: policy.platform, status: "UNSUPPORTED_HOST", code: "UNSUPPORTED_HOST", athlete, matches: [], sourceUrl: policy.url.toString(), fetchedAt, message: "No adapter for this host.", strategy: "none", diagnostics: diag({ strategy: "none" }) };
   }
 
-  const ctx = (finalUrl: string): WatchContext => ({
+  const ctx = (finalUrl: string, athleteName: string | null): WatchContext => ({
     url: new URL(finalUrl),
-    athleteName: athlete,
+    athleteName,
     timezone: options.timezone || DEFAULT_TIMEZONE,
     eventDate: options.eventDate ?? null,
     now,
@@ -149,52 +166,93 @@ async function watchUrlInner(rawUrl: string | null | undefined, options: WatchOp
     fetchedAt,
   };
 
-  let plain: WatchResult | null = null;
-  if (!preferBrowserWorker()) {
-    const fetched = await safeFetchHtml(policy.url);
-    let attempt: WatchResult;
-    if (!fetched.ok) {
-      attempt = {
-        ...base,
-        status: "FETCH_ERROR",
-        code: fetchCode(fetched),
-        message: fetched.message,
-        strategy: "http",
-        diagnostics: diag({ strategy: "http", sourceStatus: fetched.status ?? null, attempts: fetched.attempts }),
-      };
+  // Fetch once per (owner, source) when the batch asked for it; parse per athlete.
+  let shared = false;
+  let stage: FetchStage;
+  const cache = options.pageCache;
+  const key = options.cacheKey;
+  if (cache && key) {
+    const hit = cache.get(key);
+    if (hit) {
+      shared = true;
+      stage = await hit;
     } else {
-      const parsed = adapter.parse(fetched.html, ctx(fetched.finalUrl));
-      const strategy = parsed.strategy ? `http:${parsed.strategy}` : "http";
-      attempt = { ...parsed, strategy, diagnostics: diag({ strategy, sourceStatus: fetched.status, finalUrl: fetched.finalUrl, attempts: fetched.attempts }) };
+      const pending = fetchStage(adapter, policy.url, base, ctx, started);
+      cache.set(key, pending);
+      stage = await pending;
     }
-    if (attempt.status !== "REQUIRES_BROWSER_WATCHER") return attempt;
+  } else {
+    stage = await fetchStage(adapter, policy.url, base, ctx, started);
+  }
+
+  if (!stage.ok) {
+    const r = stage.result;
+    return { ...r, athlete, diagnostics: r.diagnostics ? { ...r.diagnostics, shared: shared || undefined } : undefined };
+  }
+  const parsed = adapter.parse(stage.html, ctx(stage.finalUrl, athlete));
+  const strategy = `${stage.prefix}:${parsed.strategy ?? "none"}`;
+  return {
+    ...parsed,
+    strategy,
+    diagnostics: diag({ strategy, sourceStatus: stage.sourceStatus, finalUrl: stage.finalUrl, elapsedMs: stage.elapsedMs, attempts: stage.attempts, completeness: stage.completeness, readiness: stage.readiness, shared: shared || undefined }),
+  };
+}
+
+/**
+ * The network part of a watch: plain HTTPS first (unless WATCHER_PREFER_BROWSER),
+ * then the browser worker when the page is a challenge / JS shell. The
+ * "needs a browser" verdict does not depend on the athlete (challenge and
+ * shell detection run before any name filtering), so it is safe to share.
+ */
+async function fetchStage(
+  adapter: WatcherAdapter,
+  url: URL,
+  base: Pick<WatchResult, "platform" | "athlete" | "matches" | "sourceUrl" | "fetchedAt">,
+  ctx: (finalUrl: string, athleteName: string | null) => WatchContext,
+  started: number,
+): Promise<FetchStage> {
+  const diag = (partial: Partial<WatchDiagnostics> & { strategy: string }): WatchDiagnostics => ({ sourceStatus: null, finalUrl: null, elapsedMs: Date.now() - started, ...partial });
+  const fail = (result: Omit<WatchResult, "athlete">): FetchStage => ({ ok: false, result });
+
+  let plain: Omit<WatchResult, "athlete"> | null = null;
+  if (!preferBrowserWorker()) {
+    const fetched = await safeFetchHtml(url);
+    if (!fetched.ok) {
+      return fail({ ...base, status: "FETCH_ERROR", code: fetchCode(fetched), message: fetched.message, strategy: "http", diagnostics: diag({ strategy: "http", sourceStatus: fetched.status ?? null, attempts: fetched.attempts }) });
+    }
+    const probe = adapter.parse(fetched.html, ctx(fetched.finalUrl, null));
+    if (probe.status !== "REQUIRES_BROWSER_WATCHER") {
+      return { ok: true, html: fetched.html, finalUrl: fetched.finalUrl, sourceStatus: fetched.status, prefix: "http", attempts: fetched.attempts, elapsedMs: Date.now() - started };
+    }
+    const strategy = probe.strategy ? `http:${probe.strategy}` : "http";
+    plain = { ...probe, strategy, diagnostics: diag({ strategy, sourceStatus: fetched.status, finalUrl: fetched.finalUrl, attempts: fetched.attempts }) };
     if (!isBrowserWorkerConfigured()) {
-      return { ...attempt, code: "BROWSER_WORKER_NOT_CONFIGURED", message: `${attempt.message ?? "The source needs a browser."} The browser worker is not configured.` };
+      return fail({ ...plain, code: "BROWSER_WORKER_NOT_CONFIGURED", message: `${plain.message ?? "The source needs a browser."} The browser worker is not configured.` });
     }
-    plain = attempt;
   }
 
   // Browser path.
-  const rendered = await browserFetchHtml(policy.url);
+  const rendered = await browserFetchHtml(url);
   if (!rendered.ok) {
     const mapped = browserFailure(rendered.code);
     const fallback = plain ?? { ...base };
-    return {
+    return fail({
       ...fallback,
       status: mapped.status,
       code: mapped.code,
       message: mapped.message(rendered.message),
       strategy: "browser",
-      diagnostics: diag({ strategy: "browser", sourceStatus: rendered.status ?? null, elapsedMs: rendered.elapsedMs ?? Date.now() - started, workerCode: rendered.challengeKind ? `${rendered.workerCode ?? rendered.code}:${rendered.challengeKind}` : rendered.workerCode ?? rendered.code, attempts: rendered.attempts }),
-    };
+      diagnostics: diag({
+        strategy: "browser",
+        sourceStatus: rendered.status ?? null,
+        elapsedMs: rendered.elapsedMs ?? Date.now() - started,
+        workerCode: rendered.challengeKind ? `${rendered.workerCode ?? rendered.code}:${rendered.challengeKind}` : rendered.workerCode ?? rendered.code,
+        attempts: rendered.attempts,
+        readiness: rendered.readiness,
+      }),
+    });
   }
-  const result = adapter.parse(rendered.html, ctx(rendered.finalUrl));
-  const strategy = `browser:${result.strategy ?? "none"}`;
-  return {
-    ...result,
-    strategy,
-    diagnostics: diag({ strategy, sourceStatus: rendered.status, finalUrl: rendered.finalUrl, elapsedMs: rendered.elapsedMs, attempts: rendered.attempts }),
-  };
+  return { ok: true, html: rendered.html, finalUrl: rendered.finalUrl, sourceStatus: rendered.status, prefix: "browser", attempts: rendered.attempts, elapsedMs: rendered.elapsedMs, completeness: rendered.completeness, readiness: rendered.readiness };
 }
 
 function fetchCode(r: Extract<SafeFetchResult, { ok: false }>): WatchCode {
@@ -222,6 +280,8 @@ function browserFailure(code: BrowserFetchCode): { status: WatchStatus; code: Wa
       };
     case "NOT_CONFIGURED":
       return { status: "REQUIRES_BROWSER_WATCHER", code: "BROWSER_WORKER_NOT_CONFIGURED", message: () => "The source needs a browser and the browser worker is not configured." };
+    case "PAGE_NOT_READY":
+      return { status: "FETCH_ERROR", code: "BROWSER_PAGE_NOT_READY", message: (w) => w || "The page never showed a schedule." };
     case "TIMEOUT":
       return { status: "FETCH_ERROR", code: "BROWSER_WORKER_TIMEOUT", message: () => "Browser worker timed out while rendering the page." };
     case "WORKER_UNREACHABLE":
@@ -238,4 +298,4 @@ function browserFailure(code: BrowserFetchCode): { status: WatchStatus; code: Wa
 }
 
 export { validateSourceUrl } from "./url-policy";
-export type { NormalizedMatch, WatchResult, WatchStatus, WatchCode } from "./types";
+export type { NormalizedMatch, WatchResult, WatchStatus, WatchCode, WatchDiagnostics } from "./types";

@@ -207,8 +207,23 @@ function fakeSupabase(seed: Partial<Tables> = {}) {
     };
     return b;
   }
-  return { client: { from } as unknown as SupabaseClient<Database>, tables };
+  /** Emulates photo_claim_notification_deliveries (due rows → sending, attempts+1, lease). */
+  const rpc = async (name: string, args: Record<string, unknown>) => {
+    if (name !== "photo_claim_notification_deliveries") return { data: null, error: { message: `unknown rpc ${name}` } };
+    const now = clock.now.getTime();
+    const due = tables.photo_notification_deliveries
+      .filter((r) => r.channel === args.p_channel && (!args.p_owner_id || r.owner_id === args.p_owner_id) && (r.attempts as number) < 3)
+      .filter((r) => (["pending", "failed"].includes(r.status as string) && r.next_attempt_at && new Date(r.next_attempt_at as string).getTime() <= now) || (r.status === "sending" && r.leased_until && new Date(r.leased_until as string).getTime() < now))
+      .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))
+      .slice(0, args.p_limit as number);
+    for (const r of due) Object.assign(r, { status: "sending", attempts: (r.attempts as number) + 1, leased_until: new Date(now + 60_000).toISOString(), lease_owner: args.p_worker });
+    return { data: due.map((r) => ({ ...r })), error: null };
+  };
+  return { client: { from, rpc } as unknown as SupabaseClient<Database>, tables };
 }
+
+/** The fake claim RPC reads "now" from here (tests move it forward). */
+const clock = { now: new Date("2026-10-02T10:00:00.000Z") };
 
 const NOW = new Date("2026-10-02T10:00:00.000Z");
 const OWNER = "11111111-1111-4111-8111-111111111111";
@@ -232,6 +247,7 @@ function seeded(extra: Partial<{ kinds: string[]; linkEnabled: boolean }> = {}) 
 }
 
 async function run(client: SupabaseClient<Database>, data: ReturnType<typeof fixture>, sendMessage: Sender, now = NOW) {
+  clock.now = now;
   const { runTelegramNotifier } = await import("@/lib/notifications/telegram/notifier");
   await runTelegramNotifier({ supabase: client, now, log: createLogger(), ...data }, { sendMessage });
 }
@@ -245,10 +261,10 @@ describe("runTelegramNotifier", () => {
 
     expect(send).toHaveBeenCalledTimes(1);
     expect(send.mock.calls[0][0]).toBe(123456);
-    expect(send.mock.calls[0][1]).toContain("<b>GO TO MAT — Jane Doe</b>");
+    expect(send.mock.calls[0][1]).toContain("<b>[Match] GO TO MAT — Jane Doe</b>");
     expect(send.mock.calls[0][1]).toContain("Mat 3 · 14:01");
     expect(tables.photo_notification_deliveries).toHaveLength(1);
-    expect(tables.photo_notification_deliveries[0]).toMatchObject({ alert_key: `go:${MATCH}`, kind: "GO_TO_MAT", status: "sent", attempts: 1, match_id: MATCH });
+    expect(tables.photo_notification_deliveries[0]).toMatchObject({ alert_key: `go:${MATCH}`, kind: "GO_TO_MAT", status: "sent", attempts: 1, match_id: MATCH, category: "match" });
   });
 
   it("uses a stable key for history alerts and the subscription's kinds filter", async () => {
@@ -259,7 +275,7 @@ describe("runTelegramNotifier", () => {
     await run(client, fixture({ minutes: 1, changes: [change] }), send);
 
     expect(send).toHaveBeenCalledTimes(1);
-    expect(send.mock.calls[0][1]).toContain("<b>MAT CHANGE — Jane Doe</b>");
+    expect(send.mock.calls[0][1]).toContain("<b>[Match] MAT CHANGE — Jane Doe</b>");
     expect(tables.photo_notification_deliveries.map((r) => r.alert_key)).toEqual([`hist:MAT_CHANGE:${MATCH}:Mat 1>Mat 3`]);
   });
 

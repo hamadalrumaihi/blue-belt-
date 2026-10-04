@@ -29,8 +29,8 @@ Database (already live, see `supabase/migrations/20261002150000_watcher_v2.sql`)
 - No Pic-Time integration (`photo_orders` is untouched).
 - No refund API call (`PaymentProvider.refund` is declared optional and not
   implemented).
-- No cron wiring for reconciliation; `reconcileBooking` is ready for a cron or
-  an admin action to call.
+- No automatic fulfilment: approving the order in Pic-Time after payment is a
+  **manual step** — see "Fulfilment (shipped disabled)".
 - **No automatic client creation.** See the rule at the bottom.
 
 ## Environment variables
@@ -147,6 +147,90 @@ and attempt-row write as the webhook. It is safe to run on a schedule or by
 hand; use it for `Failed` webhooks listed by `GetWebhooks`, or as the
 belt-and-braces check the docs recommend ("rely on both the webhook and
 GetPaymentStatus").
+
+## Phase F: regressions, atomic state, confirmation job, fulfilment
+
+### Regressions pinned by `tests/payments/regressions.test.ts`
+
+| Case | Behaviour |
+| --- | --- |
+| Invalid-before-valid | An unsigned copy of an event is recorded as `invalid_signature`; when the real, signed delivery with the same `Event.Reference` arrives it **takes the row over** (`signature_valid=true`, `attempts+1`) and is processed. A further unsigned copy is a plain duplicate. |
+| Failed-then-success | `failed → paid` is a legal transition (the customer retried the same invoice; MyFatoorah sends SUCCESS directly). Both attempts are recorded. |
+| Late failure after paid | `paid → failed` is illegal: an out-of-order FAILED is stored as `ignored_transition:paid->failed`, `paid_at` untouched, no attempt row, no notification. |
+| Signature validity ≠ paid | A correctly signed event whose `Transaction.Status` is FAILED marks the booking `failed`, never `paid`, and enqueues nothing. |
+| Invoice not associated | A verified event for an unknown invoice is kept as `booking_not_found`; the confirmation job (`replayUnmatchedEvents`) applies it once a booking with that invoice exists. |
+| Isolation | An event for owner B's invoice changes only B's booking; attempt, event and outbox rows carry B's `owner_id`; A's booking is untouched. |
+
+### Atomic state
+
+`photo_apply_payment_transition` (`supabase/migrations/20261004050000_payment_transition_rpc.sql`,
+SECURITY DEFINER, service role only) applies, in ONE transaction, guarded by
+the expected previous status: the booking columns from `applyTransition`,
+the `photo_payment_attempts` row (unique per provider payment id), the
+`photo_payment_events` outcome, and — on `paid` — the owner's **[Orders]
+Payment confirmed** row in `photo_notification_deliveries`
+(key `payment:<bookingId>:paid`), delivered by the independent runner
+(`docs/telegram.md`). A concurrent writer wins (`applied=false`,
+`concurrent_update`) and the delivery is reported as an ignored transition.
+
+### Confirmation job
+
+`POST /api/cron/payments` (`Authorization: Bearer <CRON_SECRET>`, dark while
+`PAYMENTS_MYFATOORAH_ENABLED` is off):
+
+1. `replayUnmatchedEvents` — re-applies verified `booking_not_found` events
+   (no provider call), bounded to 50 per run.
+2. Only with **`PAYMENTS_RECONCILE_ENABLED=1`**: `reconcilePendingBookings`
+   asks `GetPaymentStatus` about bookings still `pending` / `failed` 10+
+   minutes after creation (25 per run). Off by default so nothing calls the
+   provider before activation.
+
+Tick it from the Railway worker with `PAYMENTS_SECONDS=300` (same APP_URL /
+CRON_SECRET as the other loops), or any cron.
+
+### Fulfilment (shipped disabled)
+
+`src/lib/payments/fulfillment.ts`: `isFulfillmentAvailable()` is hard-coded
+`false` and `fulfillmentProvider()` returns `null`. **Dependency:** a
+verified Pic-Time order-approval integration (API or Zapier action) for this
+account — none has been verified. Until then a paid booking is flagged
+`metadata.fulfillment = { state: "manual", dependency }` and the owner's
+confirmation message says "Approve the order in Pic-Time by hand". No env
+flag can switch automatic fulfilment on; it needs code (a provider) plus a
+verified test order.
+
+### Activation procedure (production payments stay OFF until this is done)
+
+1. **Test portal first.** In Vercel *Preview* (not Production) set
+   `PAYMENTS_MYFATOORAH_ENABLED=1`, `MYFATOORAH_API_KEY=<test token>`,
+   `MYFATOORAH_WEBHOOK_SECRET=<test secret>`, `MYFATOORAH_BASE_URL=https://apitest.myfatoorah.com`.
+   Register the preview URL as the V2 webhook in the demo portal (events:
+   payment status, refund status, dispute status; secure key on).
+2. Create a test booking row with the invoice id from `SendPayment`, pay it
+   with a MyFatoorah test card, and check: `photo_payment_events` has the
+   delivery with `signature_valid=true`, `processing_result=processed`; the
+   booking is `paid` with `paid_at`; an attempt row exists; the owner's
+   Telegram received **[Orders] Payment confirmed** (via the delivery
+   runner). Re-send the webhook from the portal: `duplicate`. Refund it:
+   `refunded`.
+3. Run `POST /api/cron/payments` by hand with the cron secret;
+   then set `PAYMENTS_RECONCILE_ENABLED=1` on the preview and run it again
+   with a deliberately unpaid invoice to see `reconcile.scanned`.
+4. Only after 1–3 pass: switch **Production** env to the live key, the live
+   secret and `MYFATOORAH_BASE_URL=https://api-qa.myfatoorah.com`, register
+   the production webhook URL, and set `PAYMENTS_MYFATOORAH_ENABLED=1` last.
+   Add `PAYMENTS_SECONDS=300` to the Railway worker to run the confirmation
+   job. Charges and customer-facing payment links still need a checkout flow,
+   which does not exist yet — activation here only makes the app able to
+   *observe* payments correctly.
+
+### Rollback
+
+Set `PAYMENTS_MYFATOORAH_ENABLED=0` (webhook and cron answer 404 within one
+deploy; MyFatoorah retries up to 5 times and then lists misses in
+`GetWebhooks` for later replay through `processWebhook` / reconciliation).
+Remove `PAYMENTS_SECONDS` from the worker. The migration is additive and can
+stay; no data is deleted.
 
 ## Rule: paid bookings never auto-create clients
 

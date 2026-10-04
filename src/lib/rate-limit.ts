@@ -69,4 +69,8 @@ export const RULES = {
   importReceivePerIp: { max: 30, windowMs: 60_000 } satisfies RateLimitRule,
   /** Scheduled refresh endpoint (shared secret, but still bounded). */
   cron: { max: 12, windowMs: 60_000 } satisfies RateLimitRule,
+  /** Machine capture intake, per credential (an agent posts at most one capture per source per minute). */
+  capturePerCredential: { max: 60, windowMs: 60_000 } satisfies RateLimitRule,
+  /** Unauthenticated-token probes against the capture endpoints, per client address. */
+  captureAuthPerIp: { max: 30, windowMs: 60_000 } satisfies RateLimitRule,
 };

@@ -183,6 +183,9 @@ Schema lives in `supabase/migrations/`:
 - `20260929000000_baseline_schema.sql` — canonical, idempotent baseline: every table with foreign keys, constraints, indexes, RLS policies and `updated_at` triggers. A clean project is reproduced with `supabase db push` (or by pasting the files into the SQL editor in order).
 - `20260929120000_tournament_watcher_v1.sql` — the original additive watcher columns.
 - `20261002150000_watcher_v2.sql` — source health, the atomic refresh RPC, persisted settings, the collaboration foundation, Telegram and payment tables.
+- `20261003000000_collaboration_coverage.sql`, `20261003010000_incidents.sql` — coverage board, collaborator functions, operational incidents.
+- `20261004000000_captures.sql` — the capture ledger (`photo_captures`): one row per capture of a source page, unique per owner + capture id. See [docs/captures.md](docs/captures.md).
+- `20261004010000_capture_credentials.sql` — `photo_capture_credentials`: hashed, expiring, revocable machine-intake credentials with the agent's heartbeat. See [docs/windows-agent.md](docs/windows-agent.md).
 
 Core tables: **photo_events**, **photo_athletes** (with source health: `last_attempt_at`, `last_success_at`, `consecutive_failures`, `last_watch_status/code/message/strategy`, `last_source_status`, `last_final_url`, `last_elapsed_ms`, `refresh_version`, generated `name_key`), **photo_matches** (`identity_confidence` exact | probable | ambiguous), **photo_match_history**. Prepared tables: `photo_user_settings`, `photo_event_settings`, `photo_event_members`, `photo_telegram_links`, `photo_notification_subscriptions`, `photo_notification_deliveries`, `photo_bookings`, `photo_payment_attempts`, `photo_payment_events`.
 
@@ -289,6 +292,46 @@ With a proxy, set `LOCALE` and `TZ_ID` to match the exit country so the browser'
 
 Safety: the hand-over accepts only `Origin`s on the allow-listed source hosts (or the app itself), is rate-limited per address and capped at 3 MB, and never auto-imports: the signed-in page asks for a tap first. `/api/import` requires the session like `/api/watch` and is rate-limited per user. A handed-over page that is still the challenge page is reported as `BROWSER_CHALLENGE` with a message to pass the check first. `/import` also accepts pasted HTML (desktop: view-source, select all, copy) and reads the page URL from its canonical tag.
 
+### Capture trust (Phase A)
+
+Every applied page, whatever brought it (import page, bookmarklet hand-over,
+the Windows agent, the render worker), is recorded in `photo_captures` with a
+client-stable capture id, the owner-neutral **source identity**, source and
+final URL, transport, captured / received / applied times, a content hash and a
+completeness label. The rules, with the tests that pin them, are in
+[docs/captures.md](docs/captures.md):
+
+- **Source identity** keeps the query parameters that select a bracket /
+  category / division and ignores presentation ones, so two brackets on one
+  path never merge and `?tab=2` never splits a page (`src/lib/capture/source-identity.ts`).
+- **Capture once, apply to all**: a batch refresh fetches each owner + source
+  once and parses it per athlete; captures are never shared across owners.
+- **Replay** of a capture id reports the earlier outcome instead of applying
+  twice; **out-of-order** captures older than the newest applied one are
+  refused (`STALE_CAPTURE`); implausible times (future, or older than 12 h)
+  are refused (`CAPTURE_TIMING`); a final URL that is another bracket is
+  refused (`FINAL_URL_MISMATCH`). Owner identity always comes from the
+  session or credential, never from the body.
+- The render worker now waits (bounded) for a **ready** page — not a
+  challenge, login, error page or empty app shell, and the page that was
+  asked for — then expands virtualised rows, "next / load more" pages and
+  same-origin frames within fixed bounds and labels the capture
+  `complete`, `partial` or `unknown` (`worker/src/readiness.mjs`).
+
+### Windows event-session agent (Phase B)
+
+When the automatic worker is blocked and the photographer cannot keep sending
+pages by hand, a small long-running agent on the event laptop (`/agent`) keeps
+each bracket page open in a real browser window and posts it once a minute to
+a **separate machine-intake endpoint**, `POST /api/capture` (JSON), with
+`GET /api/capture/jobs` for its job list and `POST /api/capture/heartbeat`.
+It authenticates with a revocable, expiring, owner/event-scoped **capture
+credential** created in Settings → Capture agent — never the service-role key.
+The HTML form hand-over (`/api/import/receive`) and the signed-in import page
+are unchanged. Durable spool, capture-id replay, backoff with `Retry-After`,
+pause on a human check and a clean stop are built in. Setup, start/stop and
+recovery: [docs/windows-agent.md](docs/windows-agent.md).
+
 ### `CHALLENGE_NOT_CLEARED` — what it means and what to do
 
 The worker answers `CHALLENGE_NOT_CLEARED` when the page is still Cloudflare's "Just a moment…" interstitial after `CHALLENGE_WAIT_MS`. The app records it per athlete as `REQUIRES_BROWSER_WATCHER` / code `BROWSER_CHALLENGE`, keeps the last known matches on screen marked **Stale**, and keeps the manual **Open source page** button, which is the guaranteed fallback at the mats.
@@ -364,9 +407,57 @@ through SECURITY DEFINER functions (`photo_collaborator_board`,
 `supabase/migrations/20261003000000_collaboration_coverage.sql` and the
 authorization test `supabase/tests/coverage_rls.test.sql`.
 
+### Offline completion and manual corrections (Phase C)
+
+- **Photos done / Video done work offline.** A tap records a desired-state
+  command (`{athlete, kind, done, expectedDoneAt, commandId}`) in
+  `localStorage` *before* anything is sent; a sync loop replays commands one
+  at a time through `applyCoverageCommand` → `photo_apply_coverage_command`,
+  which re-checks the session and assignment, applies idempotently by command
+  id (`photo_coverage_commands` log) and reports a **conflict** when someone
+  else changed the same kind since the client looked. A command is removed
+  only when the ack names its id and it is still the live command for that
+  athlete + kind, so a late ack can never delete a newer tap. UI states:
+  *Pending sync*, *Saved*, *Failed — will retry*, *Conflict* (apply mine /
+  keep theirs). `src/lib/offline/coverage-queue.ts`, `tests/coverage-queue.test.ts`,
+  `supabase/tests/coverage_commands.test.sql`.
+- **Owner manual mat / time corrections.** On a client's page the owner can
+  correct the mat and/or time (reason optional). The correction is stored in
+  `override_*` columns beside the source values, attributed and timestamped,
+  expires at the end of the event day by default, is labelled **Manual**
+  wherever the match is shown, and drives ranking/ETA. An automatic capture
+  never silently overwrites it: it is carried forward while the source still
+  says what it said, and dropped explicitly with an `OVERRIDE_SUPERSEDED`
+  history entry when the source itself changes that field.
+  `src/lib/manual-correction.ts`, `tests/manual-correction.test.ts`.
+
+## Orders (Pic-Time via Zapier, Phase E)
+
+Feature-flagged (`ORDERS_INTAKE_ENABLED=1`) JSON intake at
+`POST /api/orders/intake`, authenticated with an **orders intake credential**
+(`bbmo_…`, Settings → Orders intake) — distinct from payment-provider webhooks
+and from the capture agent's credentials. It records the order atomically with
+its **[Orders]** Telegram outbox row (`photo_record_order`), dedupes Zap
+retries by `(owner, source, externalRef)`, never invents prices, and stores
+Fawran / bank-transfer / cash orders as **"Order placed — payment not yet
+confirmed"** until the owner confirms by hand. Owner-only `/orders` list and
+detail pages; buyers stay apart from tracked athletes; collaborators cannot
+read orders (RLS test). Proposed contract, Zapier field mapping and synthetic
+fixtures: [docs/orders-intake.md](docs/orders-intake.md).
+
 ## Notifications and payments
 
 - **Telegram** (grammY) is implemented behind `TELEGRAM_ENABLED=1` + `TELEGRAM_BOT_TOKEN`; see [docs/telegram.md](docs/telegram.md). In-app alerts are independent of it.
+- **Independent delivery runner (Phase D).** Producers (match alerts after a
+  refresh, clock-driven 15/5-minute pre-match reminders, grouped incidents and
+  recoveries, orders) only enqueue rows; the runner claims due rows atomically
+  (`photo_claim_notification_deliveries`, lease + `SKIP LOCKED`), sends with
+  per-chat spacing and backoff, releases the claim on a rate limit and
+  recovers a crashed runner's leases. It runs as the bounded
+  `POST /api/cron/deliveries` job ticked by the Railway process every
+  `DELIVERY_SECONDS`, plus a small per-owner kick after a user's own refresh.
+  Messages carry **[Match] / [Orders] / [System]** prefixes; tests and
+  `TELEGRAM_DRY_RUN=1` never contact Telegram.
 - **Operational alerts.** Besides match alerts, Telegram now reports operational
   incidents (Cloudflare challenge, worker unavailable, source timeout, athlete
   not found, parse/persist errors) with the reason, last-verified time, whether
@@ -383,11 +474,21 @@ authorization test `supabase/tests/coverage_rls.test.sql`.
 npm run typecheck   # next typegen + tsc
 npm run lint        # eslint
 npm test            # vitest: parsers (fixtures), time/DST, validation, identity, plans, alerts, API 400s, worker client (MSW)
-npm run test:worker # worker: node --test (HTTP contract, URL policy, config); browser integration with BBM_WORKER_BROWSER_TESTS=1
+npm run test:worker # worker: node --test (HTTP contract, URL policy, config, readiness, scheduler); browser integration with BBM_WORKER_BROWSER_TESTS=1
+npm run test:agent  # Windows capture agent: node --test (schedule, spool, config, one full tick against a fake app)
+npm run check       # all of the above except the build
 npm run build
 ```
 
-`.github/workflows/ci.yml` runs type-check, lint, unit tests and the build with placeholder public Supabase values (no secrets), plus the worker checks and the browser integration test in the Playwright container. `supabase/tests/rls.test.sql` is a pgTAP suite for the RLS invariant (needs a local Supabase stack; not part of CI).
+`.github/workflows/ci.yml` runs type-check, lint, unit tests and the build with placeholder public Supabase values (no secrets), plus the worker and agent checks and the browser integration test in the Playwright container.
+
+**Database tests** (`supabase/tests/*.sql`) run against a real Postgres, not
+mocks: `rls.test.sql` (pgTAP, `supabase test db`) plus DO-block tests you
+paste into psql against a disposable database — each ends with
+`ERROR: ROLLBACK_OK: …` on success and rolls everything back:
+`coverage_rls`, `captures_rls`, `coverage_commands`, `deliveries_claim`,
+`orders_rls`. They need one seeded owner (`photo_events`) to run. Not part
+of CI (no hosted database there).
 
 ## Current limitations
 

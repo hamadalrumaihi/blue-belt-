@@ -2,8 +2,8 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { RefreshNotificationContext } from "@/lib/notifications/server";
 import { buildIncidentDrafts, incidentRef, recoveryText, type IncidentDraft } from "@/lib/notifications/incidents";
-import type { Database, Json } from "@/lib/supabase/database.types";
-import { TELEGRAM_CHANNEL } from "./core";
+import type { Database } from "@/lib/supabase/database.types";
+import { deliveryInsert } from "../delivery-runner";
 
 type Client = SupabaseClient<Database>;
 
@@ -73,7 +73,7 @@ async function processOwnerIncidents(
     } else {
       await supabase.from("photo_incidents").insert({ owner_id: ownerId, incident_key: d.key, kind: d.kind, event_id: d.eventId, source_host: d.sourceHost, athlete_count: d.athleteIds.length, status: "open", first_seen_at: now, last_seen_at: now, occurrences: 1 });
     }
-    deliveries.push({ owner_id: ownerId, channel: TELEGRAM_CHANNEL, alert_key: `incident:${d.key}`, kind: `INCIDENT_${d.kind}`, payload: { text: d.text } as Json, status: "pending", attempts: 0, next_attempt_at: now });
+    deliveries.push(deliveryInsert({ ownerId, alertKey: `incident:${d.key}`, kind: `INCIDENT_${d.kind}`, text: d.text, category: "system", now: new Date(now) }));
   }
 
   // Resolve open incidents that are no longer failing and whose event saw an OK read.
@@ -85,7 +85,7 @@ async function processOwnerIncidents(
     const kind = r.kind as IncidentDraft["kind"];
     const eventName = r.event_id ? events.get(r.event_id)?.name ?? null : null;
     const text = recoveryText({ kind, eventName, count: r.athlete_count ?? 1, ref: incidentRef(r.incident_key) });
-    deliveries.push({ owner_id: ownerId, channel: TELEGRAM_CHANNEL, alert_key: `recovery:${r.incident_key}:${r.last_seen_at}`, kind: `RECOVERY_${kind}`, payload: { text } as Json, status: "pending", attempts: 0, next_attempt_at: now });
+    deliveries.push(deliveryInsert({ ownerId, alertKey: `recovery:${r.incident_key}:${r.last_seen_at}`, kind: `RECOVERY_${kind}`, text, category: "system", now: new Date(now) }));
   }
 
   if (deliveries.length) {

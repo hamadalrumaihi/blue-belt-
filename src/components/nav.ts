@@ -1,5 +1,5 @@
 import type { ComponentType } from "react";
-import { CalendarIcon, CheckIcon, EyeIcon, HistoryIcon, HomeIcon, MoreIcon, SettingsIcon, UsersIcon } from "./icons";
+import { CalendarIcon, CheckIcon, EyeIcon, HistoryIcon, HomeIcon, MoreIcon, ReceiptIcon, SettingsIcon, UsersIcon } from "./icons";
 
 export type NavItem = { href: string; label: string; icon: ComponentType<{ size?: number; className?: string }> };
 
@@ -9,6 +9,7 @@ export const SIDEBAR_ITEMS: NavItem[] = [
   { href: "/clients", label: "Clients", icon: UsersIcon },
   { href: "/watcher", label: "Match Watcher", icon: EyeIcon },
   { href: "/coverage", label: "My coverage", icon: CheckIcon },
+  { href: "/orders", label: "Orders", icon: ReceiptIcon },
   { href: "/history", label: "History", icon: HistoryIcon },
   { href: "/settings", label: "Settings", icon: SettingsIcon },
 ];
@@ -22,6 +23,6 @@ export const BOTTOM_ITEMS: NavItem[] = [
 ];
 
 export function isActivePath(pathname: string, href: string): boolean {
-  if (href === "/more") return ["/more", "/history", "/settings"].some((p) => pathname === p || pathname.startsWith(`${p}/`));
+  if (href === "/more") return ["/more", "/history", "/settings", "/orders"].some((p) => pathname === p || pathname.startsWith(`${p}/`));
   return pathname === href || pathname.startsWith(`${href}/`);
 }

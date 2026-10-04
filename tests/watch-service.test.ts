@@ -209,6 +209,43 @@ describe("refreshAthletes", () => {
     expect(watchUrlMock.mock.calls.find((c) => c[1]?.athleteName === "A")?.[1]).toMatchObject({ timezone: "Europe/London", eventDate: "2026-03-14" });
     expect(watchUrlMock.mock.calls.find((c) => c[1]?.athleteName === "B")?.[1]).toMatchObject({ timezone: "Asia/Qatar", eventDate: null });
   });
+
+  it("capture-once: every athlete in a batch shares one page cache keyed by owner + source identity (never across owners)", async () => {
+    const page = "https://ajptour.com/en/event/1411/bracket/130617";
+    const a = athleteRow({ id: "dddddddd-0000-4000-8000-000000000001", name: "A", source_url: page });
+    const b = athleteRow({ id: "dddddddd-0000-4000-8000-000000000002", name: "B", source_url: `${page}/?tab=2` });
+    const c = athleteRow({ id: "dddddddd-0000-4000-8000-000000000003", name: "C", source_url: `${page}?category=5` });
+    const d = athleteRow({ id: "dddddddd-0000-4000-8000-000000000004", name: "D", source_url: page, owner_id: "other-owner" });
+    const fake = fakeSupabase({ matches: [], athlete: a, version: 0 });
+    watchUrlMock.mockResolvedValue(watchResult({ matches: [], status: "NO_MATCHES", code: "NO_MATCH_ROWS" }));
+
+    await refreshAthletes(fake.client, [a, b, c, d], new Map(), { now: NOW, staggerMs: 0 });
+
+    const keys = watchUrlMock.mock.calls.map((call) => call[1]?.cacheKey);
+    const caches = new Set(watchUrlMock.mock.calls.map((call) => call[1]?.pageCache));
+    expect(caches.size).toBe(1); // one shared map per batch
+    expect(keys[0]).toBe(`${a.owner_id}|ajptour.com|/event/1411/bracket/130617`);
+    expect(keys[1]).toBe(keys[0]); // same bracket, presentation params ignored
+    expect(keys[2]).toBe(`${a.owner_id}|ajptour.com|/event/1411/bracket/130617|category=5`); // other bracket
+    expect(keys[3]).toBe(`other-owner|ajptour.com|/event/1411/bracket/130617`); // other owner
+  });
+
+  it("a single refresh outside a batch does not use a page cache", async () => {
+    const athlete = athleteRow();
+    const fake = fakeSupabase({ matches: [], athlete, version: 0 });
+    watchUrlMock.mockResolvedValue(watchResult({ matches: [], status: "NO_MATCHES", code: "NO_MATCH_ROWS" }));
+    await refreshAthlete(fake.client, athlete, eventRow(), { now: NOW });
+    expect(watchUrlMock.mock.calls[0][1]?.pageCache).toBeUndefined();
+    expect(watchUrlMock.mock.calls[0][1]?.cacheKey).toBeUndefined();
+  });
+
+  it("persists the worker's completeness and readiness in the refresh diagnostics", async () => {
+    const athlete = athleteRow();
+    const fake = fakeSupabase({ matches: [], athlete, version: 0 });
+    watchUrlMock.mockResolvedValue(watchResult({ matches: [], status: "NO_MATCHES", code: "NO_MATCH_ROWS", diagnostics: { strategy: "browser:none", sourceStatus: 200, finalUrl: athlete.source_url, elapsedMs: 10, attempts: 1, completeness: "partial", readiness: "NO_SCHEDULE_YET", shared: true } }));
+    await refreshAthlete(fake.client, athlete, eventRow(), { now: NOW });
+    expect(fake.rpcCalls[0].args.p_diag).toMatchObject({ completeness: "partial", readiness: "NO_SCHEDULE_YET", shared: true });
+  });
 });
 
 describe("helpers", () => {

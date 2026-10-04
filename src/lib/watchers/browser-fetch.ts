@@ -19,6 +19,7 @@ const RETRY_DELAY_MS = 1_000;
 export type BrowserFetchCode =
   | "NOT_CONFIGURED"
   | "CHALLENGE_NOT_CLEARED"
+  | "PAGE_NOT_READY"
   | "WORKER_UNREACHABLE"
   | "WORKER_RESTARTING"
   | "WORKER_ERROR"
@@ -26,9 +27,11 @@ export type BrowserFetchCode =
   | "TIMEOUT"
   | "REDIRECT_BLOCKED";
 
+export type RenderCompleteness = "complete" | "partial" | "unknown";
+
 type RenderOnce =
-  | { ok: true; html: string; finalUrl: string; status: number | null; elapsedMs: number }
-  | { ok: false; code: BrowserFetchCode; message: string; workerCode?: string; challengeKind?: string; status?: number | null; elapsedMs?: number };
+  | { ok: true; html: string; finalUrl: string; status: number | null; elapsedMs: number; completeness: RenderCompleteness; readiness?: string }
+  | { ok: false; code: BrowserFetchCode; message: string; workerCode?: string; challengeKind?: string; readiness?: string; status?: number | null; elapsedMs?: number };
 
 export type BrowserFetchResult = RenderOnce & { attempts: number };
 
@@ -47,6 +50,8 @@ export function mapWorkerCode(code: string | undefined): BrowserFetchCode {
   switch (code) {
     case "CHALLENGE_NOT_CLEARED":
       return "CHALLENGE_NOT_CLEARED";
+    case "PAGE_NOT_READY":
+      return "PAGE_NOT_READY";
     case "TIMEOUT":
       return "TIMEOUT";
     case "WORKER_RESTARTING":
@@ -95,7 +100,7 @@ async function renderOnce(url: URL, fetchImpl: typeof fetch): Promise<RenderOnce
       : { ok: false, code: "WORKER_UNREACHABLE", message: "Browser worker unreachable." };
   }
 
-  let body: { ok?: boolean; html?: string; finalUrl?: string; status?: number | null; elapsedMs?: number; code?: string; message?: string; challengeKind?: string };
+  let body: { ok?: boolean; html?: string; finalUrl?: string; status?: number | null; elapsedMs?: number; code?: string; message?: string; challengeKind?: string; completeness?: string; readiness?: string };
   try {
     body = (await response.json()) as typeof body;
   } catch {
@@ -112,6 +117,7 @@ async function renderOnce(url: URL, fetchImpl: typeof fetch): Promise<RenderOnce
       code,
       workerCode,
       challengeKind: typeof body.challengeKind === "string" ? body.challengeKind : undefined,
+      readiness: typeof body.readiness === "string" ? body.readiness.slice(0, 40) : undefined,
       message: typeof body.message === "string" ? body.message.slice(0, 200) : `Browser worker error (HTTP ${response.status}).`,
       status: typeof body.status === "number" ? body.status : null,
       elapsedMs: typeof body.elapsedMs === "number" ? body.elapsedMs : undefined,
@@ -127,5 +133,6 @@ async function renderOnce(url: URL, fetchImpl: typeof fetch): Promise<RenderOnce
     finalUrl = policy.url.toString();
   }
 
-  return { ok: true, html: body.html, finalUrl, status: body.status ?? null, elapsedMs: body.elapsedMs ?? 0 };
+  const completeness: RenderCompleteness = body.completeness === "complete" || body.completeness === "partial" ? body.completeness : "unknown";
+  return { ok: true, html: body.html, finalUrl, status: body.status ?? null, elapsedMs: body.elapsedMs ?? 0, completeness, readiness: typeof body.readiness === "string" ? body.readiness.slice(0, 40) : undefined };
 }

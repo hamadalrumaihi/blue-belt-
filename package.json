@@ -12,7 +12,8 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:worker": "npm --prefix worker test",
-    "check": "npm run typecheck && npm run lint && npm test"
+    "test:agent": "npm --prefix agent test",
+    "check": "npm run typecheck && npm run lint && npm test && npm run test:worker && npm run test:agent"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

@@ -97,6 +97,8 @@ export function describeFailure(code: string | null | undefined, message?: strin
       return message ? `Browser worker error: ${message}` : "The browser worker returned an error.";
     case "BROWSER_PROXY_ERROR":
       return message ? `Browser worker proxy problem: ${message}` : "The browser worker's proxy failed.";
+    case "BROWSER_PAGE_NOT_READY":
+      return message ? `The page never showed a schedule: ${message}` : "The page loaded but never showed a schedule (login, error or empty app shell).";
     case "SOURCE_TIMEOUT":
       return "The source site did not respond in time.";
     case "SOURCE_HTTP_ERROR":

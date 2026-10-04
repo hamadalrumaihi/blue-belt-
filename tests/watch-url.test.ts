@@ -69,10 +69,64 @@ describe("watchUrl end-to-end (MSW)", () => {
     const result = await watchUrl(PAGE, opts);
     expect(result).toMatchObject({ status: "OK", code: "MATCHES_FOUND", strategy: "browser:table", athlete: "Hamad Al Rumaihi" });
     expect(result.matches.map((m) => m.matchNumber)).toEqual(["12", "27"]);
-    expect(result.diagnostics).toEqual({ strategy: "browser:table", sourceStatus: 200, finalUrl: PAGE, elapsedMs: 2500, attempts: 1 });
+    expect(result.diagnostics).toEqual({ strategy: "browser:table", sourceStatus: 200, finalUrl: PAGE, elapsedMs: 2500, attempts: 1, completeness: "unknown" });
     expect(workerCalls).toEqual([{ auth: `Bearer ${TOKEN}`, body: { url: PAGE } }]);
     expectCleanLogs();
     expect(logs[0].record).toMatchObject({ strategy: "browser:table", sourceStatus: 200, matches: 2 });
+  });
+
+  it("capture-once: with a shared page cache the source is fetched once and parsed per athlete", async () => {
+    let fetches = 0;
+    server.use(http.get(PAGE, () => { fetches += 1; return HttpResponse.html(fixture("ajp-bracket-table")); }));
+    const pageCache = new Map();
+    const key = "owner-1|ajptour.com|/events/4471/brackets/88";
+    const [first, second, third] = await Promise.all([
+      watchUrl(PAGE, { ...opts, pageCache, cacheKey: key }),
+      watchUrl(PAGE, { ...opts, athleteName: "Nobody Here", pageCache, cacheKey: key }),
+      watchUrl(PAGE, { ...opts, pageCache, cacheKey: "owner-2|ajptour.com|/events/4471/brackets/88" }),
+    ]);
+    expect(fetches).toBe(2); // owner-1 once (shared by two athletes), owner-2 once
+    expect(first).toMatchObject({ status: "OK", strategy: "http:table" });
+    expect(first.matches).toHaveLength(2);
+    expect(second).toMatchObject({ status: "ATHLETE_NOT_FOUND", athlete: "Nobody Here" });
+    expect(second.diagnostics?.shared).toBe(true);
+    expect(first.diagnostics?.shared).toBeUndefined();
+    expect(third).toMatchObject({ status: "OK" });
+    expect(logs).toHaveLength(3);
+  });
+
+  it("capture-once also shares a browser render, and a shared fetch failure is reported per athlete", async () => {
+    let renders = 0;
+    server.use(http.get(PAGE, challenge), http.post(`${WORKER}/render`, () => { renders += 1; return HttpResponse.json({ ok: true, html: fixture("ajp-bracket-table"), finalUrl: PAGE, status: 200, elapsedMs: 900, strategy: "browser", completeness: "partial", readiness: "SCHEDULE_FOUND" }); }));
+    const pageCache = new Map();
+    const key = "owner-1|ajptour.com|/events/4471/brackets/88";
+    const [a, b] = await Promise.all([watchUrl(PAGE, { ...opts, pageCache, cacheKey: key }), watchUrl(PAGE, { ...opts, pageCache, cacheKey: key })]);
+    expect(renders).toBe(1);
+    expect(a).toMatchObject({ status: "OK", strategy: "browser:table" });
+    expect(a.diagnostics).toMatchObject({ completeness: "partial", readiness: "SCHEDULE_FOUND" });
+    expect(b.diagnostics).toMatchObject({ shared: true, completeness: "partial" });
+
+    server.resetHandlers();
+    let fails = 0;
+    // 404 is not retried by safe-fetch, so one request means one shared fetch.
+    server.use(http.get(PAGE, () => { fails += 1; return new HttpResponse("gone", { status: 404 }); }));
+    const cache2 = new Map();
+    const [x, y] = await Promise.all([watchUrl(PAGE, { ...opts, pageCache: cache2, cacheKey: key }), watchUrl(PAGE, { ...opts, athleteName: "Other", pageCache: cache2, cacheKey: key })]);
+    expect(fails).toBe(1);
+    expect(x).toMatchObject({ status: "FETCH_ERROR", code: "SOURCE_HTTP_ERROR", athlete: "Hamad Al Rumaihi" });
+    expect(y).toMatchObject({ status: "FETCH_ERROR", code: "SOURCE_HTTP_ERROR", athlete: "Other" });
+    expect(y.diagnostics?.shared).toBe(true);
+  });
+
+  it("maps the worker's PAGE_NOT_READY to BROWSER_PAGE_NOT_READY with the readiness reason", async () => {
+    server.use(
+      http.get(PAGE, challenge),
+      http.post(`${WORKER}/render`, () => HttpResponse.json({ ok: false, code: "PAGE_NOT_READY", message: "The page showed a login form.", readiness: "LOGIN_PAGE", status: 200, elapsedMs: 15_000 }, { status: 502 })),
+    );
+    const result = await watchUrl(PAGE, opts);
+    expect(result).toMatchObject({ status: "FETCH_ERROR", code: "BROWSER_PAGE_NOT_READY", strategy: "browser", matches: [] });
+    expect(result.message).toContain("login form");
+    expect(result.diagnostics).toMatchObject({ workerCode: "PAGE_NOT_READY", readiness: "LOGIN_PAGE" });
   });
 
   it("uses the rendered final URL for the parse context", async () => {

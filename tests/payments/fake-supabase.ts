@@ -5,6 +5,8 @@
  *   from(t).insert(row)
  *   from(t).select(cols).eq(..).eq(..).maybeSingle()
  *   from(t).update(patch).eq(..)[.eq(..)][.select(cols)]
+ *   from(t).select().in(..).is(..).lt(..).not(..).order(..).limit(n)
+ *   rpc("photo_apply_payment_transition", args)   (emulated in-process, sequentially)
  * Enforces the partial unique indexes from the migration so idempotency can
  * be tested the way Postgres would behave (error code 23505).
  */
@@ -12,20 +14,23 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/database.types";
 
 type Row = Record<string, unknown>;
-type Filter = { col: string; val: unknown };
+type Filter = (row: Row) => boolean;
 type Op = "select" | "insert" | "update";
 
 const UNIQUE: Record<string, string[][]> = {
   photo_payment_events: [["provider", "provider_event_id"]],
   photo_payment_attempts: [["provider", "provider_payment_id"]],
   photo_bookings: [["provider", "provider_invoice_id"]],
+  photo_notification_deliveries: [["owner_id", "channel", "alert_key"]],
 };
 
-export type FakeCall = { table: string; op: Op; payload?: Row; filters: Filter[] };
+export type FakeCall = { table: string; op: Op; payload?: Row; filters: number };
+export type FakeRpcCall = { name: string; args: Record<string, unknown> };
 
 export class FakeSupabase {
-  tables: Record<string, Row[]> = { photo_payment_events: [], photo_bookings: [], photo_payment_attempts: [], photo_athletes: [] };
+  tables: Record<string, Row[]> = { photo_payment_events: [], photo_bookings: [], photo_payment_attempts: [], photo_athletes: [], photo_notification_deliveries: [] };
   calls: FakeCall[] = [];
+  rpcCalls: FakeRpcCall[] = [];
   private seq = 1;
 
   from(table: string) {
@@ -34,11 +39,39 @@ export class FakeSupabase {
   }
 
   seed(table: string, rows: Row[]) {
+    if (!this.tables[table]) this.tables[table] = [];
     for (const r of rows) this.tables[table].push({ ...r });
   }
 
   nextId(): number {
     return this.seq++;
+  }
+
+  /** Emulates photo_apply_payment_transition: guarded booking update + attempt + event row + outbox, all-or-nothing. */
+  async rpc(name: string, args: Record<string, unknown>) {
+    this.rpcCalls.push({ name, args });
+    if (name !== "photo_apply_payment_transition") return { data: null, error: { code: "42883", message: `unknown function ${name}` } };
+    const booking = this.tables.photo_bookings.find((b) => b.id === args.p_booking_id);
+    if (!booking) return { data: { applied: false, reason: "booking_not_found" }, error: null };
+    if (booking.status !== args.p_expected_status) return { data: { applied: false, reason: "concurrent_update", status: booking.status }, error: null };
+    const columns = args.p_columns as Row;
+    Object.assign(booking, columns);
+    const attempt = args.p_attempt as Row | null | undefined;
+    if (attempt) {
+      const row: Row = { id: this.nextId(), owner_id: booking.owner_id, booking_id: booking.id, provider: attempt.provider ?? "MYFATOORAH", status: attempt.status ?? columns.status, amount: attempt.amount ?? booking.amount_qr, currency: attempt.currency ?? booking.currency, ...attempt };
+      const clash = row.provider_payment_id && this.tables.photo_payment_attempts.some((a) => a.provider === row.provider && a.provider_payment_id === row.provider_payment_id);
+      if (!clash) this.tables.photo_payment_attempts.push(row);
+    }
+    if (args.p_event_row_id !== null && args.p_event_row_id !== undefined) {
+      const ev = this.tables.photo_payment_events.find((e) => e.id === args.p_event_row_id);
+      if (ev) Object.assign(ev, { processing_result: args.p_processing_result, processed_at: new Date().toISOString(), booking_id: booking.id, owner_id: booking.owner_id });
+    }
+    const delivery = args.p_delivery as Row | null | undefined;
+    if (delivery) {
+      const exists = this.tables.photo_notification_deliveries.some((d) => d.owner_id === booking.owner_id && d.channel === (delivery.channel ?? "telegram") && d.alert_key === delivery.alert_key);
+      if (!exists) this.tables.photo_notification_deliveries.push({ id: this.nextId(), owner_id: booking.owner_id, channel: delivery.channel ?? "telegram", alert_key: delivery.alert_key, kind: delivery.kind ?? "PAYMENT_CONFIRMED", category: "orders", payload: delivery.payload ?? {}, status: "pending", attempts: 0 });
+    }
+    return { data: { applied: true, status: columns.status ?? booking.status, owner_id: booking.owner_id }, error: null };
   }
 
   asClient(): SupabaseClient<Database> {
@@ -52,6 +85,8 @@ class FakeQuery {
   private filters: Filter[] = [];
   private returning = false;
   private mode: "many" | "single" | "maybeSingle" = "many";
+  private orderBy: { col: string; asc: boolean } | null = null;
+  private limitN: number | null = null;
 
   constructor(
     private db: FakeSupabase,
@@ -75,7 +110,35 @@ class FakeQuery {
     return this;
   }
   eq(col: string, val: unknown) {
-    this.filters.push({ col, val });
+    this.filters.push((r) => r[col] === val);
+    return this;
+  }
+  neq(col: string, val: unknown) {
+    this.filters.push((r) => r[col] !== val);
+    return this;
+  }
+  is(col: string, val: unknown) {
+    this.filters.push((r) => (r[col] ?? null) === val);
+    return this;
+  }
+  not(col: string, _op: string, val: unknown) {
+    this.filters.push((r) => (r[col] ?? null) !== val);
+    return this;
+  }
+  in(col: string, vals: unknown[]) {
+    this.filters.push((r) => vals.includes(r[col]));
+    return this;
+  }
+  lt(col: string, val: unknown) {
+    this.filters.push((r) => r[col] !== null && r[col] !== undefined && String(r[col]) < String(val));
+    return this;
+  }
+  order(col: string, opts?: { ascending?: boolean }) {
+    this.orderBy = { col, asc: opts?.ascending !== false };
+    return this;
+  }
+  limit(n: number) {
+    this.limitN = n;
     return this;
   }
   single() {
@@ -97,11 +160,11 @@ class FakeQuery {
   }
 
   private matches(row: Row) {
-    return this.filters.every((f) => row[f.col] === f.val);
+    return this.filters.every((f) => f(row));
   }
 
   private exec() {
-    this.db.calls.push({ table: this.table, op: this.op, payload: this.payload ?? undefined, filters: this.filters });
+    this.db.calls.push({ table: this.table, op: this.op, payload: this.payload ?? undefined, filters: this.filters.length });
     const rows = this.db.tables[this.table];
     if (this.op === "insert") {
       const row = { id: this.db.nextId(), attempts: 1, ...this.payload } as Row;
@@ -113,7 +176,12 @@ class FakeQuery {
       rows.push(row);
       return this.shape([row]);
     }
-    const hit = rows.filter((r) => this.matches(r));
+    let hit = rows.filter((r) => this.matches(r));
+    if (this.orderBy) {
+      const { col, asc } = this.orderBy;
+      hit = [...hit].sort((a, b) => (String(a[col] ?? "") < String(b[col] ?? "") ? -1 : 1) * (asc ? 1 : -1));
+    }
+    if (this.limitN !== null) hit = hit.slice(0, this.limitN);
     if (this.op === "update") {
       for (const r of hit) Object.assign(r, this.payload);
       return this.returning ? this.shape(hit) : { data: null, error: null };

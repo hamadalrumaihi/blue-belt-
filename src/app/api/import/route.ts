@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { importPage, previewImport } from "@/lib/import-service";
+import { failureStatus, importPage, previewImport } from "@/lib/import-service";
 import { requestLogger } from "@/lib/log";
 import { rateLimit, rateLimitHeaders, RULES } from "@/lib/rate-limit";
 import { createClient } from "@/lib/supabase/server";
@@ -52,24 +52,11 @@ export async function POST(request: Request) {
   const preview = new URL(request.url).searchParams.get("preview") === "1";
   const outcome = preview
     ? await previewImport(supabase, { url: parsed.url, html: parsed.html, log })
-    : await importPage(supabase, { url: parsed.url, html: parsed.html, log });
+    : await importPage(supabase, { url: parsed.url, html: parsed.html, ownerId: user.id, capture: parsed.capture, transport: parsed.capture.transport ?? "import", log });
   if (!outcome.ok) {
     const status = failureStatus(outcome.code);
-    return NextResponse.json({ error: outcome.message, code: outcome.code, url: outcome.url, candidates: outcome.candidates ?? [] }, { status, headers: { ...headers, ...rateLimitHeaders(limit) } });
+    const capture = "capture" in outcome ? outcome.capture : undefined;
+    return NextResponse.json({ error: outcome.message, code: outcome.code, url: outcome.url, candidates: outcome.candidates ?? [], ...(capture ? { capture } : {}) }, { status, headers: { ...headers, ...rateLimitHeaders(limit) } });
   }
   return NextResponse.json(outcome, { headers: { ...headers, ...rateLimitHeaders(limit) } });
-}
-
-/** HTTP status for an import failure code. */
-function failureStatus(code: string): number {
-  switch (code) {
-    case "QUERY_FAILED":
-      return 500;
-    case "NO_ATHLETES":
-      return 404;
-    case "CHALLENGE_PAGE":
-      return 422;
-    default:
-      return 400;
-  }
 }

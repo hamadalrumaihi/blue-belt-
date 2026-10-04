@@ -37,6 +37,7 @@ export function MatchCard({ entry, timezone, state, onRefresh, now = null }: Pro
   const failed = isWatchFailure(status);
   const copy = watchStateCopy(status, state?.message ?? athlete.last_watch_message, state?.code ?? athlete.last_watch_code);
   const needsReview = match?.identity_confidence === "ambiguous";
+  const manual = Boolean(match?.manual?.mat || match?.manual?.time);
 
   return (
     <article className={cn("card p-3.5", BORDER[eta.bucket] ?? "border-line", failed && !match && "border-danger/30")} aria-label={athlete.name}>
@@ -61,8 +62,8 @@ export function MatchCard({ entry, timezone, state, onRefresh, now = null }: Pro
 
       {match ? (
         <dl className="mt-3 grid grid-cols-4 gap-2 rounded-xl bg-page p-2.5 text-center">
-          <Cell label="Mat" value={match.mat?.replace(/^Mat\s*/i, "") ?? "—"} strong />
-          <Cell label="Time" value={formatTime(time, timezone)} strong />
+          <Cell label={match.manual?.mat ? "Mat · manual" : "Mat"} value={match.mat?.replace(/^Mat\s*/i, "") ?? "—"} strong />
+          <Cell label={match.manual?.time ? "Time · manual" : "Time"} value={formatTime(time, timezone)} strong />
           <Cell label="Match #" value={snapshotNumber(match) ?? (match.match_order ? String(match.match_order) : "—")} />
           <Cell label="Opponent" value={match.opponent ?? "Unknown"} />
         </dl>
@@ -74,6 +75,7 @@ export function MatchCard({ entry, timezone, state, onRefresh, now = null }: Pro
 
       {match && failed && <p className="mt-2 text-xs font-semibold text-danger">{copy} Showing last known schedule.</p>}
       {needsReview && <p className="mt-2 rounded-lg bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700">Needs review: similar matches were found, so this row was kept separate.</p>}
+      {manual && <p className="mt-2 rounded-lg bg-lightblue px-2 py-1 text-[11px] font-semibold text-primary">Manual correction by the owner is in effect for this match.</p>}
 
       <div className="mt-3 flex items-center gap-2">
         <SourceLinkButton url={match?.source_url ?? athlete.source_url} platform={athlete.platform} size="sm" />

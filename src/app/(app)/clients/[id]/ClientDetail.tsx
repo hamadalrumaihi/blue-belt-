@@ -11,6 +11,7 @@ import { RefreshButton } from "@/components/RefreshButton";
 import { SourceLinkButton } from "@/components/SourceLinkButton";
 import { StatusBadge } from "@/components/StatusBadge";
 import { EditIcon, MailIcon, PhoneIcon } from "@/components/icons";
+import { ManualCorrection } from "@/components/ManualCorrection";
 import { SourceHealthBadge } from "@/components/SourceHealthBadge";
 import { isWatchFailure, watchStateCopy } from "@/components/watchStateCopy";
 import { useLiveAthletes } from "@/hooks/useLiveAthletes";
@@ -51,13 +52,16 @@ export function ClientDetail({ athlete: initialAthlete, history: initialHistory 
             <>
               <div className="mt-2 flex items-end justify-between gap-3">
                 <div>
-                  <p className="text-3xl font-black text-ink">{current.mat ?? "Mat —"}</p>
+                  <p className="text-3xl font-black text-ink">
+                    {current.mat ?? "Mat —"}
+                    {current.manual?.mat && <span className="ml-2 align-middle rounded-md bg-lightblue px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-primary">Manual</span>}
+                  </p>
                   <p className="text-sm text-muted">vs <span className="font-bold text-ink">{current.opponent ?? "Unknown"}</span></p>
                 </div>
                 {now && <EtaBadge eta={eta} size="lg" />}
               </div>
               <dl className="mt-4 grid grid-cols-3 gap-2 rounded-xl bg-page p-3 text-center">
-                <div><dt className="eyebrow">Scheduled</dt><dd className="text-lg font-black tabular-nums">{formatTime(current.scheduled_at, tz)}</dd></div>
+                <div><dt className="eyebrow">{current.manual?.time ? "Manual time" : "Scheduled"}</dt><dd className="text-lg font-black tabular-nums">{formatTime(current.scheduled_at, tz)}</dd></div>
                 <div><dt className="eyebrow">Estimated</dt><dd className="text-lg font-black tabular-nums">{formatTime(current.estimated_at, tz)}</dd></div>
                 <div><dt className="eyebrow">Match #</dt><dd className="text-lg font-black tabular-nums">{snapshotNumber(current) ?? current.match_order ?? "—"}</dd></div>
               </dl>
@@ -73,6 +77,7 @@ export function ClientDetail({ athlete: initialAthlete, history: initialHistory 
           <div className="mt-3">
             <SourceHealthBadge athlete={{ ...athlete, last_watch_status: status, last_watch_code: code }} now={now} hasMatches={athlete.matches.length > 0} showDetail />
           </div>
+          {current && <ManualCorrection match={current} timezone={tz} />}
           <div className="mt-4 flex flex-wrap gap-2">
             <RefreshButton onClick={() => refresh([athlete.id])} loading={state?.loading} label={failed ? "Retry refresh" : "Refresh Match Data"} variant="primary" disabled={!athlete.source_url} />
             <SourceLinkButton url={athlete.source_url} platform={athlete.platform} />

@@ -92,3 +92,6 @@ export const CheckIcon = (p: IconProps) => (
 export const SwordsIcon = (p: IconProps) => (
   <svg {...base(p)}><path d="M3 21l6-6M21 21l-6-6" /><path d="M14.5 3 21 9.5 9.5 21 3 14.5 14.5 3Z" /><path d="M3 9.5 9.5 3M14.5 21 21 14.5" /></svg>
 );
+export const ReceiptIcon = (p: IconProps) => (
+  <svg {...base(p)}><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z" /><path d="M9 8h6M9 12h6" /></svg>
+);

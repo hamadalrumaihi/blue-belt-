@@ -177,6 +177,23 @@ describe("buildRefreshPlan", () => {
     expect(plan.preview[1]).toMatchObject({ id: ROW_B, last_checked_at: "old" });
   });
 
+  it("carries an owner's manual correction forward while the source is unchanged, and supersedes it explicitly when the source changes that field", () => {
+    const corrected = matchRow({ id: ROW_A, external_match_id: "9012", mat: "Mat 3", scheduled_at: "2026-03-14T07:40:00.000Z", override_mat: "Mat 5", override_scheduled_at: "2026-03-14T08:00:00.000Z", override_by: "owner", override_at: "2026-03-14T05:00:00.000Z", override_reason: "Announcer", override_until: "2026-03-14T20:59:59.000Z" });
+    // Source unchanged: correction kept, no supersede history.
+    const same = buildRefreshPlan([corrected], watchResult({ matches: [normalized({ externalMatchId: "9012", mat: "Mat 3", scheduledAt: "2026-03-14T07:40:00.000Z" })] }), CHECKED_AT);
+    expect(same.updates[0].patch).toMatchObject({ override_mat: "Mat 5", override_scheduled_at: "2026-03-14T08:00:00.000Z", override_by: "owner", override_reason: "Announcer" });
+    expect(same.history.map((h) => h.change_type)).not.toContain("OVERRIDE_SUPERSEDED");
+    // Source moved the mat: the mat correction is dropped with a history entry; the time correction stands.
+    const moved = buildRefreshPlan([corrected], watchResult({ matches: [normalized({ externalMatchId: "9012", mat: "Mat 4", scheduledAt: "2026-03-14T07:40:00.000Z" })] }), CHECKED_AT);
+    expect(moved.updates[0].patch).toMatchObject({ mat: "Mat 4", override_mat: null, override_scheduled_at: "2026-03-14T08:00:00.000Z", override_by: "owner" });
+    const sup = moved.history.find((h) => h.change_type === "OVERRIDE_SUPERSEDED");
+    expect(sup).toMatchObject({ match_id: ROW_A, old_value: { value: "Mat 5", label: "Manual Mat 5" }, new_value: { value: "Mat 4", label: "Source now says Mat 4" } });
+    expect(moved.history.map((h) => h.change_type)).toContain("MAT_CHANGE");
+    // Both fields changed at the source: every override column is cleared.
+    const both = buildRefreshPlan([corrected], watchResult({ matches: [normalized({ externalMatchId: "9012", mat: "Mat 4", scheduledAt: "2026-03-14T09:00:00.000Z" })] }), CHECKED_AT);
+    expect(both.updates[0].patch).toMatchObject({ override_mat: null, override_scheduled_at: null, override_by: null, override_at: null, override_reason: null, override_until: null });
+  });
+
   it("describeParsed", () => {
     expect(describeParsed(normalized(), "Asia/Qatar")).toBe("Mat 3 · 10:40 · vs João Silva");
     expect(describeParsed(normalized({ mat: null, scheduledAt: null, opponent: null }), "Asia/Qatar")).toBe("Match added");

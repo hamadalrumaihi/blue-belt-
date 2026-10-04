@@ -3,7 +3,7 @@ import Link from "next/link";
 import { BrandHeader } from "@/components/BrandHeader";
 import { PageBody } from "@/components/AppShell";
 import { Logo } from "@/components/Logo";
-import { ChevronRightIcon, EyeIcon, HistoryIcon, LogoutIcon, SettingsIcon, ShieldIcon } from "@/components/icons";
+import { ChevronRightIcon, EyeIcon, HistoryIcon, LogoutIcon, ReceiptIcon, SettingsIcon, ShieldIcon } from "@/components/icons";
 import { signOut } from "@/lib/actions/auth";
 import { getUser } from "@/lib/supabase/server";
 
@@ -12,6 +12,7 @@ export const metadata: Metadata = { title: "More" };
 export default async function MorePage() {
   const user = await getUser();
   const items = [
+    { href: "/orders", label: "Orders (Pic-Time)", icon: ReceiptIcon },
     { href: "/history", label: "Activity / change history", icon: HistoryIcon },
     { href: "/import", label: "Import a page (CAPTCHA workaround)", icon: EyeIcon },
     { href: "/settings", label: "Settings", icon: SettingsIcon },

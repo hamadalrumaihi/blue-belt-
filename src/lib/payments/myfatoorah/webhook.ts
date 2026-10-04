@@ -18,6 +18,7 @@ import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Logger } from "@/lib/log";
 import type { Database, Json, PhotoBookingRow } from "@/lib/supabase/database.types";
+import { fulfillmentPlan } from "@/lib/payments/fulfillment";
 import { applyTransition, isPaymentStatus, type PaymentStatus } from "@/lib/payments/types";
 import { MYFATOORAH_PROVIDER, type PaymentProvider, type PaymentStatusOutput } from "./client";
 import { buildSignaturePayload, eventNameOf, readPath, signatureValue, type SignedEventName } from "./signature";
@@ -215,47 +216,69 @@ export async function linkBookingToAthlete(booking: PhotoBookingRow, deps: Webho
   if (error) deps.log.warn("payments.link_flag_failed", { bookingId: booking.id, error: error.message });
 }
 
-async function applyStatusToBooking(booking: PhotoBookingRow, mapping: Extract<StatusMapping, { kind: "apply" }>, source: string, deps: WebhookDeps): Promise<ApplyOutcome> {
+type ApplyContext = { source: string; eventRowId?: number | null };
+
+/**
+ * Applies one status transition ATOMICALLY through photo_apply_payment_transition:
+ * booking columns (guarded by the previous status), the payment attempt row,
+ * the delivery row's outcome and — on paid — the owner's [Orders]
+ * confirmation in the notification outbox, in one database transaction.
+ * A concurrent writer wins and this delivery is reported as an ignored
+ * transition instead of clobbering it.
+ */
+async function applyStatusToBooking(booking: PhotoBookingRow, mapping: Extract<StatusMapping, { kind: "apply" }>, ctx: ApplyContext, deps: WebhookDeps): Promise<ApplyOutcome> {
   const now = deps.now();
   const transition = applyTransition(booking.status, mapping.status, now, booking);
   if (!transition.ok) {
     if (transition.reason === "same_status") return { result: "unchanged", status: booking.status };
-    deps.log.warn("payments.illegal_transition", { bookingId: booking.id, from: booking.status, to: mapping.status, source });
+    deps.log.warn("payments.illegal_transition", { bookingId: booking.id, from: booking.status, to: mapping.status, source: ctx.source });
     return { result: "ignored_transition", status: booking.status, detail: `${booking.status}->${mapping.status}` };
   }
 
-  // Optimistic guard on the previous status: a concurrent writer wins and this
-  // delivery is reported as an ignored transition instead of clobbering it.
-  const { data: updated, error: updateError } = await deps.supabase
-    .from("photo_bookings")
-    .update(transition.columns)
-    .eq("id", booking.id)
-    .eq("status", booking.status)
-    .select("id");
-  if (updateError) {
-    deps.log.error("payments.booking_update_failed", { bookingId: booking.id, error: updateError.message });
+  // Signature validity is not payment: only Transaction.Status SUCCESS reaches
+  // "paid" (mapWebhookEvent), and only then is fulfilment / confirmation planned.
+  const columns: Record<string, Json> = { ...(transition.columns as unknown as Record<string, Json>) };
+  let delivery: Json | null = null;
+  if (mapping.status === "paid") {
+    const plan = fulfillmentPlan(booking);
+    const metadata = isRecord(booking.metadata) ? booking.metadata : {};
+    columns.metadata = { ...metadata, ...plan.metadata, pending_athlete_link: true } as Json;
+    const amount = `${Number(mapping.amount ?? booking.amount_qr).toFixed(2)} ${mapping.currency ?? booking.currency}`;
+    delivery = {
+      alert_key: `payment:${booking.id}:paid`,
+      kind: "PAYMENT_CONFIRMED",
+      payload: { text: `<b>Payment confirmed — ${escapeHtml(booking.customer_name)}</b>\n${escapeHtml(amount)} · ${escapeHtml(booking.package_name)}${booking.athlete_name ? ` · ${escapeHtml(booking.athlete_name)}` : ""}\n${escapeHtml(plan.ownerText)}`, category: "orders" },
+    } as Json;
+  }
+
+  const { data, error } = await deps.supabase.rpc("photo_apply_payment_transition", {
+    p_booking_id: booking.id,
+    p_expected_status: booking.status,
+    p_columns: columns as Json,
+    p_attempt: {
+      provider: MYFATOORAH_PROVIDER,
+      provider_invoice_id: mapping.invoiceId,
+      provider_payment_id: mapping.paymentId,
+      status: mapping.status,
+      amount: mapping.amount ?? booking.amount_qr,
+      currency: mapping.currency ?? booking.currency,
+      raw: { source: ctx.source, transaction: mapping.transaction, recorded_at: now.toISOString() },
+    } as Json,
+    p_event_row_id: ctx.eventRowId ?? null,
+    p_processing_result: "processed",
+    p_delivery: delivery,
+  });
+  if (error) {
+    deps.log.error("payments.booking_update_failed", { bookingId: booking.id, error: error.message });
     return { result: "error", status: booking.status, detail: "booking_update_failed" };
   }
-  if (!updated || updated.length === 0) return { result: "ignored_transition", status: booking.status, detail: "concurrent_update" };
-
-  if (mapping.status === "paid") await linkBookingToAthlete(booking, deps);
-
-  // One attempt row per provider payment id; a redelivery with the same id is fine.
-  const { error: attemptError } = await deps.supabase.from("photo_payment_attempts").insert({
-    owner_id: booking.owner_id,
-    booking_id: booking.id,
-    provider: MYFATOORAH_PROVIDER,
-    provider_invoice_id: mapping.invoiceId,
-    provider_payment_id: mapping.paymentId,
-    status: mapping.status,
-    amount: mapping.amount ?? booking.amount_qr,
-    currency: mapping.currency ?? booking.currency,
-    raw: { source, transaction: mapping.transaction, recorded_at: now.toISOString() } as Json,
-  });
-  if (attemptError && attemptError.code !== PG_UNIQUE_VIOLATION) {
-    deps.log.warn("payments.attempt_insert_failed", { bookingId: booking.id, error: attemptError.message });
-  }
+  const out = isRecord(data) ? data : {};
+  if (out.applied !== true) return { result: "ignored_transition", status: booking.status, detail: out.reason === "booking_not_found" ? "booking_not_found" : "concurrent_update" };
   return { result: "processed", status: mapping.status };
+}
+
+function escapeHtml(v: string): string {
+  return v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 async function findBookingByInvoice(invoiceId: string, deps: WebhookDeps): Promise<PhotoBookingRow | null> {
@@ -287,17 +310,28 @@ export async function processWebhook(event: WebhookEvent, deps: WebhookDeps): Pr
     .select("id")
     .single();
 
+  let rowId: number;
   if (insertError) {
     if (insertError.code !== PG_UNIQUE_VIOLATION) {
       deps.log.error("payments.event_insert_failed", { eventId, eventType, error: insertError.message });
       return { result: "error", eventId, eventType, bookingId: null, detail: "event_insert_failed" };
     }
-    const { data: existing } = await deps.supabase.from("photo_payment_events").select("id, attempts, booking_id").eq("provider", MYFATOORAH_PROVIDER).eq("provider_event_id", eventId).maybeSingle();
-    if (existing) await deps.supabase.from("photo_payment_events").update({ attempts: (existing.attempts ?? 1) + 1 }).eq("id", existing.id);
-    deps.log.info("payments.duplicate_event", { eventId, eventType, attempts: (existing?.attempts ?? 1) + 1 });
-    return { result: "duplicate", eventId, eventType, bookingId: existing?.booking_id ?? null };
+    const { data: existing } = await deps.supabase.from("photo_payment_events").select("id, attempts, booking_id, signature_valid, processing_result").eq("provider", MYFATOORAH_PROVIDER).eq("provider_event_id", eventId).maybeSingle();
+    // An earlier UNVERIFIED copy of this event (bad signature, replay attempt,
+    // transit damage) must never shadow the real, signed delivery: take the
+    // row over and process it now.
+    if (existing && existing.signature_valid === false && event.signatureValid) {
+      await deps.supabase.from("photo_payment_events").update({ attempts: (existing.attempts ?? 1) + 1, signature_valid: true, payload: body as Json, received_at: receivedAt, processing_result: null, processed_at: null }).eq("id", existing.id);
+      deps.log.info("payments.event_upgraded", { eventId, eventType, attempts: (existing.attempts ?? 1) + 1 });
+      rowId = existing.id;
+    } else {
+      if (existing) await deps.supabase.from("photo_payment_events").update({ attempts: (existing.attempts ?? 1) + 1 }).eq("id", existing.id);
+      deps.log.info("payments.duplicate_event", { eventId, eventType, attempts: (existing?.attempts ?? 1) + 1 });
+      return { result: "duplicate", eventId, eventType, bookingId: existing?.booking_id ?? null };
+    }
+  } else {
+    rowId = inserted.id;
   }
-  const rowId = inserted.id;
 
   const finish = async (result: ProcessingResult, booking: PhotoBookingRow | null, status?: PaymentStatus, detail?: string): Promise<ProcessWebhookOutcome> => {
     await deps.supabase
@@ -323,8 +357,65 @@ export async function processWebhook(event: WebhookEvent, deps: WebhookDeps): Pr
     return finish("booking_not_found", null);
   }
 
-  const applied = await applyStatusToBooking(booking, mapping, `webhook:${eventId}`, deps);
+  const applied = await applyStatusToBooking(booking, mapping, { source: `webhook:${eventId}`, eventRowId: rowId }, deps);
+  // "processed" already marked the delivery row inside the transaction.
+  if (applied.result === "processed") return { result: "processed", eventId, eventType, bookingId: booking.id, status: applied.status };
   return finish(applied.result, booking, applied.status, applied.detail);
+}
+
+// ---------------------------------------------------------------------------
+// Confirmation job helpers (cron / manual)
+// ---------------------------------------------------------------------------
+
+/**
+ * Re-applies verified events that arrived before their booking existed
+ * (processing_result = booking_not_found). Bounded; safe to repeat.
+ */
+export async function replayUnmatchedEvents(deps: WebhookDeps, limit = 50): Promise<{ scanned: number; applied: number }> {
+  const { data: events } = await deps.supabase
+    .from("photo_payment_events")
+    .select("*")
+    .eq("provider", MYFATOORAH_PROVIDER)
+    .eq("signature_valid", true)
+    .eq("processing_result", "booking_not_found")
+    .order("received_at", { ascending: true })
+    .limit(limit);
+  let applied = 0;
+  for (const ev of events ?? []) {
+    const body = isRecord(ev.payload) ? ev.payload : {};
+    const mapping = mapWebhookEvent(eventNameOf(body), isRecord(body.Data) ? body.Data : {});
+    if (mapping.kind === "ignore") continue;
+    const booking = await findBookingByInvoice(mapping.invoiceId, deps);
+    if (!booking) continue;
+    const out = await applyStatusToBooking(booking, mapping, { source: `replay:${ev.provider_event_id ?? ev.id}`, eventRowId: ev.id }, deps);
+    if (out.result !== "processed") {
+      await deps.supabase.from("photo_payment_events").update({ processing_result: out.detail ? `${out.result}:${out.detail}` : out.result, processed_at: deps.now().toISOString(), booking_id: booking.id, owner_id: booking.owner_id }).eq("id", ev.id);
+    } else {
+      applied += 1;
+    }
+  }
+  return { scanned: (events ?? []).length, applied };
+}
+
+/**
+ * Reconciles bookings that have an invoice but are still pending / failed
+ * after `olderThanMinutes` (a missed webhook). Calls the provider once per
+ * booking; bounded by `limit`.
+ */
+export async function reconcilePendingBookings(provider: PaymentProvider, deps: WebhookDeps, opts: { olderThanMinutes?: number; limit?: number } = {}): Promise<{ scanned: number; changed: number; results: ReconcileResult[] }> {
+  const cutoff = new Date(deps.now().getTime() - (opts.olderThanMinutes ?? 10) * 60_000).toISOString();
+  const { data: bookings } = await deps.supabase
+    .from("photo_bookings")
+    .select("id")
+    .eq("provider", MYFATOORAH_PROVIDER)
+    .in("status", ["pending", "failed"])
+    .not("provider_invoice_id", "is", null)
+    .lt("created_at", cutoff)
+    .order("created_at", { ascending: true })
+    .limit(opts.limit ?? 25);
+  const results: ReconcileResult[] = [];
+  for (const b of bookings ?? []) results.push(await reconcileBooking(b.id, provider, deps));
+  return { scanned: results.length, changed: results.filter((r) => r.result === "processed").length, results };
 }
 
 // ---------------------------------------------------------------------------
@@ -357,7 +448,7 @@ export async function reconcileBooking(bookingId: string, provider: PaymentProvi
   if (mapping.kind === "ignore") return { result: "unchanged", bookingId, status: booking.status, detail: mapping.reason };
   if (!isPaymentStatus(mapping.status)) return { result: "error", bookingId, status: booking.status, detail: "bad_status" };
 
-  const applied = await applyStatusToBooking(booking, mapping, "reconcile", deps);
+  const applied = await applyStatusToBooking(booking, mapping, { source: "reconcile" }, deps);
   deps.log.info("payments.reconcile", { bookingId, result: applied.result, from: booking.status, to: applied.status });
   return { result: applied.result, bookingId, status: applied.status, detail: applied.detail };
 }
