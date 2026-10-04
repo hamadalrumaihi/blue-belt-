@@ -10,8 +10,12 @@
  *   pending   -> paid | failed | cancelled
  *   paid      -> refunded | disputed
  *   disputed  -> refunded | paid
- *   failed    -> pending          (customer retries the same invoice)
+ *   failed    -> pending | paid | cancelled   (the customer retries the same invoice;
+ *                                             MyFatoorah then sends SUCCESS directly)
  *   refunded, cancelled           (terminal)
+ *
+ * A late FAILED after paid (out-of-order delivery of an earlier attempt) is an
+ * illegal transition and is ignored: paid never regresses to failed.
  *
  * Self-transitions are never allowed; callers treat "same status" as a no-op.
  */
@@ -25,7 +29,7 @@ export const PAYMENT_TRANSITIONS: Readonly<Record<PaymentStatus, readonly Paymen
   pending: ["paid", "failed", "cancelled"],
   paid: ["refunded", "disputed"],
   disputed: ["refunded", "paid"],
-  failed: ["pending"],
+  failed: ["pending", "paid", "cancelled"],
   refunded: [],
   cancelled: [],
 };

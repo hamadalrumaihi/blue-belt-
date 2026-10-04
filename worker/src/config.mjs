@@ -53,6 +53,8 @@ export const config = {
     seconds: int("SCHEDULE_SECONDS", 0),
     /** Independent notification runner tick (reminders + Telegram sends). 0 disables; defaults to 30 s when the refresh loop is on. */
     deliverySeconds: process.env.DELIVERY_SECONDS === undefined ? (int("SCHEDULE_SECONDS", 0) ? 30 : 0) : int("DELIVERY_SECONDS", 0),
+    /** Payment confirmation job tick (/api/cron/payments). 0 (default) disables; see docs/payments.md. */
+    paymentsSeconds: int("PAYMENTS_SECONDS", 0),
     appUrl: (process.env.APP_URL ?? "").replace(/\/$/, ""),
     cronSecret: process.env.CRON_SECRET ?? "",
   },
@@ -97,7 +99,7 @@ export function validateConfig() {
   if (!["new", "shell", "headed"].includes(config.headless)) problems.push("HEADLESS must be new, shell or headed");
   if (!["playwright", "patchright"].includes(config.engine)) problems.push("ENGINE must be playwright or patchright");
   if (!isValidTimezone(config.timezone)) problems.push(`TZ_ID must be an IANA zone such as Europe/London (got "${config.timezone}")`);
-  if ((config.schedule.seconds || config.schedule.deliverySeconds) && (!config.schedule.appUrl || !config.schedule.cronSecret)) {
+  if ((config.schedule.seconds || config.schedule.deliverySeconds || config.schedule.paymentsSeconds) && (!config.schedule.appUrl || !config.schedule.cronSecret)) {
     problems.push("SCHEDULE_SECONDS / DELIVERY_SECONDS require APP_URL and CRON_SECRET");
   }
   return problems;

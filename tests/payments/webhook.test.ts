@@ -52,8 +52,9 @@ describe("processWebhook", () => {
     expect(db.tables.photo_payment_events[0].attempts).toBe(2);
     expect(db.tables.photo_payment_attempts).toHaveLength(attempts);
     expect(bookingRow(db).paid_at).toBe(paidAt);
-    // The duplicate path never touched bookings.
-    expect(db.calls.filter((c) => c.table === "photo_bookings" && c.op === "update")).toHaveLength(2); // status + pending_athlete_link flag from the first delivery only
+    // The duplicate path never touched bookings (the first delivery's transition went through the atomic RPC).
+    expect(db.rpcCalls.filter((c) => c.name === "photo_apply_payment_transition")).toHaveLength(1);
+    expect(db.calls.filter((c) => c.table === "photo_bookings" && c.op === "update")).toHaveLength(0);
   });
 
   it("derives a deterministic event id when Event.Reference is absent", () => {
@@ -146,7 +147,7 @@ describe("processWebhook", () => {
     expect(db.calls.some((c) => c.table === "photo_athletes")).toBe(false);
     const b = bookingRow(db);
     expect(b.watcher_athlete_id).toBeNull();
-    expect(b.metadata).toEqual({ pending_athlete_link: true });
+    expect(b.metadata).toMatchObject({ pending_athlete_link: true, fulfillment: { state: "manual" } });
   });
 
   it("linkBookingToAthlete merges the flag into existing metadata and is a no-op when already set", async () => {

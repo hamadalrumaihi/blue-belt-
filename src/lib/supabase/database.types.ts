@@ -708,6 +708,10 @@ export type Database = {
         Args: { p_channel: string; p_limit: number; p_lease_seconds: number; p_worker: string; p_owner_id?: string | null };
         Returns: PhotoNotificationDeliveryRow[];
       };
+      photo_apply_payment_transition: {
+        Args: { p_booking_id: string; p_expected_status: string; p_columns: Json; p_attempt?: Json | null; p_event_row_id?: number | null; p_processing_result?: string | null; p_delivery?: Json | null };
+        Returns: Json;
+      };
       photo_record_order: {
         Args: { p_owner_id: string; p_order: Json; p_delivery?: Json | null };
         Returns: Json;

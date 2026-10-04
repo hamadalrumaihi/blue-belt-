@@ -17,7 +17,7 @@ import { log } from "./log.mjs";
 const MAX_PAGES_PER_TICK = 10;
 
 export function startScheduler(deps = {}) {
-  const { seconds, appUrl, cronSecret, deliverySeconds } = config.schedule;
+  const { seconds, appUrl, cronSecret, deliverySeconds, paymentsSeconds } = config.schedule;
   const fetchImpl = deps.fetch ?? fetch;
   const handles = [];
 
@@ -87,10 +87,34 @@ export function startScheduler(deps = {}) {
     handles.push({ name: "deliveries", tick, first: setTimeout(tick, 10_000), timer: setInterval(tick, interval) });
   }
 
+  if (paymentsSeconds && appUrl && cronSecret) {
+    const interval = Math.max(60, paymentsSeconds) * 1000;
+    let running = false;
+    async function tick() {
+      if (running) return;
+      running = true;
+      const started = Date.now();
+      try {
+        const res = await fetchImpl(`${appUrl}/api/cron/payments`, { method: "POST", headers: { authorization: `Bearer ${cronSecret}`, "content-type": "application/json" }, body: "{}", signal: AbortSignal.timeout(55_000) });
+        const body = await res.json().catch(() => ({}));
+        if (res.status === 404) log.info("payments.tick_skipped", { reason: "payments disabled on the app" });
+        else if (!res.ok) log.warn("payments.tick_failed", { status: res.status, code: body.code, elapsedMs: Date.now() - started });
+        else log.info("payments.tick", { replay: body.replay, reconcile: body.reconcile, elapsedMs: Date.now() - started });
+      } catch (err) {
+        log.error("payments.error", { error: err instanceof Error ? err.message : String(err), elapsedMs: Date.now() - started });
+      } finally {
+        running = false;
+      }
+    }
+    log.info("payments.enabled", { everySeconds: interval / 1000, target: `${appUrl}/api/cron/payments` });
+    handles.push({ name: "payments", tick, first: setTimeout(tick, 15_000), timer: setInterval(tick, interval) });
+  }
+
   if (!handles.length) return null;
   return {
     tick: () => handles.find((h) => h.name === "refresh")?.tick(),
     tickDeliveries: () => handles.find((h) => h.name === "deliveries")?.tick(),
+    tickPayments: () => handles.find((h) => h.name === "payments")?.tick(),
     stop: () => {
       for (const h of handles) {
         clearTimeout(h.first);
