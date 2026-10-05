@@ -32,7 +32,7 @@ export default async function OrdersPage({ searchParams }: PageProps<"/orders">)
 
   return (
     <>
-      <BrandHeader title="Orders" subtitle={counts.needsConfirmation ? `${counts.needsConfirmation} awaiting payment confirmation` : `${counts.total} order${counts.total === 1 ? "" : "s"}`} />
+      <BrandHeader title="Orders" subtitle={counts.needsConfirmation ? `${counts.needsConfirmation} need${counts.needsConfirmation === 1 ? "s" : ""} payment attention` : `${counts.total} order${counts.total === 1 ? "" : "s"}`} />
       <PageBody className="max-w-3xl">
         <div className="mb-3 flex flex-wrap gap-2">
           {FILTERS.map((f) => (

@@ -16,13 +16,13 @@ import { log } from "./log.mjs";
  */
 const MAX_PAGES_PER_TICK = 10;
 
-// A refresh page can legitimately take up to the endpoint's TIME_BUDGET_MS
-// (~240s: each athlete may wait on the browser worker). The per-request abort
-// must exceed that, NOT the tick interval — otherwise a short SCHEDULE_SECONDS
-// aborts every slow page, the cursor never advances and the sweep re-hits page
-// one forever. The non-overlap `running` guard handles cadence; a request may
-// safely span several intervals.
-const REFRESH_REQUEST_TIMEOUT_MS = 250_000;
+// A refresh page can run until the endpoint's hard limit (maxDuration = 300s
+// on /api/cron/refresh: its 240s budget is only checked between sub-batches, and
+// a sub-batch may wait on the browser worker for minutes). The per-request abort
+// must exceed that, NOT the tick interval — otherwise a slow page is aborted, the
+// cursor is dropped and the sweep re-hits page one forever. The non-overlap
+// `running` guard handles cadence; a request may safely span several intervals.
+const REFRESH_REQUEST_TIMEOUT_MS = 310_000;
 
 export function startScheduler(deps = {}) {
   const { seconds, appUrl, cronSecret, deliverySeconds, paymentsSeconds } = config.schedule;
