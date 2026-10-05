@@ -5,6 +5,8 @@ import { PageBody } from "@/components/AppShell";
 import { EmptyState } from "@/components/EmptyState";
 import { EventSwitcher } from "@/components/EventSwitcher";
 import { CalendarIcon } from "@/components/icons";
+import { redirect } from "next/navigation";
+import { resolveViewerMode } from "@/lib/collaborator";
 import { listAthletes, listEvents, listHistory, pickCurrentEvent } from "@/lib/queries";
 import { DashboardLive } from "./DashboardLive";
 import { SeedFirstEventButton } from "./SeedFirstEventButton";
@@ -13,6 +15,9 @@ export const metadata: Metadata = { title: "Dashboard" };
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage({ searchParams }: PageProps<"/dashboard">) {
+  // Sign-in lands everyone here; a collaborator-only account has no dashboard
+  // of its own, so send it to its coverage board.
+  if ((await resolveViewerMode()).collaboratorOnly) redirect("/coverage");
   const params = await searchParams;
   const preferred = typeof params.event === "string" ? params.event : null;
   const events = await listEvents();

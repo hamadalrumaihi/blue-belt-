@@ -47,7 +47,13 @@ export function DeleteDialog({ trigger, triggerClassName, title, summary, confir
       const focusables = dialog.querySelectorAll<HTMLElement>(
         'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
       );
-      if (!focusables.length) return;
+      if (!focusables.length) {
+        // Every control is disabled while the delete runs: keep focus on the
+        // dialog itself rather than letting Tab escape to the page behind it.
+        e.preventDefault();
+        dialog.focus();
+        return;
+      }
       const first = focusables[0];
       const last = focusables[focusables.length - 1];
       const active = document.activeElement;
@@ -105,6 +111,7 @@ export function DeleteDialog({ trigger, triggerClassName, title, summary, confir
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-navy/60 p-3 backdrop-blur-sm sm:items-center" onClick={() => !pending && setOpen(false)}>
           <div
             ref={dialogRef}
+            tabIndex={-1}
             role="alertdialog"
             aria-modal="true"
             aria-labelledby={titleId}

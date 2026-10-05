@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient, isServiceClientConfigured } from "@/lib/supabase/service";
 import type { CollaboratorBoardRow, CollaboratorEventRow, PhotoCoverageRow } from "@/lib/supabase/database.types";
@@ -19,16 +20,19 @@ export async function loadCollaboratorEvents(): Promise<CollaboratorEventRow[]> 
  * is treated as an owner so they can set up. photo_collaborator_events() returns
  * membership rows only, never owned events, so the two counts don't overlap.
  */
-export async function resolveViewerMode(): Promise<{ collaboratorOnly: boolean }> {
+export const resolveViewerMode = cache(async (): Promise<{ collaboratorOnly: boolean }> => {
   const supabase = await createClient();
   const [owned, collab] = await Promise.all([
     supabase.from("photo_events").select("id", { count: "exact", head: true }),
     supabase.rpc("photo_collaborator_events"),
   ]);
+  // Fail open to the owner nav: a transient error must never hide the owner's
+  // own surfaces. This only decides what the nav offers; RLS still guards data.
+  if (owned.error || collab.error) return { collaboratorOnly: false };
   const ownedCount = owned.count ?? 0;
   const collabCount = (collab.data as CollaboratorEventRow[] | null)?.length ?? 0;
   return { collaboratorOnly: ownedCount === 0 && collabCount > 0 };
-}
+});
 
 /** The caller's assigned clients for one event (operational fields only). */
 export async function loadCollaboratorBoard(eventId: string): Promise<CollaboratorBoardRow[]> {

@@ -1,10 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { BOTTOM_ITEMS, isActivePath, navItemsFor, SIDEBAR_ITEMS } from "@/components/nav";
+import { BOTTOM_ITEMS, bottomGridClass, isActivePath, navItemsFor, SIDEBAR_ITEMS } from "@/components/nav";
 
 describe("navItemsFor", () => {
-  it("returns every item for an owner", () => {
+  it("keeps the owner's nav as it was (no collaborator shortcuts)", () => {
     expect(navItemsFor(SIDEBAR_ITEMS, false)).toEqual(SIDEBAR_ITEMS);
-    expect(navItemsFor(BOTTOM_ITEMS, false)).toEqual(BOTTOM_ITEMS);
+    expect(navItemsFor(BOTTOM_ITEMS, false).map((i) => i.href)).toEqual(["/dashboard", "/events", "/clients", "/watcher", "/more"]);
+  });
+
+  it("fits every viewer's bottom nav on one row", () => {
+    for (const collaboratorOnly of [false, true]) {
+      const n = navItemsFor(BOTTOM_ITEMS, collaboratorOnly).length;
+      expect(bottomGridClass(n)).toBe(`grid-cols-${n}`);
+    }
+    expect(bottomGridClass(9)).toBe("grid-flow-col auto-cols-fr");
   });
 
   it("drops owner-only items for a collaborator and never exposes Orders", () => {
