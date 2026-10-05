@@ -17,7 +17,8 @@
 import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Logger } from "@/lib/log";
-import type { Database, Json, PhotoBookingRow } from "@/lib/supabase/database.types";
+import type { Database, Json, PhotoBookingRow, PhotoOrderRow } from "@/lib/supabase/database.types";
+import { deliveryInsert } from "@/lib/notifications/delivery-runner";
 import { fulfillmentPlan } from "@/lib/payments/fulfillment";
 import { applyTransition, isPaymentStatus, type PaymentStatus } from "@/lib/payments/types";
 import { MYFATOORAH_PROVIDER, type PaymentProvider, type PaymentStatusOutput } from "./client";
@@ -291,6 +292,80 @@ async function findBookingByInvoice(invoiceId: string, deps: WebhookDeps): Promi
 }
 
 // ---------------------------------------------------------------------------
+// Order updates — the Pic-Time order side of the same invoice
+// ---------------------------------------------------------------------------
+
+/**
+ * A MyFatoorah invoice can belong to a Pic-Time order instead of a standalone
+ * booking: createInvoiceForOrder stamps the order with (provider,
+ * provider_invoice_id). This resolves the webhook's invoice to that order.
+ */
+async function findOrderByInvoice(invoiceId: string, deps: WebhookDeps): Promise<PhotoOrderRow | null> {
+  const { data, error } = await deps.supabase.from("photo_orders").select("*").eq("provider", MYFATOORAH_PROVIDER).eq("provider_invoice_id", invoiceId).maybeSingle();
+  if (error) {
+    deps.log.error("payments.order_lookup_failed", { error: error.message });
+    return null;
+  }
+  return data ?? null;
+}
+
+type OrderApplyOutcome = { result: Extract<ProcessingResult, "processed" | "unchanged" | "error">; detail?: string };
+
+/**
+ * Applies a provider status to a Pic-Time order's payment_state. Only paid /
+ * failed / refunded flip the state (the order's payment_state enum has no
+ * disputed or cancelled); a dispute or cancellation is recorded in metadata
+ * only. On the first transition to paid, enqueues the owner's [Orders]
+ * confirmation — an owner notice, never a message to the customer. Idempotent:
+ * a repeat of the same terminal state is reported unchanged.
+ */
+async function applyStatusToOrder(order: PhotoOrderRow, mapping: Extract<StatusMapping, { kind: "apply" }>, ctx: ApplyContext, deps: WebhookDeps): Promise<OrderApplyOutcome> {
+  const now = deps.now();
+  const metadata = isRecord(order.metadata) ? order.metadata : {};
+  const lastEvent = { status: mapping.status, at: now.toISOString(), source: ctx.source, invoice_id: mapping.invoiceId };
+  const columns: Partial<PhotoOrderRow> = { metadata: { ...metadata, payment_last_event: lastEvent } as Json };
+
+  const stateFor: Partial<Record<PaymentStatus, string>> = { paid: "paid", failed: "failed", refunded: "refunded" };
+  const nextState = stateFor[mapping.status];
+  if (!nextState) {
+    // disputed / cancelled: keep the record, do not invent an order state.
+    const { error } = await deps.supabase.from("photo_orders").update(columns).eq("id", order.id).eq("owner_id", order.owner_id);
+    if (error) deps.log.warn("payments.order_meta_update_failed", { orderId: order.id, error: error.message });
+    return { result: "unchanged", detail: `order_${mapping.status}` };
+  }
+  if (order.payment_state === nextState) return { result: "unchanged", detail: `already_${nextState}` };
+
+  columns.payment_state = nextState;
+  columns.payment_reported_state = nextState;
+  let delivery: Database["public"]["Tables"]["photo_notification_deliveries"]["Insert"] | null = null;
+  if (mapping.status === "paid") {
+    columns.paid_at = now.toISOString();
+    columns.payment_confirmed_at = now.toISOString();
+    columns.payment_confirmed_by = MYFATOORAH_PROVIDER;
+    const amount = `${Number(mapping.amount ?? order.amount_qr).toFixed(2)} ${mapping.currency ?? order.currency}`;
+    delivery = deliveryInsert({
+      ownerId: order.owner_id,
+      alertKey: `order-payment:${order.id}:paid`,
+      kind: "PAYMENT_CONFIRMED",
+      text: `<b>Payment confirmed — ${escapeHtml(order.customer_name)}</b>\n${escapeHtml(amount)}${order.gallery_name ? ` · ${escapeHtml(order.gallery_name)}` : ""}`,
+      category: "orders",
+      now,
+    });
+  }
+
+  const { error } = await deps.supabase.from("photo_orders").update(columns).eq("id", order.id).eq("owner_id", order.owner_id);
+  if (error) {
+    deps.log.error("payments.order_update_failed", { orderId: order.id, error: error.message });
+    return { result: "error", detail: "order_update_failed" };
+  }
+  if (delivery) {
+    const { error: dErr } = await deps.supabase.from("photo_notification_deliveries").insert(delivery);
+    if (dErr) deps.log.warn("payments.order_confirm_enqueue_failed", { orderId: order.id, error: dErr.message });
+  }
+  return { result: "processed" };
+}
+
+// ---------------------------------------------------------------------------
 // Webhook entry point
 // ---------------------------------------------------------------------------
 
@@ -333,10 +408,10 @@ export async function processWebhook(event: WebhookEvent, deps: WebhookDeps): Pr
     rowId = inserted.id;
   }
 
-  const finish = async (result: ProcessingResult, booking: PhotoBookingRow | null, status?: PaymentStatus, detail?: string): Promise<ProcessWebhookOutcome> => {
+  const finish = async (result: ProcessingResult, booking: PhotoBookingRow | null, status?: PaymentStatus, detail?: string, order?: PhotoOrderRow | null): Promise<ProcessWebhookOutcome> => {
     await deps.supabase
       .from("photo_payment_events")
-      .update({ processing_result: detail ? `${result}:${detail}` : result, processed_at: deps.now().toISOString(), booking_id: booking?.id ?? null, owner_id: booking?.owner_id ?? null })
+      .update({ processing_result: detail ? `${result}:${detail}` : result, processed_at: deps.now().toISOString(), booking_id: booking?.id ?? null, order_id: order?.id ?? null, owner_id: booking?.owner_id ?? order?.owner_id ?? null })
       .eq("id", rowId);
     return { result, eventId, eventType, bookingId: booking?.id ?? null, status, detail };
   };
@@ -353,6 +428,12 @@ export async function processWebhook(event: WebhookEvent, deps: WebhookDeps): Pr
 
   const booking = await findBookingByInvoice(mapping.invoiceId, deps);
   if (!booking) {
+    // Not a standalone booking — the invoice may belong to a Pic-Time order.
+    const order = await findOrderByInvoice(mapping.invoiceId, deps);
+    if (order) {
+      const appliedOrder = await applyStatusToOrder(order, mapping, { source: `webhook:${eventId}`, eventRowId: rowId }, deps);
+      return finish(appliedOrder.result, null, appliedOrder.result === "processed" ? mapping.status : undefined, appliedOrder.detail, order);
+    }
     deps.log.warn("payments.booking_not_found", { eventId, eventType });
     return finish("booking_not_found", null);
   }
@@ -385,14 +466,24 @@ export async function replayUnmatchedEvents(deps: WebhookDeps, limit = 50): Prom
     const body = isRecord(ev.payload) ? ev.payload : {};
     const mapping = mapWebhookEvent(eventNameOf(body), isRecord(body.Data) ? body.Data : {});
     if (mapping.kind === "ignore") continue;
+    const source = `replay:${ev.provider_event_id ?? ev.id}`;
     const booking = await findBookingByInvoice(mapping.invoiceId, deps);
-    if (!booking) continue;
-    const out = await applyStatusToBooking(booking, mapping, { source: `replay:${ev.provider_event_id ?? ev.id}`, eventRowId: ev.id }, deps);
-    if (out.result !== "processed") {
-      await deps.supabase.from("photo_payment_events").update({ processing_result: out.detail ? `${out.result}:${out.detail}` : out.result, processed_at: deps.now().toISOString(), booking_id: booking.id, owner_id: booking.owner_id }).eq("id", ev.id);
-    } else {
-      applied += 1;
+    if (booking) {
+      const out = await applyStatusToBooking(booking, mapping, { source, eventRowId: ev.id }, deps);
+      if (out.result !== "processed") {
+        await deps.supabase.from("photo_payment_events").update({ processing_result: out.detail ? `${out.result}:${out.detail}` : out.result, processed_at: deps.now().toISOString(), booking_id: booking.id, owner_id: booking.owner_id }).eq("id", ev.id);
+      } else {
+        applied += 1;
+      }
+      continue;
     }
+    // No booking — try the Pic-Time order side (the order may have been
+    // invoiced after this event first arrived).
+    const order = await findOrderByInvoice(mapping.invoiceId, deps);
+    if (!order) continue;
+    const out = await applyStatusToOrder(order, mapping, { source, eventRowId: ev.id }, deps);
+    await deps.supabase.from("photo_payment_events").update({ processing_result: out.detail ? `${out.result}:${out.detail}` : out.result, processed_at: deps.now().toISOString(), order_id: order.id, owner_id: order.owner_id }).eq("id", ev.id);
+    if (out.result === "processed") applied += 1;
   }
   return { scanned: (events ?? []).length, applied };
 }

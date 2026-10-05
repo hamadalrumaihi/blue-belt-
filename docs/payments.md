@@ -253,3 +253,40 @@ Compared on 2026-10-02 with [my-fatoorah/library](https://github.com/my-fatoorah
 - **Status words**: the library maps webhook `CANCELED` to "Expired"; this adapter maps it to the booking status `cancelled`. `GetPaymentStatus` success transactions are spelled `Succss` by the API (handled), and `DuplicatePayment` counts as paid (handled). The library derives "Expired" from `ExpiryDate`/`ExpiryTime` in the vendor timezone; this adapter leaves such invoices `pending` until a webhook or a later inquiry says otherwise.
 - **Endpoints and auth**: `POST /v2/SendPayment`, `POST /v2/GetPaymentStatus` with `Authorization: Bearer <API key>`, matching both libraries. Refunds use `POST /v2/MakeRefund` (not implemented here yet).
 - **Base URLs**: Qatar production `https://api-qa.myfatoorah.com`, test `https://apitest.myfatoorah.com`, matching `mf-config.json`.
+
+## Order ↔ invoice lifecycle (NEW-2)
+
+Until now the Pic-Time **orders** pipeline and the MyFatoorah **booking/invoice**
+pipeline never touched. The lifecycle connects them, entirely behind the
+existing flags (nothing runs until payments are activated):
+
+- **Invoice from an order (option b).** `createInvoiceForOrder` (in
+  `src/lib/payments/invoicing.ts`) calls `SendPayment` with the **order id as the
+  `customerReference`**, then writes `provider` / `provider_invoice_id` /
+  `payment_url` back onto the `photo_orders` row. Two entry points:
+  - *Manual*: the owner action `requestOrderInvoice(orderId)` (Orders → an
+    order → "Create MyFatoorah payment invoice"). Gated by `isPaymentsEnabled()`.
+  - *Automatic*: the payments cron invoices every eligible order when
+    `PAYMENTS_AUTO_INVOICE_ENABLED=1`. Eligible = unpaid, not cancelled, has an
+    amount, no invoice yet, **and paid by an offline method** (Fawran / bank
+    transfer / cash). A card order is already settled in Pic-Time, so it is
+    never auto-invoiced (no double charge).
+- **Direct / standalone invoice (option a).** `createStandaloneInvoice` inserts
+  a `photo_bookings` row and invoices it with the booking id as the reference,
+  so it flows through the existing webhook/reconcile path. (Library + action in
+  place; a dedicated owner form is the remaining UI increment.)
+- **The webhook/reconcile now resolve orders too.** When an invoice does not
+  match a standalone booking, `processWebhook` / `replayUnmatchedEvents` look it
+  up as an order (by `provider` + `provider_invoice_id`) and set the order's
+  `payment_state` (paid / failed / refunded), `paid_at`, and
+  `photo_payment_events.order_id`. On the first transition to **paid** an owner
+  `[Orders]` confirmation is enqueued.
+
+### What this does NOT do (owner's decision)
+
+Creating an invoice **stores a payment URL on the order; it never sends that
+link to the customer.** Delivering the link to the buyer (and whether the
+automatic path should message them) is a deliberate, unbuilt step — it is an
+outward, customer-facing action that needs the owner's explicit sign-off on
+wording and channel. The owner sees the link on the order page and sends it
+themselves. A paid booking still never creates a tracked athlete.

@@ -1,0 +1,179 @@
+import { describe, expect, it, vi } from "vitest";
+import { createLogger, setLogSink } from "@/lib/log";
+import type { CreateInvoiceInput, PaymentProvider, ProviderResult, CreateInvoiceOutput } from "@/lib/payments/myfatoorah/client";
+import { autoInvoiceOrders, createInvoiceForOrder, createStandaloneInvoice, eligibleForAutoInvoice, invoiceInputForOrder, type InvoiceDeps } from "@/lib/payments/invoicing";
+import type { PhotoOrderRow } from "@/lib/supabase/database.types";
+import { FakeSupabase } from "./fake-supabase";
+import { OWNER } from "./fixtures";
+
+vi.mock("server-only", () => ({}));
+setLogSink(() => {});
+
+const ORDER_ID = "33333333-3333-4333-8333-333333333333";
+
+function order(overrides: Partial<PhotoOrderRow> = {}): PhotoOrderRow {
+  return {
+    id: ORDER_ID,
+    owner_id: OWNER,
+    pictime_order_id: "PT-1",
+    customer_name: "Buyer One",
+    customer_email: "buyer@example.com",
+    customer_phone: null,
+    gallery_name: "Doha Open",
+    amount_qr: 120,
+    currency: "QAR",
+    status: "placed",
+    provider: null,
+    provider_invoice_id: null,
+    payment_url: null,
+    paid_at: null,
+    approved_in_pictime_at: null,
+    metadata: {},
+    source: "pictime",
+    external_ref: "PT-1",
+    payment_method: "fawran",
+    payment_state: "pending",
+    payment_reference: null,
+    payment_reported_state: null,
+    items: [],
+    placed_at: null,
+    received_at: "2026-10-02T10:00:00.000Z",
+    buyer_note: null,
+    athlete_name_hint: null,
+    raw: {},
+    payment_confirmed_at: null,
+    payment_confirmed_by: null,
+    fulfilled_at: null,
+    created_at: "2026-10-02T10:00:00.000Z",
+    updated_at: "2026-10-02T10:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function fakeProvider(createInvoice?: (input: CreateInvoiceInput) => Promise<ProviderResult<CreateInvoiceOutput>>): PaymentProvider & { calls: CreateInvoiceInput[] } {
+  const calls: CreateInvoiceInput[] = [];
+  return {
+    name: "MYFATOORAH",
+    calls,
+    createInvoice: async (input) => {
+      calls.push(input);
+      if (createInvoice) return createInvoice(input);
+      return { ok: true, data: { invoiceId: "INV-NEW", paymentUrl: "https://pay.test/INV-NEW", customerReference: input.customerReference, raw: {} } };
+    },
+    getPaymentStatus: async () => ({ ok: false, error: { code: "not_configured", message: "n/a" } }),
+  };
+}
+
+function setup(seedOrders: PhotoOrderRow[] = []) {
+  const db = new FakeSupabase();
+  if (seedOrders.length) db.seed("photo_orders", seedOrders as unknown as Record<string, unknown>[]);
+  let t = Date.parse("2026-10-03T09:00:00.000Z");
+  const deps: InvoiceDeps = { supabase: db.asClient(), now: () => new Date((t += 1000)), log: createLogger({ test: true }) };
+  return { db, deps };
+}
+
+describe("eligibleForAutoInvoice", () => {
+  it("is true for an unpaid offline order with an amount and no invoice", () => {
+    expect(eligibleForAutoInvoice(order())).toBe(true);
+    expect(eligibleForAutoInvoice(order({ payment_method: "bank_transfer" }))).toBe(true);
+    expect(eligibleForAutoInvoice(order({ payment_method: "cash" }))).toBe(true);
+  });
+  it("is false for a card order (already paid in Pic-Time)", () => {
+    expect(eligibleForAutoInvoice(order({ payment_method: "card" }))).toBe(false);
+  });
+  it("is false when already invoiced, paid, refunded, cancelled, or zero amount", () => {
+    expect(eligibleForAutoInvoice(order({ provider_invoice_id: "X" }))).toBe(false);
+    expect(eligibleForAutoInvoice(order({ payment_state: "paid" }))).toBe(false);
+    expect(eligibleForAutoInvoice(order({ payment_state: "refunded" }))).toBe(false);
+    expect(eligibleForAutoInvoice(order({ status: "cancelled" }))).toBe(false);
+    expect(eligibleForAutoInvoice(order({ amount_qr: 0 }))).toBe(false);
+  });
+});
+
+describe("invoiceInputForOrder", () => {
+  it("carries the order id as the customerReference", () => {
+    const input = invoiceInputForOrder(order({ external_ref: "PT-9" }));
+    expect(input).toMatchObject({ amount: 120, customerName: "Buyer One", customerReference: ORDER_ID, customerEmail: "buyer@example.com", displayCurrencyIso: "QAR", userDefinedField: "PT-9" });
+  });
+});
+
+describe("createInvoiceForOrder", () => {
+  it("creates an invoice and writes the invoice id + payment url back on the order", async () => {
+    const { db, deps } = setup([order()]);
+    const provider = fakeProvider();
+    const result = await createInvoiceForOrder(order(), provider, deps);
+    expect(result).toMatchObject({ ok: true, orderId: ORDER_ID, invoiceId: "INV-NEW", paymentUrl: "https://pay.test/INV-NEW" });
+    expect(provider.calls[0].customerReference).toBe(ORDER_ID);
+    const saved = db.tables.photo_orders.find((o) => o.id === ORDER_ID)!;
+    expect(saved).toMatchObject({ provider: "MYFATOORAH", provider_invoice_id: "INV-NEW", payment_url: "https://pay.test/INV-NEW" });
+    expect((saved.metadata as { invoice?: { invoice_id?: string } }).invoice?.invoice_id).toBe("INV-NEW");
+  });
+
+  it("is a no-op success when the order already has an invoice (no provider call)", async () => {
+    const existing = order({ provider_invoice_id: "INV-OLD", payment_url: "https://pay.test/INV-OLD", provider: "MYFATOORAH" });
+    const { deps } = setup([existing]);
+    const provider = fakeProvider();
+    const result = await createInvoiceForOrder(existing, provider, deps);
+    expect(result).toEqual({ ok: true, orderId: ORDER_ID, invoiceId: "INV-OLD", paymentUrl: "https://pay.test/INV-OLD", alreadyInvoiced: true });
+    expect(provider.calls).toHaveLength(0);
+  });
+
+  it("refuses a paid, cancelled or zero-amount order", async () => {
+    const { deps } = setup();
+    const provider = fakeProvider();
+    expect(await createInvoiceForOrder(order({ payment_state: "paid" }), provider, deps)).toMatchObject({ ok: false, reason: "already_paid" });
+    expect(await createInvoiceForOrder(order({ status: "cancelled" }), provider, deps)).toMatchObject({ ok: false, reason: "cancelled" });
+    expect(await createInvoiceForOrder(order({ amount_qr: 0 }), provider, deps)).toMatchObject({ ok: false, reason: "no_amount" });
+    expect(provider.calls).toHaveLength(0);
+  });
+
+  it("reports a provider error and does not update the order", async () => {
+    const { db, deps } = setup([order()]);
+    const provider = fakeProvider(async () => ({ ok: false, error: { code: "provider", message: "declined" } }));
+    const result = await createInvoiceForOrder(order(), provider, deps);
+    expect(result).toMatchObject({ ok: false, reason: "provider_error" });
+    const saved = db.tables.photo_orders.find((o) => o.id === ORDER_ID)!;
+    expect(saved.provider_invoice_id ?? null).toBeNull();
+  });
+});
+
+describe("autoInvoiceOrders", () => {
+  it("invoices only the eligible unpaid offline orders", async () => {
+    const eligible = order({ id: "a1", external_ref: "a1", payment_method: "fawran", payment_state: "pending" });
+    const card = order({ id: "a2", external_ref: "a2", payment_method: "card", payment_state: "pending" });
+    const paid = order({ id: "a3", external_ref: "a3", payment_method: "fawran", payment_state: "paid" });
+    const invoiced = order({ id: "a4", external_ref: "a4", payment_method: "fawran", provider_invoice_id: "INV-X" });
+    const { db, deps } = setup([eligible, card, paid, invoiced]);
+    const provider = fakeProvider();
+    const out = await autoInvoiceOrders(provider, deps, { limit: 25 });
+    expect(out.invoiced).toBe(1);
+    expect(provider.calls.map((c) => c.customerReference)).toEqual(["a1"]);
+    expect(db.tables.photo_orders.find((o) => o.id === "a1")!.provider_invoice_id).toBe("INV-NEW");
+    expect(db.tables.photo_orders.find((o) => o.id === "a2")!.provider_invoice_id ?? null).toBeNull();
+  });
+});
+
+describe("createStandaloneInvoice", () => {
+  it("inserts a booking and invoices it with the booking id as the reference", async () => {
+    const { db, deps } = setup();
+    const provider = fakeProvider();
+    const result = await createStandaloneInvoice(
+      { ownerId: OWNER, customerName: "Direct Buyer", customerEmail: "d@example.com", customerPhone: "+97400000001", packageName: "Event photos", amountQr: 200 },
+      provider,
+      deps,
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(provider.calls[0].customerReference).toBe(result.bookingId);
+    const b = db.tables.photo_bookings.find((x) => x.id === result.bookingId)!;
+    expect(b).toMatchObject({ owner_id: OWNER, provider: "MYFATOORAH", provider_invoice_id: "INV-NEW", payment_url: "https://pay.test/INV-NEW", status: "pending", amount_qr: 200 });
+  });
+
+  it("refuses a zero amount", async () => {
+    const { deps } = setup();
+    const provider = fakeProvider();
+    const result = await createStandaloneInvoice({ ownerId: OWNER, customerName: "X", customerEmail: "x@x.com", customerPhone: "", packageName: "P", amountQr: 0 }, provider, deps);
+    expect(result).toMatchObject({ ok: false, reason: "no_amount" });
+    expect(provider.calls).toHaveLength(0);
+  });
+});
