@@ -1,0 +1,37 @@
+import { describe, expect, it } from "vitest";
+import { BOTTOM_ITEMS, isActivePath, navItemsFor, SIDEBAR_ITEMS } from "@/components/nav";
+
+describe("navItemsFor", () => {
+  it("returns every item for an owner", () => {
+    expect(navItemsFor(SIDEBAR_ITEMS, false)).toEqual(SIDEBAR_ITEMS);
+    expect(navItemsFor(BOTTOM_ITEMS, false)).toEqual(BOTTOM_ITEMS);
+  });
+
+  it("drops owner-only items for a collaborator and never exposes Orders", () => {
+    const sidebar = navItemsFor(SIDEBAR_ITEMS, true);
+    expect(sidebar.every((i) => !i.ownerOnly)).toBe(true);
+    expect(sidebar.some((i) => i.href === "/orders")).toBe(false);
+    // The collaborator still has their coverage board.
+    expect(sidebar.some((i) => i.href === "/coverage")).toBe(true);
+  });
+
+  it("keeps the collaborator bottom nav non-empty (coverage + more)", () => {
+    const bottom = navItemsFor(BOTTOM_ITEMS, true);
+    expect(bottom.map((i) => i.href)).toEqual(["/coverage", "/more"]);
+  });
+});
+
+describe("isActivePath", () => {
+  it("matches the exact path and its sub-paths", () => {
+    expect(isActivePath("/events", "/events")).toBe(true);
+    expect(isActivePath("/events/123", "/events")).toBe(true);
+    expect(isActivePath("/eventsomething", "/events")).toBe(false);
+  });
+
+  it("groups owner sub-pages under More", () => {
+    for (const p of ["/more", "/history", "/settings", "/orders", "/orders/abc"]) {
+      expect(isActivePath(p, "/more")).toBe(true);
+    }
+    expect(isActivePath("/coverage", "/more")).toBe(false);
+  });
+});
