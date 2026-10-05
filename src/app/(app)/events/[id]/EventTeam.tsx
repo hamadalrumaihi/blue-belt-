@@ -59,9 +59,9 @@ export function EventTeam({ eventId, members }: Props) {
       )}
 
       <div className="mt-3 space-y-2">
-        <input className="input" type="email" inputMode="email" placeholder="collaborator@email.com" value={email} onChange={(e) => setEmail(e.target.value)} />
+        <input className="input" type="email" inputMode="email" aria-label="Collaborator email" placeholder="collaborator@email.com" value={email} onChange={(e) => setEmail(e.target.value)} />
         <div className="flex gap-2">
-          <select className="input flex-1" value={role} onChange={(e) => setRole(e.target.value as "photographer" | "assistant")}>
+          <select className="input flex-1" aria-label="Collaborator role" value={role} onChange={(e) => setRole(e.target.value as "photographer" | "assistant")}>
             <option value="photographer">Photographer</option>
             <option value="assistant">Assistant</option>
           </select>
