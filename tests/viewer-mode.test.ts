@@ -6,10 +6,10 @@ vi.mock("server-only", () => ({}));
 let ownedCount = 0;
 let collabRows: unknown[] = [];
 const fakeClient = {
-  from(_table: string) {
-    return { select: async (_cols: string, _opts: unknown) => ({ count: ownedCount, error: null }) };
+  from() {
+    return { select: async () => ({ count: ownedCount, error: null }) };
   },
-  rpc: async (_name: string) => ({ data: collabRows, error: null }),
+  rpc: async () => ({ data: collabRows, error: null }),
 };
 
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => fakeClient }));
