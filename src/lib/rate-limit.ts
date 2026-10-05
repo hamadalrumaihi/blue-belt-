@@ -73,4 +73,6 @@ export const RULES = {
   capturePerCredential: { max: 60, windowMs: 60_000 } satisfies RateLimitRule,
   /** Unauthenticated-token probes against the capture endpoints, per client address. */
   captureAuthPerIp: { max: 30, windowMs: 60_000 } satisfies RateLimitRule,
+  /** MyFatoorah webhook, per client address, so one abusive IP cannot starve the provider's budget. */
+  paymentsWebhookPerIp: { max: 120, windowMs: 60_000 } satisfies RateLimitRule,
 };

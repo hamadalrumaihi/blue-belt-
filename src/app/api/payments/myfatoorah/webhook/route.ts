@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requestLogger } from "@/lib/log";
-import { rateLimit, rateLimitHeaders } from "@/lib/rate-limit";
+import { rateLimit, rateLimitHeaders, RULES } from "@/lib/rate-limit";
 import { createServiceClient, isServiceClientConfigured } from "@/lib/supabase/service";
 import { getPaymentsConfig, isPaymentsEnabled } from "@/lib/payments/config";
 import { isSupportedWebhookVersion, SIGNATURE_HEADER, VERSION_HEADER, verifySignature } from "@/lib/payments/myfatoorah/signature";
@@ -8,6 +8,9 @@ import { processWebhook } from "@/lib/payments/myfatoorah/webhook";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+/** Webhook V2 bodies are a few KB; anything larger is not a real MyFatoorah delivery. */
+const MAX_BODY_BYTES = 64 * 1024;
 
 /**
  * POST /api/payments/myfatoorah/webhook  (Webhook V2, see docs/payments.md)
@@ -26,7 +29,10 @@ export async function POST(request: Request) {
   const { log, requestId } = requestLogger(request, "api/payments/myfatoorah/webhook");
   const headers = { "cache-control": "no-store", "x-request-id": requestId };
 
-  const limit = rateLimit("payments-webhook", { max: 120, windowMs: 60_000 });
+  // Per-IP so one abusive source cannot exhaust the shared budget and 429 the
+  // provider's genuine deliveries.
+  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  const limit = rateLimit(`payments-webhook:${ip}`, RULES.paymentsWebhookPerIp);
   if (!limit.ok) return NextResponse.json({ error: "Too many requests.", code: "RATE_LIMITED" }, { status: 429, headers: { ...headers, ...rateLimitHeaders(limit) } });
 
   if (!isServiceClientConfigured()) {
@@ -34,9 +40,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Service client is not configured.", code: "NOT_CONFIGURED" }, { status: 503, headers });
   }
 
+  // Cap the body before reading/parsing so an unauthenticated caller cannot post
+  // a huge blob (it would otherwise be stored as evidence). Mirrors orders intake.
+  if (Number(request.headers.get("content-length") ?? 0) > MAX_BODY_BYTES) {
+    return NextResponse.json({ error: "Body too large.", code: "TOO_LARGE" }, { status: 413, headers });
+  }
+
   // The signature covers specific fields, not the raw bytes, so read the text
   // first (never consumed twice) and parse after.
   const text = await request.text();
+  if (text.length > MAX_BODY_BYTES) {
+    return NextResponse.json({ error: "Body too large.", code: "TOO_LARGE" }, { status: 413, headers });
+  }
   let body: unknown;
   try {
     body = JSON.parse(text);

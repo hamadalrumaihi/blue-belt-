@@ -294,6 +294,21 @@ async function findBookingByInvoice(invoiceId: string, deps: WebhookDeps): Promi
 // Webhook entry point
 // ---------------------------------------------------------------------------
 
+/** Stop polling / replaying a stuck booking or unmatched event after this long. */
+const MAX_PENDING_AGE_MINUTES = 14 * 24 * 60;
+
+/**
+ * What to persist as a delivery's payload. A verified delivery keeps its full
+ * body (needed for replay/reconcile). An UNVERIFIED delivery is attacker-
+ * controlled, so only a hash + size is stored as evidence — never the raw
+ * blob — until a real signed copy upgrades the row to the full body.
+ */
+function storedPayload(body: Record<string, unknown>, signatureValid: boolean): Json {
+  if (signatureValid) return body as Json;
+  const text = JSON.stringify(body);
+  return { unverified: true, hash: createHash("sha256").update(text, "utf8").digest("hex"), bytes: Buffer.byteLength(text, "utf8") };
+}
+
 export async function processWebhook(event: WebhookEvent, deps: WebhookDeps): Promise<ProcessWebhookOutcome> {
   const { body } = event;
   const eventId = providerEventIdOf(body);
@@ -306,7 +321,7 @@ export async function processWebhook(event: WebhookEvent, deps: WebhookDeps): Pr
   // index, so insert-then-handle-conflict is the idempotency primitive.
   const { data: inserted, error: insertError } = await deps.supabase
     .from("photo_payment_events")
-    .insert({ provider: MYFATOORAH_PROVIDER, provider_event_id: eventId, event_type: eventType, payload: body as Json, signature_valid: event.signatureValid, received_at: receivedAt, attempts: 1 })
+    .insert({ provider: MYFATOORAH_PROVIDER, provider_event_id: eventId, event_type: eventType, payload: storedPayload(body, event.signatureValid), signature_valid: event.signatureValid, received_at: receivedAt, attempts: 1 })
     .select("id")
     .single();
 
@@ -371,13 +386,28 @@ export async function processWebhook(event: WebhookEvent, deps: WebhookDeps): Pr
  * Re-applies verified events that arrived before their booking existed
  * (processing_result = booking_not_found). Bounded; safe to repeat.
  */
-export async function replayUnmatchedEvents(deps: WebhookDeps, limit = 50): Promise<{ scanned: number; applied: number }> {
+export async function replayUnmatchedEvents(deps: WebhookDeps, limit = 50): Promise<{ scanned: number; applied: number; abandoned: number }> {
+  const floor = new Date(deps.now().getTime() - MAX_PENDING_AGE_MINUTES * 60_000).toISOString();
+  // Events still unmatched past the window will almost certainly never match
+  // (wrong invoice id, cancelled sale). Retire them to a terminal result so
+  // they stop being re-scanned every tick, and report the count.
+  const { data: retired } = await deps.supabase
+    .from("photo_payment_events")
+    .update({ processing_result: "abandoned", processed_at: deps.now().toISOString() })
+    .eq("provider", MYFATOORAH_PROVIDER)
+    .eq("signature_valid", true)
+    .eq("processing_result", "booking_not_found")
+    .lte("received_at", floor)
+    .select("id");
+  const abandoned = (retired ?? []).length;
+
   const { data: events } = await deps.supabase
     .from("photo_payment_events")
     .select("*")
     .eq("provider", MYFATOORAH_PROVIDER)
     .eq("signature_valid", true)
     .eq("processing_result", "booking_not_found")
+    .gt("received_at", floor)
     .order("received_at", { ascending: true })
     .limit(limit);
   let applied = 0;
@@ -394,7 +424,7 @@ export async function replayUnmatchedEvents(deps: WebhookDeps, limit = 50): Prom
       applied += 1;
     }
   }
-  return { scanned: (events ?? []).length, applied };
+  return { scanned: (events ?? []).length, applied, abandoned };
 }
 
 /**
@@ -402,8 +432,13 @@ export async function replayUnmatchedEvents(deps: WebhookDeps, limit = 50): Prom
  * after `olderThanMinutes` (a missed webhook). Calls the provider once per
  * booking; bounded by `limit`.
  */
-export async function reconcilePendingBookings(provider: PaymentProvider, deps: WebhookDeps, opts: { olderThanMinutes?: number; limit?: number } = {}): Promise<{ scanned: number; changed: number; results: ReconcileResult[] }> {
-  const cutoff = new Date(deps.now().getTime() - (opts.olderThanMinutes ?? 10) * 60_000).toISOString();
+export async function reconcilePendingBookings(provider: PaymentProvider, deps: WebhookDeps, opts: { olderThanMinutes?: number; maxAgeMinutes?: number; limit?: number } = {}): Promise<{ scanned: number; changed: number; results: ReconcileResult[] }> {
+  const now = deps.now().getTime();
+  const cutoff = new Date(now - (opts.olderThanMinutes ?? 10) * 60_000).toISOString();
+  // Lower bound: an invoice the customer never paid would otherwise be polled
+  // (one provider call each) on every tick forever. Past the window, stop; the
+  // owner reconciles those by hand.
+  const floor = new Date(now - (opts.maxAgeMinutes ?? MAX_PENDING_AGE_MINUTES) * 60_000).toISOString();
   const { data: bookings } = await deps.supabase
     .from("photo_bookings")
     .select("id")
@@ -411,6 +446,7 @@ export async function reconcilePendingBookings(provider: PaymentProvider, deps: 
     .in("status", ["pending", "failed"])
     .not("provider_invoice_id", "is", null)
     .lt("created_at", cutoff)
+    .gt("created_at", floor)
     .order("created_at", { ascending: true })
     .limit(opts.limit ?? 25);
   const results: ReconcileResult[] = [];
