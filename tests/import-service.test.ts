@@ -341,3 +341,48 @@ describe("importPage rejects a challenge page", () => {
     expect(fake.captures).toHaveLength(0);
   });
 });
+
+describe("importPage — conditional capture finalisation (multi-device)", () => {
+  const supersededResult = (a: { id: string; name: string; source_url: string | null }) => ({
+    athleteId: a.id,
+    athleteName: a.name,
+    status: "NO_MATCHES" as const,
+    code: "SKIPPED" as const,
+    matches: [],
+    changes: [],
+    checkedAt: NOW.toISOString(),
+    sourceUrl: a.source_url,
+    health: { lastAttemptAt: null, lastSuccessAt: null, consecutiveFailures: 0 },
+    ambiguous: 0,
+    skipped: "SUPERSEDED" as const,
+  });
+
+  it("marks the capture rejected (not applied) and returns STALE_CAPTURE when every athlete is superseded", async () => {
+    const a1 = athleteRow({ id: "22222222-2222-4222-8222-000000000001", name: "Hamad Al Rumaihi", source_url: PAGE });
+    const fake = fakeSupabase({ athletes: [a1], events: [eventRow()] });
+    refreshMock.mockImplementation(async (_c, athletes) => athletes.map(supersededResult));
+
+    const out = await importPage(fake.client, { url: PAGE, html: fixture("ajp-bracket-table"), ownerId: OWNER, capture: { captureId: "cap-superseded", capturedAt: "2026-03-14T05:50:00.000Z" }, now: NOW });
+
+    expect(out).toMatchObject({ ok: false, code: "STALE_CAPTURE" });
+    expect(fake.captures.find((c) => c.capture_id === "cap-superseded")).toMatchObject({ status: "rejected", reject_code: "STALE_CAPTURE" });
+  });
+
+  it("counts only the athletes actually applied in matched when some are superseded", async () => {
+    const a1 = athleteRow({ id: "22222222-2222-4222-8222-000000000001", name: "Hamad Al Rumaihi", source_url: PAGE });
+    const a2 = athleteRow({ id: "22222222-2222-4222-8222-000000000002", name: "Someone Else", source_url: PAGE });
+    const fake = fakeSupabase({ athletes: [a1, a2], events: [eventRow()] });
+    refreshMock.mockImplementation(async (_c, athletes) =>
+      athletes.map((a, i) =>
+        i === 0
+          ? { athleteId: a.id, athleteName: a.name, status: "OK" as const, code: "MATCHES_FOUND" as const, matches: [], changes: [], checkedAt: NOW.toISOString(), sourceUrl: a.source_url, health: { lastAttemptAt: null, lastSuccessAt: null, consecutiveFailures: 0 }, ambiguous: 0 }
+          : supersededResult(a),
+      ),
+    );
+
+    const out = await importPage(fake.client, { url: PAGE, html: fixture("ajp-bracket-table"), ownerId: OWNER, capture: { captureId: "cap-partial", capturedAt: "2026-03-14T05:58:00.000Z" }, now: NOW });
+
+    expect(out).toMatchObject({ ok: true, matched: 1 });
+    expect(fake.captures.find((c) => c.capture_id === "cap-partial")).toMatchObject({ status: "applied", athlete_count: 1 });
+  });
+});

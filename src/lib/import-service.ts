@@ -231,19 +231,60 @@ export async function importPage(supabase: Client, input: ImportInput): Promise<
     now,
     staggerMs: 0,
     concurrency: 4,
+    captureAt: env.capturedAt,
     watch: async (athlete: AthleteRow, event: EventRow | null) =>
       parseImportedHtml(url, input.html, { athleteName: athlete.name, timezone: event?.timezone ?? null, eventDate: event?.event_date ?? null, now, log: log.child({ athleteId: athlete.id }) }),
   });
   const statuses = results.reduce<Record<string, number>>((acc, r) => ({ ...acc, [r.status]: (acc[r.status] ?? 0) + 1 }), {});
   const checkedAt = now.toISOString();
-  await markCaptureApplied(supabase, input.ownerId, registered.row.id, {
+
+  // How many athletes this capture actually persisted. A result is "applied"
+  // unless it was skipped (superseded by a newer capture, or lost the version
+  // race) or errored. Marking the capture applied only when something was
+  // written keeps a wholly-conflicted/superseded import out of the replay lock,
+  // so it stays retryable instead of being recorded as a silent success.
+  const appliedCount = results.filter((r) => !r.skipped && r.code !== "REFRESH_ERROR").length;
+  const supersededCount = results.filter((r) => r.skipped === "SUPERSEDED").length;
+
+  if (appliedCount === 0) {
+    const code: ImportFailureCode = supersededCount > 0 ? "STALE_CAPTURE" : "CAPTURE_IN_PROGRESS";
+    const message =
+      supersededCount > 0
+        ? "A newer capture of this page was already applied; this older one was not."
+        : "Another refresh is applying this page right now. Capture again in a moment.";
+    await markCaptureRejected(supabase, input.ownerId, registered.row.id, code).catch((err: unknown) =>
+      log.warn("import.capture_mark_failed", { error: err instanceof Error ? err.message : String(err) }),
+    );
+    log.info("import.not_applied", { url, code, superseded: supersededCount, athletes: athletes.length });
+    return { ok: false, code, message, url, capture: summary(false) };
+  }
+
+  await markCaptureAppliedWithRetry(supabase, input.ownerId, registered.row.id, {
     appliedAt: checkedAt,
-    athleteCount: athletes.length,
-    outcome: { matched: athletes.length, checkedAt, statuses } as Json,
+    athleteCount: appliedCount,
+    outcome: { matched: appliedCount, checkedAt, statuses } as Json,
     diagnostics: redactDiagnostics({ ...(results[0]?.diagnostics ?? {}), transport: env.transport, completeness: env.completeness, bytes: env.bytes }) as Json,
-  }).catch((err: unknown) => log.warn("import.capture_mark_failed", { error: err instanceof Error ? err.message : String(err) }));
-  log.info("import.applied", { url, athletes: athletes.length, htmlBytes: input.html.length, transport: env.transport, completeness: env.completeness, statuses });
-  return { ok: true, url, matched: athletes.length, results, checkedAt, capture: summary(false) };
+  }, log);
+  log.info("import.applied", { url, athletes: athletes.length, applied: appliedCount, superseded: supersededCount, htmlBytes: input.html.length, transport: env.transport, completeness: env.completeness, statuses });
+  return { ok: true, url, matched: appliedCount, results, checkedAt, capture: summary(false) };
+}
+
+/** Marks a capture applied, retrying the ledger write once so a transient DB hiccup does not leave it stuck "received". */
+async function markCaptureAppliedWithRetry(
+  supabase: Client,
+  ownerId: string,
+  id: string,
+  update: { appliedAt: string; athleteCount: number; outcome: Json; diagnostics: Json },
+  log: Logger,
+): Promise<void> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await markCaptureApplied(supabase, ownerId, id, update);
+      return;
+    } catch (err) {
+      if (attempt === 1) log.warn("import.capture_mark_failed", { error: err instanceof Error ? err.message : String(err) });
+    }
+  }
 }
 
 /** Shape of a capture envelope exposed for tests / other transports. */

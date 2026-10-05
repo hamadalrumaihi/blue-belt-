@@ -68,7 +68,29 @@ In order; each step is tested in `tests/import-service.test.ts`:
    was captured later than this one → `STALE_CAPTURE` (409) and the row is
    marked rejected. Captures of *other* brackets never block.
 7. Apply through the normal pipeline (`refreshAthletes` → plan → `photo_apply_refresh`
-   → history → notifications), then mark the capture `applied`.
+   → history → notifications), then mark the capture `applied` — but only when at
+   least one athlete was actually written. A capture whose athletes were all
+   superseded or lost the version race stays retryable (`STALE_CAPTURE` /
+   `CAPTURE_IN_PROGRESS`) instead of being recorded as a false success.
+
+### Concurrent captures of the same page (phone + agent + PC)
+
+Step 6 catches an older capture that arrives *after* a newer one has already
+been applied. When two captures of the same source are **in flight at once**
+(the phone, the Windows agent and a PC all importing the same bracket), the
+service-level check is not enough: both read the athlete at the same
+`refresh_version` and race into `photo_apply_refresh`.
+
+`photo_apply_refresh` therefore orders by capture time, not arrival order. Each
+athlete records the `captured_at` of the newest capture applied to it
+(`photo_athletes.last_capture_at`); an apply whose capture is older is refused
+with a `STALE` result and writes nothing. The capture time rides in the `p_diag`
+jsonb under `captureAt` (so the function signature is unchanged; live refreshes
+and the cron sweep send none and skip the check). The import path passes it and,
+on a `CONFLICT`, re-plans against the winner's rows and retries at the fresh
+version — so whichever apply wins the version race, **the newest capture's data
+is what persists**. Pinned by `supabase/tests/capture_ordering.test.sql` and
+`tests/watch-service.test.ts` / `tests/import-service.test.ts`.
 
 Owner identity is the authenticated session (`/api/import`) or the capture
 credential (machine intake, Phase B). The body cannot name an owner; a
