@@ -391,7 +391,7 @@ export async function replayUnmatchedEvents(deps: WebhookDeps, limit = 50): Prom
   // Events still unmatched past the window will almost certainly never match
   // (wrong invoice id, cancelled sale). Retire them to a terminal result so
   // they stop being re-scanned every tick, and report the count.
-  const { data: retired } = await deps.supabase
+  const { data: retired, error: retireError } = await deps.supabase
     .from("photo_payment_events")
     .update({ processing_result: "abandoned", processed_at: deps.now().toISOString() })
     .eq("provider", MYFATOORAH_PROVIDER)
@@ -399,6 +399,7 @@ export async function replayUnmatchedEvents(deps: WebhookDeps, limit = 50): Prom
     .eq("processing_result", "booking_not_found")
     .lte("received_at", floor)
     .select("id");
+  if (retireError) deps.log.warn("payments.abandon_failed", { error: retireError.message });
   const abandoned = (retired ?? []).length;
 
   const { data: events } = await deps.supabase

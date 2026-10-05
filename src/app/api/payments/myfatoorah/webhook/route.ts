@@ -49,7 +49,9 @@ export async function POST(request: Request) {
   // The signature covers specific fields, not the raw bytes, so read the text
   // first (never consumed twice) and parse after.
   const text = await request.text();
-  if (text.length > MAX_BODY_BYTES) {
+  // Bytes, not UTF-16 characters: a multi-byte body without Content-Length
+  // would otherwise slip past the cap at up to 3x its size.
+  if (Buffer.byteLength(text, "utf8") > MAX_BODY_BYTES) {
     return NextResponse.json({ error: "Body too large.", code: "TOO_LARGE" }, { status: 413, headers });
   }
   let body: unknown;
