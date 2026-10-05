@@ -12,7 +12,9 @@ export type OrderFilter = "all" | "needs_confirmation" | "paid" | "fulfilled";
 export async function listOrders(filter: OrderFilter = "all", limit = 100): Promise<PhotoOrderRow[]> {
   const supabase = await createClient();
   let query = supabase.from("photo_orders").select("*").order("received_at", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false }).limit(limit);
-  if (filter === "needs_confirmation") query = query.in("payment_state", ["pending", "unknown"]).neq("status", "cancelled");
+  // Includes `failed`: those orders are highlighted in the list and need owner
+  // attention (retry / confirm), so they belong under this filter and its count.
+  if (filter === "needs_confirmation") query = query.in("payment_state", ["pending", "unknown", "failed"]).neq("status", "cancelled");
   if (filter === "paid") query = query.eq("payment_state", "paid");
   if (filter === "fulfilled") query = query.eq("status", "fulfilled");
   const { data, error } = await query;
@@ -30,7 +32,7 @@ export async function orderCounts(): Promise<{ total: number; needsConfirmation:
   const supabase = await createClient();
   const [{ count: total }, { count: needs }] = await Promise.all([
     supabase.from("photo_orders").select("id", { count: "exact", head: true }),
-    supabase.from("photo_orders").select("id", { count: "exact", head: true }).in("payment_state", ["pending", "unknown"]).neq("status", "cancelled"),
+    supabase.from("photo_orders").select("id", { count: "exact", head: true }).in("payment_state", ["pending", "unknown", "failed"]).neq("status", "cancelled"),
   ]);
   return { total: total ?? 0, needsConfirmation: needs ?? 0 };
 }

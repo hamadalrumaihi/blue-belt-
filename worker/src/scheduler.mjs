@@ -16,6 +16,14 @@ import { log } from "./log.mjs";
  */
 const MAX_PAGES_PER_TICK = 10;
 
+// A refresh page can legitimately take up to the endpoint's TIME_BUDGET_MS
+// (~240s: each athlete may wait on the browser worker). The per-request abort
+// must exceed that, NOT the tick interval — otherwise a short SCHEDULE_SECONDS
+// aborts every slow page, the cursor never advances and the sweep re-hits page
+// one forever. The non-overlap `running` guard handles cadence; a request may
+// safely span several intervals.
+const REFRESH_REQUEST_TIMEOUT_MS = 250_000;
+
 export function startScheduler(deps = {}) {
   const { seconds, appUrl, cronSecret, deliverySeconds, paymentsSeconds } = config.schedule;
   const fetchImpl = deps.fetch ?? fetch;
@@ -37,7 +45,7 @@ export function startScheduler(deps = {}) {
             method: "POST",
             headers: { authorization: `Bearer ${cronSecret}`, "content-type": "application/json" },
             body: JSON.stringify(cursor ? { cursor } : {}),
-            signal: AbortSignal.timeout(Math.max(interval - 1000, 20_000)),
+            signal: AbortSignal.timeout(REFRESH_REQUEST_TIMEOUT_MS),
           });
           const body = await res.json().catch(() => ({}));
           pages += 1;

@@ -167,6 +167,9 @@ async function watchUrlInner(rawUrl: string | null | undefined, options: WatchOp
   };
 
   // Fetch once per (owner, source) when the batch asked for it; parse per athlete.
+  // Carry the request correlation id (held on the request logger) into the
+  // browser worker so a render is traceable end to end.
+  const requestId = typeof options.log?.fields.requestId === "string" ? options.log.fields.requestId : null;
   let shared = false;
   let stage: FetchStage;
   const cache = options.pageCache;
@@ -177,12 +180,12 @@ async function watchUrlInner(rawUrl: string | null | undefined, options: WatchOp
       shared = true;
       stage = await hit;
     } else {
-      const pending = fetchStage(adapter, policy.url, base, ctx, started);
+      const pending = fetchStage(adapter, policy.url, base, ctx, started, requestId);
       cache.set(key, pending);
       stage = await pending;
     }
   } else {
-    stage = await fetchStage(adapter, policy.url, base, ctx, started);
+    stage = await fetchStage(adapter, policy.url, base, ctx, started, requestId);
   }
 
   if (!stage.ok) {
@@ -210,6 +213,7 @@ async function fetchStage(
   base: Pick<WatchResult, "platform" | "athlete" | "matches" | "sourceUrl" | "fetchedAt">,
   ctx: (finalUrl: string, athleteName: string | null) => WatchContext,
   started: number,
+  requestId: string | null = null,
 ): Promise<FetchStage> {
   const diag = (partial: Partial<WatchDiagnostics> & { strategy: string }): WatchDiagnostics => ({ sourceStatus: null, finalUrl: null, elapsedMs: Date.now() - started, ...partial });
   const fail = (result: Omit<WatchResult, "athlete">): FetchStage => ({ ok: false, result });
@@ -232,7 +236,7 @@ async function fetchStage(
   }
 
   // Browser path.
-  const rendered = await browserFetchHtml(url);
+  const rendered = await browserFetchHtml(url, { requestId });
   if (!rendered.ok) {
     const mapped = browserFailure(rendered.code);
     const fallback = plain ?? { ...base };

@@ -85,9 +85,6 @@ export async function runDeliveryBatch(opts: DeliveryBatchOptions): Promise<Deli
     const text = textOf(row);
     try {
       await sendMessage(chatId, text);
-      lastSentAt.set(chatId, Date.now());
-      await patch(supabase, row, { status: "sent", sent_at: now.toISOString(), last_error: null, next_attempt_at: null, leased_until: null, updated_at: now.toISOString() });
-      summary.sent += 1;
     } catch (err) {
       const klass = classifyTelegramError(err);
       if (klass.transient) {
@@ -118,7 +115,20 @@ export async function runDeliveryBatch(opts: DeliveryBatchOptions): Promise<Deli
         if (linkError) log.warn("delivery.disable_link_failed", { error: linkError.message });
         links.set(row.owner_id, null);
       }
+      continue;
     }
+
+    // The message is out. Record it as sent. A failure to write the status here
+    // must NOT be classified as a send error and rescheduled — that would
+    // re-send a message already delivered. It is logged; the lease simply
+    // expires (at-least-once, as documented), it is not retried in this batch.
+    lastSentAt.set(chatId, Date.now());
+    try {
+      await patch(supabase, row, { status: "sent", sent_at: now.toISOString(), last_error: null, next_attempt_at: null, leased_until: null, updated_at: now.toISOString() });
+    } catch (perr) {
+      log.warn("delivery.mark_sent_failed", { deliveryId: row.id, error: perr instanceof Error ? perr.message : String(perr) });
+    }
+    summary.sent += 1;
   }
   if (summary.sent || summary.failed || summary.retried || summary.skipped) log.info("delivery.batch", { ...summary, worker });
   return summary;
