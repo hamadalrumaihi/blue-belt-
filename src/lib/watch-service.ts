@@ -179,6 +179,11 @@ export async function refreshAthlete(supabase: Client, athlete: AthleteRow, even
         // Another apply persisted first. On the capture path, re-plan against
         // the rows it wrote and retry with the fresh version: the RPC's
         // capture-time guard then decides the winner (older → STALE).
+        // Known limit: live/cron refreshes do not advance last_capture_at, so a
+        // capture retried after a live refresh can still overwrite it with the
+        // capture's (slightly older) view. Live data refreshes again on its next
+        // tick; ordering captures against live checks would need clock-aligned
+        // timestamps across devices and is deliberately out of scope here.
         if (attempt < maxRetries) {
           expectedVersion = applied.version;
           existing = applied.matches;
