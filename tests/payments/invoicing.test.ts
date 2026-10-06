@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createLogger, setLogSink } from "@/lib/log";
-import type { CreateInvoiceInput, PaymentProvider, ProviderResult, CreateInvoiceOutput } from "@/lib/payments/myfatoorah/client";
-import { autoInvoiceOrders, createInvoiceForOrder, createStandaloneInvoice, eligibleForAutoInvoice, invoiceInputForOrder, type InvoiceDeps } from "@/lib/payments/invoicing";
+import type { CreateInvoiceInput, CreateInvoiceOutput, PaymentProvider, PaymentStatusOutput, ProviderResult } from "@/lib/payments/myfatoorah/client";
+import { autoInvoiceOrders, createInvoiceForOrder, createStandaloneInvoice, eligibleForAutoInvoice, INVOICE_CLAIM_TTL_MS, invoiceInputForOrder, MAX_AUTO_INVOICE_ATTEMPTS, type InvoiceDeps } from "@/lib/payments/invoicing";
 import type { PhotoOrderRow } from "@/lib/supabase/database.types";
 import { FakeSupabase } from "./fake-supabase";
 import { OWNER } from "./fixtures";
@@ -44,24 +44,34 @@ function order(overrides: Partial<PhotoOrderRow> = {}): PhotoOrderRow {
     payment_confirmed_at: null,
     payment_confirmed_by: null,
     fulfilled_at: null,
+    invoice_claimed_at: null,
     created_at: "2026-10-02T10:00:00.000Z",
     updated_at: "2026-10-02T10:00:00.000Z",
     ...overrides,
   };
 }
 
-function fakeProvider(createInvoice?: (input: CreateInvoiceInput) => Promise<ProviderResult<CreateInvoiceOutput>>): PaymentProvider & { calls: CreateInvoiceInput[] } {
+function fakeProvider(
+  createInvoice?: (input: CreateInvoiceInput) => Promise<ProviderResult<CreateInvoiceOutput>>,
+  getPaymentStatus?: () => Promise<ProviderResult<PaymentStatusOutput>>,
+): PaymentProvider & { calls: CreateInvoiceInput[]; statusCalls: number } {
   const calls: CreateInvoiceInput[] = [];
-  return {
-    name: "MYFATOORAH",
+  const self = {
+    name: "MYFATOORAH" as const,
     calls,
-    createInvoice: async (input) => {
+    statusCalls: 0,
+    createInvoice: async (input: CreateInvoiceInput): Promise<ProviderResult<CreateInvoiceOutput>> => {
       calls.push(input);
       if (createInvoice) return createInvoice(input);
       return { ok: true, data: { invoiceId: "INV-NEW", paymentUrl: "https://pay.test/INV-NEW", customerReference: input.customerReference, raw: {} } };
     },
-    getPaymentStatus: async () => ({ ok: false, error: { code: "not_configured", message: "n/a" } }),
+    getPaymentStatus: async (): Promise<ProviderResult<PaymentStatusOutput>> => {
+      self.statusCalls += 1;
+      if (getPaymentStatus) return getPaymentStatus();
+      return { ok: false, error: { code: "provider", message: "No invoice for this key" } };
+    },
   };
+  return self;
 }
 
 function setup(seedOrders: PhotoOrderRow[] = []) {
@@ -87,6 +97,10 @@ describe("eligibleForAutoInvoice", () => {
     expect(eligibleForAutoInvoice(order({ payment_state: "refunded" }))).toBe(false);
     expect(eligibleForAutoInvoice(order({ status: "cancelled" }))).toBe(false);
     expect(eligibleForAutoInvoice(order({ amount_qr: 0 }))).toBe(false);
+  });
+  it("stops auto-invoicing an order after repeated provider failures", () => {
+    expect(eligibleForAutoInvoice(order({ metadata: { invoice_attempts: MAX_AUTO_INVOICE_ATTEMPTS - 1 } }))).toBe(true);
+    expect(eligibleForAutoInvoice(order({ metadata: { invoice_attempts: MAX_AUTO_INVOICE_ATTEMPTS } }))).toBe(false);
   });
 });
 
@@ -118,6 +132,73 @@ describe("createInvoiceForOrder", () => {
     expect(provider.calls).toHaveLength(0);
   });
 
+  it("never creates two invoices when two callers race for the same order", async () => {
+    const { db, deps } = setup([order()]);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const provider = fakeProvider(async (input) => {
+      await gate;
+      return { ok: true, data: { invoiceId: "INV-ONE", paymentUrl: "https://pay.test/INV-ONE", customerReference: input.customerReference, raw: {} } };
+    });
+    // Both read the same unclaimed order; only one may reach the provider.
+    const first = createInvoiceForOrder(order(), provider, deps);
+    const second = await createInvoiceForOrder(order(), provider, deps);
+    release();
+    expect(await first).toMatchObject({ ok: true, invoiceId: "INV-ONE" });
+    expect(second).toMatchObject({ ok: false, reason: "in_progress" });
+    expect(provider.calls).toHaveLength(1);
+    expect(db.tables.photo_orders[0]).toMatchObject({ provider_invoice_id: "INV-ONE", invoice_claimed_at: null });
+  });
+
+  it("answers in_progress while another caller's claim is fresh", async () => {
+    const claimed = order({ invoice_claimed_at: "2026-10-03T08:59:00.000Z" });
+    const { deps } = setup([claimed]);
+    const provider = fakeProvider();
+    expect(await createInvoiceForOrder(claimed, provider, deps)).toMatchObject({ ok: false, reason: "in_progress" });
+    expect(provider.calls).toHaveLength(0);
+    expect(provider.statusCalls).toBe(0);
+  });
+
+  it("re-links the invoice of a stale claim by CustomerReference instead of creating another", async () => {
+    const stale = order({ invoice_claimed_at: new Date(Date.parse("2026-10-03T09:00:00.000Z") - INVOICE_CLAIM_TTL_MS - 60_000).toISOString() });
+    const { db, deps } = setup([stale]);
+    const provider = fakeProvider(undefined, async () => ({ ok: true, data: { invoiceId: "INV-LOST", invoiceStatus: "Pending", invoiceReference: null, customerReference: ORDER_ID, invoiceValue: 120, transactions: [], raw: {} } }));
+    const result = await createInvoiceForOrder(stale, provider, deps);
+    expect(result).toMatchObject({ ok: true, invoiceId: "INV-LOST", relinked: true, paymentUrl: null });
+    expect(provider.calls).toHaveLength(0);
+    expect(db.tables.photo_orders[0]).toMatchObject({ provider_invoice_id: "INV-LOST", invoice_claimed_at: null });
+  });
+
+  it("takes over a stale claim and creates the invoice when MyFatoorah has none", async () => {
+    const staleAt = new Date(Date.parse("2026-10-03T09:00:00.000Z") - INVOICE_CLAIM_TTL_MS - 60_000).toISOString();
+    const stale = order({ invoice_claimed_at: staleAt });
+    const { db, deps } = setup([stale]);
+    const provider = fakeProvider();
+    expect(await createInvoiceForOrder(stale, provider, deps)).toMatchObject({ ok: true, invoiceId: "INV-NEW" });
+    expect(provider.statusCalls).toBe(1);
+    expect(provider.calls).toHaveLength(1);
+    expect(db.tables.photo_orders[0]).toMatchObject({ provider_invoice_id: "INV-NEW", invoice_claimed_at: null });
+  });
+
+  it("does not create anything when the stale-claim lookup is inconclusive (network)", async () => {
+    const stale = order({ invoice_claimed_at: "2026-10-01T00:00:00.000Z" });
+    const { deps } = setup([stale]);
+    const provider = fakeProvider(undefined, async () => ({ ok: false, error: { code: "timeout", message: "slow" } }));
+    expect(await createInvoiceForOrder(stale, provider, deps)).toMatchObject({ ok: false, reason: "provider_error", detail: "relink_timeout" });
+    expect(provider.calls).toHaveLength(0);
+  });
+
+  it("logs an orphan instead of overwriting when another invoice landed first", async () => {
+    const { db, deps } = setup([order()]);
+    const provider = fakeProvider(async (input) => {
+      // Something else records an invoice while SendPayment is in flight.
+      Object.assign(db.tables.photo_orders[0], { provider_invoice_id: "INV-OTHER" });
+      return { ok: true, data: { invoiceId: "INV-LATE", paymentUrl: "https://pay.test/INV-LATE", customerReference: input.customerReference, raw: {} } };
+    });
+    expect(await createInvoiceForOrder(order(), provider, deps)).toMatchObject({ ok: false, reason: "provider_error", detail: "orphan" });
+    expect(db.tables.photo_orders[0].provider_invoice_id).toBe("INV-OTHER");
+  });
+
   it("refuses a paid, cancelled or zero-amount order", async () => {
     const { deps } = setup();
     const provider = fakeProvider();
@@ -127,13 +208,15 @@ describe("createInvoiceForOrder", () => {
     expect(provider.calls).toHaveLength(0);
   });
 
-  it("reports a provider error and does not update the order", async () => {
+  it("reports a provider error, releases the claim and counts the attempt", async () => {
     const { db, deps } = setup([order()]);
     const provider = fakeProvider(async () => ({ ok: false, error: { code: "provider", message: "declined" } }));
     const result = await createInvoiceForOrder(order(), provider, deps);
     expect(result).toMatchObject({ ok: false, reason: "provider_error" });
     const saved = db.tables.photo_orders.find((o) => o.id === ORDER_ID)!;
     expect(saved.provider_invoice_id ?? null).toBeNull();
+    expect(saved.invoice_claimed_at).toBeNull();
+    expect(saved.metadata).toMatchObject({ invoice_attempts: 1, invoice_last_error: "provider" });
   });
 });
 

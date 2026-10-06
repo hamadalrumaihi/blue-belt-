@@ -50,7 +50,7 @@ export async function POST(request: Request) {
       reconcile = { enabled: true, scanned: r.scanned, changed: r.changed };
     }
     if (isAutoInvoiceEnabled()) {
-      const a = await autoInvoiceOrders(provider, deps, { limit: 25 });
+      const a = await autoInvoiceOrders(provider, deps, { limit: 10, budgetMs: 25_000 });
       autoInvoice = { enabled: true, scanned: a.scanned, invoiced: a.invoiced, failed: a.failed };
     }
   }
