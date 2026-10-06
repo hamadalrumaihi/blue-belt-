@@ -422,3 +422,85 @@ as $$
 $$;
 revoke execute on function public.photo_my_role() from public, anon;
 grant execute on function public.photo_my_role() to authenticated, service_role;
+
+-- Hardening -----------------------------------------------------------------------
+-- 1. Owner tables are for studio users only. Magic-link sign-in creates auth
+--    users for clients, and "owner_id = auth.uid()" alone would let any such
+--    user create their own tenant (a photo_studio row, bookings, e-mails).
+--    Every *_owner_* policy on photo_* tables additionally requires an
+--    owner/staff profile. Client access goes through the views below.
+create or replace function public.photo_is_studio_user()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select auth.uid() is not null and exists (
+    select 1 from public.photo_profiles p where p.user_id = auth.uid() and p.role in ('owner', 'staff')
+  );
+$$;
+revoke execute on function public.photo_is_studio_user() from public, anon;
+grant execute on function public.photo_is_studio_user() to authenticated, service_role;
+
+do $$
+declare pol record; v_qual text; v_check text;
+begin
+  for pol in
+    select schemaname, tablename, policyname, cmd, qual, with_check
+    from pg_policies
+    where schemaname = 'public' and tablename like 'photo\_%' and policyname like '%\_owner\_%'
+      and coalesce(qual, '') not like '%photo_is_studio_user%' and coalesce(with_check, '') not like '%photo_is_studio_user%'
+  loop
+    v_qual := case when pol.qual is null then null else format('(%s) and public.photo_is_studio_user()', pol.qual) end;
+    v_check := case when pol.with_check is null then null else format('(%s) and public.photo_is_studio_user()', pol.with_check) end;
+    if pol.cmd in ('SELECT', 'DELETE') then
+      execute format('alter policy %I on public.%I using (%s)', pol.policyname, pol.tablename, v_qual);
+    elsif pol.cmd = 'INSERT' then
+      execute format('alter policy %I on public.%I with check (%s)', pol.policyname, pol.tablename, v_check);
+    else
+      execute format('alter policy %I on public.%I using (%s) with check (%s)', pol.policyname, pol.tablename, coalesce(v_qual, 'true'), coalesce(v_check, v_qual, 'true'));
+    end if;
+  end loop;
+end $$;
+
+-- 2. Client portal reads go through SECURITY DEFINER views that expose only
+--    client-safe columns (no internal notes, metadata, assignments, provider
+--    ids). The row-level policies that returned whole rows are dropped.
+--    photo_documents keeps its client policy: the document is the client's own
+--    agreement and the PDF route reads it through RLS.
+drop policy if exists photo_people_self_select on public.photo_people;
+drop policy if exists photo_bookings_client_select on public.photo_bookings;
+drop policy if exists photo_galleries_client_select on public.photo_galleries;
+drop policy if exists photo_payment_records_client_select on public.photo_payment_records;
+
+create or replace view public.photo_client_people_v with (security_invoker = false) as
+  select p.id, p.owner_id, p.full_name, p.email, p.phone, p.instagram, p.whatsapp, p.created_at
+  from public.photo_people p
+  where p.user_id is not null and p.user_id = auth.uid();
+
+create or replace view public.photo_client_bookings_v with (security_invoker = false) as
+  select b.id, b.owner_id, b.client_id, b.public_ref, b.booking_type, b.booking_status, b.athlete_name, b.customer_name, b.customer_email,
+         b.customer_phone, b.academy, b.division, b.package_name, b.amount_qr, b.currency, b.status, b.payment_url, b.paid_at, b.event_id,
+         b.session_at, b.session_end_at, b.location, b.payment_mode, b.payment_method, b.amount_paid_qr, b.manual_paid_at, b.details,
+         b.contract_document_id, b.gallery_id, b.confirmed_at, b.delivered_at, b.completed_at, b.cancelled_at, b.created_at, b.updated_at
+  from public.photo_bookings b
+  where b.client_id is not null and public.photo_is_my_person(b.client_id);
+
+create or replace view public.photo_client_galleries_v with (security_invoker = false) as
+  select g.id, g.owner_id, g.booking_id, g.client_id, g.name, g.pictime_url, g.status, g.ready_at, g.delivered_at, g.created_at
+  from public.photo_galleries g
+  where g.status in ('ready', 'delivered') and (
+    (g.client_id is not null and public.photo_is_my_person(g.client_id))
+    or exists (select 1 from public.photo_bookings b where b.id = g.booking_id and b.client_id is not null and public.photo_is_my_person(b.client_id))
+  );
+
+create or replace view public.photo_client_payments_v with (security_invoker = false) as
+  select r.id, r.owner_id, r.booking_id, r.kind, r.method, r.amount_qr, r.currency, r.paid_at, r.created_at
+  from public.photo_payment_records r
+  where r.booking_id is not null and exists (
+    select 1 from public.photo_bookings b where b.id = r.booking_id and b.client_id is not null and public.photo_is_my_person(b.client_id)
+  );
+
+revoke all on public.photo_client_people_v, public.photo_client_bookings_v, public.photo_client_galleries_v, public.photo_client_payments_v from public, anon;
+grant select on public.photo_client_people_v, public.photo_client_bookings_v, public.photo_client_galleries_v, public.photo_client_payments_v to authenticated, service_role;

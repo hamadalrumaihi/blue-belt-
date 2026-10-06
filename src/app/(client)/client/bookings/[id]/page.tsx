@@ -19,7 +19,7 @@ export default async function ClientBookingPage({ params }: PageProps<"/client/b
   if (!viewer) redirect("/client/login");
   const { id } = await params;
   if (!isUuid(id)) notFound();
-  const people = await loadMyPeople(viewer.userId);
+  const people = await loadMyPeople(viewer.userId, viewer.email);
   const item = await getMyBooking(id, people.map((p) => p.id));
   if (!item) notFound();
   const { booking, documents, gallery, payments } = item;
@@ -62,7 +62,7 @@ export default async function ClientBookingPage({ params }: PageProps<"/client/b
             <ul className="mt-3 divide-y divide-line text-sm">
               {payments.map((p) => (
                 <li key={p.id} className="flex items-center justify-between gap-3 py-2">
-                  <span className="text-ink">{PAYMENT_METHOD_LABEL[p.method] ?? p.method}<span className="block text-xs text-muted">{formatDateTime(p.paid_at)} Qatar time{p.note ? ` · ${p.note}` : ""}</span></span>
+                  <span className="text-ink">{PAYMENT_METHOD_LABEL[p.method] ?? p.method}<span className="block text-xs text-muted">{formatDateTime(p.paid_at)} Qatar time</span></span>
                   <span className="tabular-nums font-semibold text-ink">{formatQr(p.amount_qr)}</span>
                 </li>
               ))}

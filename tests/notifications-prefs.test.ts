@@ -1,6 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
+vi.mock("@/lib/roles", async () => {
+  const { createClient } = await import("@/lib/supabase/server");
+  return {
+    requireStudioUser: async () => {
+      const s = await createClient();
+      const { data } = await s.auth.getUser();
+      const user = data?.user;
+      return user ? { ok: true, viewer: { userId: user.id, email: user.email ?? null, role: "owner" } } : { ok: false, error: "You are signed out." };
+    },
+    isStudioRole: (r: string) => r !== "client",
+  };
+});
 const getUser = vi.fn();
 const from = vi.fn();
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn(async () => ({ auth: { getUser }, from })) }));

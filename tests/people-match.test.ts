@@ -105,6 +105,19 @@ describe("findOrCreatePerson", () => {
     expect(inserts).toHaveLength(0);
   });
 
+  it("untrusted (website) input matches by e-mail only and never rewrites an existing person", async () => {
+    const existing = person({ email: null, email_key: null });
+    const { client, inserts, updates } = fakeSupabase([existing]);
+    // Same phone as the existing client, a stranger's e-mail: must NOT attach that e-mail.
+    const out = await findOrCreatePerson(client, OWNER, { fullName: "Stranger", email: "stranger@example.com", phone: "+974 5555 1234" }, { trusted: false });
+    expect(out.ok && out.found.created).toBe(true);
+    expect(updates).toHaveLength(0);
+    expect(inserts[0]).toMatchObject({ email: "stranger@example.com" });
+    // An e-mail match is still honoured, but nothing is patched onto the row.
+    const byEmail = await findOrCreatePerson(fakeSupabase([person()]).client, OWNER, { fullName: "X", email: "sara@example.com", instagram: "@new" }, { trusted: false });
+    expect(byEmail.ok && byEmail.found.matchedBy).toBe("email");
+  });
+
   it("creates a person with the owner id from the caller, never from the input", async () => {
     const { client, inserts } = fakeSupabase([]);
     const out = await findOrCreatePerson(client, OWNER, { fullName: "  New Client ", email: "new@example.com", phone: "+974 3333 4444", source: "website" });

@@ -81,7 +81,7 @@ export async function submitPublicBooking(_prev: PublicFormState, fd: FormData):
       instagram: values.instagram,
       kind: isClub ? "club_contact" : values.details.booked_for === "child" ? "parent" : values.details.booked_for === "athlete" ? "coach" : "person",
       source: "website",
-    });
+    }, { trusted: false });
     if (!person.ok) {
       log.error("public.booking.person_failed", { reason: person.error });
       return { error: GENERIC_ERROR };
@@ -225,7 +225,7 @@ export async function submitContact(_prev: PublicFormState, fd: FormData): Promi
 
   try {
     const supabase = createServiceClient();
-    const person = await findOrCreatePerson(supabase, ownerId, { fullName: values.full_name, email: values.email, phone: values.phone, source: "website" });
+    const person = await findOrCreatePerson(supabase, ownerId, { fullName: values.full_name, email: values.email, phone: values.phone, source: "website" }, { trusted: false });
     if (!person.ok) {
       log.error("public.contact.person_failed", { reason: person.error });
       return { error: GENERIC_ERROR };

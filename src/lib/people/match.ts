@@ -26,13 +26,26 @@ export type PersonInput = {
 
 export type FoundPerson = { person: PhotoPersonRow; created: boolean; matchedBy: "email" | "phone" | "created" };
 
+export type MatchOptions = {
+  /**
+   * false for public (website) submissions: match by e-mail only and never
+   * write the submitter's contact details onto an existing person. A
+   * phone-only match from the public form could otherwise attach a
+   * stranger's e-mail to an existing client and hand them that client's
+   * portal. Owner-entered data (default true) may match by phone and fill
+   * empty fields.
+   */
+  trusted?: boolean;
+};
+
 /**
  * Find the CRM person for a contact (e-mail first, then phone) or create one.
  * Never merges two different people: a phone match with a different e-mail
  * on file is still a match (people change e-mails), but nothing on the
  * existing row is overwritten except empty contact fields.
  */
-export async function findOrCreatePerson(supabase: Client, ownerId: string, input: PersonInput): Promise<{ ok: true; found: FoundPerson } | { ok: false; error: string }> {
+export async function findOrCreatePerson(supabase: Client, ownerId: string, input: PersonInput, options: MatchOptions = {}): Promise<{ ok: true; found: FoundPerson } | { ok: false; error: string }> {
+  const trusted = options.trusted ?? true;
   const email = input.email?.trim().toLowerCase() || null;
   const pk = phoneKey(input.phone);
   let person: PhotoPersonRow | null = null;
@@ -46,7 +59,7 @@ export async function findOrCreatePerson(supabase: Client, ownerId: string, inpu
       matchedBy = "email";
     }
   }
-  if (!person && pk) {
+  if (!person && pk && trusted) {
     const { data, error } = await supabase.from("photo_people").select("*").eq("owner_id", ownerId).eq("phone_key", pk).order("created_at", { ascending: true }).limit(1).maybeSingle();
     if (error) return { ok: false, error: error.message };
     if (data) {
@@ -56,6 +69,7 @@ export async function findOrCreatePerson(supabase: Client, ownerId: string, inpu
   }
 
   if (person) {
+    if (!trusted) return { ok: true, found: { person, created: false, matchedBy } };
     const patch: Partial<Omit<PhotoPersonRow, "email_key">> = {};
     if (!person.email && email) patch.email = email;
     if (!person.phone && input.phone?.trim()) {

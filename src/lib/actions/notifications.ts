@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { ALWAYS_ON_KINDS, isClientNotificationKind } from "@/lib/notifications/email/kinds";
+import { requireStudioUser } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
 
 /**
@@ -20,6 +21,7 @@ export async function setClientNotificationPref(kind: string, enabled: boolean):
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "You are signed out." };
+  if (!(await requireStudioUser()).ok) return { ok: false, error: "This action is for the studio team only." };
   const { error } = await supabase.from("photo_client_notification_prefs").upsert({ owner_id: user.id, kind, enabled, updated_at: new Date().toISOString() }, { onConflict: "owner_id,kind" });
   if (error) return { ok: false, error: error.message };
   revalidatePath("/notifications");
@@ -34,6 +36,7 @@ export async function retryDelivery(id: number): Promise<NotificationActionResul
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "You are signed out." };
+  if (!(await requireStudioUser()).ok) return { ok: false, error: "This action is for the studio team only." };
   const now = new Date().toISOString();
   const { error, count } = await supabase
     .from("photo_notification_deliveries")

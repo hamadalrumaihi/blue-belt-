@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { writeAudit } from "@/lib/audit";
 import { normalizeInstagram } from "@/lib/people/match";
+import { requireStudioUser } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
 import { isValidEmail, trimOrNull } from "@/lib/utils";
 
@@ -19,6 +20,7 @@ export async function saveStudio(_prev: StudioState, formData: FormData): Promis
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "You are signed out." };
+  if (!(await requireStudioUser()).ok) return { error: "This action is for the studio team only." };
 
   const fieldErrors: Record<string, string> = {};
   const business_name = trimOrNull(formData.get("business_name"));

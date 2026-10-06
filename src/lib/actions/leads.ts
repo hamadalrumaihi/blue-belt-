@@ -5,6 +5,7 @@ import { writeAudit } from "@/lib/audit";
 import { composeDivision, type PublicBookingDetails } from "@/lib/bookings/public-form";
 import { makePublicRef } from "@/lib/bookings/state";
 import { isLeadStatus } from "@/lib/leads/labels";
+import { requireStudioUser } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
 import type { Json, LeadStatus } from "@/lib/supabase/database.types";
 import { isPlainObject, isUuid } from "@/lib/validation";
@@ -17,6 +18,7 @@ export async function setLeadStatus(id: string, status: LeadStatus): Promise<Res
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "You are signed out." };
+  if (!(await requireStudioUser()).ok) return { ok: false, error: "This action is for the studio team only." };
   const { error, count } = await supabase.from("photo_leads").update({ status }, { count: "exact" }).eq("id", id).eq("owner_id", user.id);
   if (error) return { ok: false, error: error.message };
   if (!count) return { ok: false, error: "Lead not found or you do not have access to it." };
@@ -36,6 +38,7 @@ export async function convertLeadToBooking(id: string): Promise<(Result & { book
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "You are signed out." };
+  if (!(await requireStudioUser()).ok) return { ok: false, error: "This action is for the studio team only." };
   const { data: lead } = await supabase.from("photo_leads").select("*").eq("id", id).eq("owner_id", user.id).maybeSingle();
   if (!lead) return { ok: false, error: "Lead not found or you do not have access to it." };
   if (lead.booking_id) return { ok: true, bookingId: lead.booking_id };

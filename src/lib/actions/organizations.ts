@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { writeAudit } from "@/lib/audit";
 import { parseOrganizationForm } from "@/lib/organizations/form";
+import { requireStudioUser } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
 import { isUuid } from "@/lib/validation";
 
@@ -13,7 +14,10 @@ export type OrganizationActionResult = { ok: true } | { ok: false; error: string
 
 async function owner() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  // Studio team only: a client-portal account gets `user: null` here, which every
+  // caller turns into a clear error. RLS (photo_is_studio_user) enforces the same.
+  const guard = await requireStudioUser();
+  const user = guard.ok ? ({ id: guard.viewer.userId, email: guard.viewer.email } as { id: string; email: string | null }) : null;
   return { supabase, user };
 }
 

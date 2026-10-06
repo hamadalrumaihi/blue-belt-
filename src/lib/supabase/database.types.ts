@@ -678,6 +678,49 @@ export type PhotoAuditLogRow = {
   created_at: string;
 };
 
+/** Client-portal views (SECURITY DEFINER): only client-safe columns. */
+export type ClientPersonView = Pick<PhotoPersonRow, "id" | "owner_id" | "full_name" | "email" | "phone" | "instagram" | "whatsapp" | "created_at">;
+export type ClientBookingView = Pick<
+  PhotoBookingRow,
+  | "id"
+  | "owner_id"
+  | "client_id"
+  | "public_ref"
+  | "booking_type"
+  | "booking_status"
+  | "athlete_name"
+  | "customer_name"
+  | "customer_email"
+  | "customer_phone"
+  | "academy"
+  | "division"
+  | "package_name"
+  | "amount_qr"
+  | "currency"
+  | "status"
+  | "payment_url"
+  | "paid_at"
+  | "event_id"
+  | "session_at"
+  | "session_end_at"
+  | "location"
+  | "payment_mode"
+  | "payment_method"
+  | "amount_paid_qr"
+  | "manual_paid_at"
+  | "details"
+  | "contract_document_id"
+  | "gallery_id"
+  | "confirmed_at"
+  | "delivered_at"
+  | "completed_at"
+  | "cancelled_at"
+  | "created_at"
+  | "updated_at"
+>;
+export type ClientGalleryView = Pick<PhotoGalleryRow, "id" | "owner_id" | "booking_id" | "client_id" | "name" | "pictime_url" | "status" | "ready_at" | "delivered_at" | "created_at">;
+export type ClientPaymentView = Pick<PhotoPaymentRecordRow, "id" | "owner_id" | "booking_id" | "kind" | "method" | "amount_qr" | "currency" | "paid_at" | "created_at">;
+
 // ---------------------------------------------------------------------------
 // RPC payloads
 // ---------------------------------------------------------------------------
@@ -1075,7 +1118,12 @@ export type Database = {
         Relationships: [];
       };
     };
-    Views: Record<string, never>;
+    Views: {
+      photo_client_people_v: { Row: ClientPersonView; Relationships: [] };
+      photo_client_bookings_v: { Row: ClientBookingView; Relationships: [] };
+      photo_client_galleries_v: { Row: ClientGalleryView; Relationships: [] };
+      photo_client_payments_v: { Row: ClientPaymentView; Relationships: [] };
+    };
     Functions: {
       photo_apply_refresh: {
         Args: ApplyRefreshArgs;
@@ -1123,6 +1171,10 @@ export type Database = {
       };
       photo_is_my_person: {
         Args: { p_person_id: string };
+        Returns: boolean;
+      };
+      photo_is_studio_user: {
+        Args: Record<string, never>;
         Returns: boolean;
       };
     };

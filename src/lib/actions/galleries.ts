@@ -11,6 +11,7 @@ import { buildEmail } from "@/lib/notifications/email/templates";
 import { enqueueOwnerTelegram } from "@/lib/notifications/owner";
 import { loadStudio, siteUrl } from "@/lib/studio/queries";
 import type { GalleryStatus, PhotoBookingRow, PhotoGalleryRow } from "@/lib/supabase/database.types";
+import { requireStudioUser } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
 import { isValidEmail } from "@/lib/utils";
 import { isUuid } from "@/lib/validation";
@@ -30,9 +31,10 @@ type BookingLite = Pick<PhotoBookingRow, "id" | "owner_id" | "client_id" | "cust
 
 async function currentUser() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // Studio team only: a client-portal account gets `user: null` here, which every
+  // caller turns into a clear error. RLS (photo_is_studio_user) enforces the same.
+  const guard = await requireStudioUser();
+  const user = guard.ok ? ({ id: guard.viewer.userId, email: guard.viewer.email } as { id: string; email: string | null }) : null;
   return { supabase, user };
 }
 

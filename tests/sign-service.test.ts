@@ -100,7 +100,8 @@ describe("signDocument", () => {
     expect(deliveries.find((d) => d.channel === "telegram" && d.alert_key === `document:${DOC}:signed`)).toMatchObject({ kind: "CONTRACT_SIGNED", owner_id: OWNER });
     const mail = deliveries.find((d) => d.channel === "email" && d.alert_key === `email:document:${DOC}:signed`);
     expect(mail).toMatchObject({ kind: "CONTRACT_SIGNED" });
-    expect((mail?.payload as { to: string }).to).toBe("sara@example.com");
+    // The copy goes to the address the studio has on file, not the typed one.
+    expect((mail?.payload as { to: string }).to).toBe("parent@example.com");
 
     expect(db.tables.photo_athletes).toHaveLength(0);
     expect(db.calls.some((c) => c.table === "photo_athletes")).toBe(false);

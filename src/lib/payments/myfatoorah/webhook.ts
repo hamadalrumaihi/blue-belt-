@@ -308,18 +308,21 @@ async function afterProviderPaid(booking: PhotoBookingRow, mapping: Extract<Stat
   }
 
   try {
-    const { error } = await deps.supabase.from("photo_payment_records").insert({
-      owner_id: booking.owner_id,
-      booking_id: booking.id,
-      kind: "provider",
-      method: "myfatoorah",
-      amount_qr: Number(mapping.amount ?? booking.amount_qr),
-      currency: mapping.currency ?? booking.currency,
-      paid_at: nowIso,
-      provider: MYFATOORAH_PROVIDER,
-      provider_payment_id: mapping.paymentId,
-    });
-    if (error && error.code !== PG_UNIQUE_VIOLATION) deps.log.warn("payments.record_insert_failed", { bookingId: booking.id, error: error.message });
+    // A dispute that resolves back to paid is the same payment, not a new one.
+    if (booking.status !== "disputed") {
+      const { error } = await deps.supabase.from("photo_payment_records").insert({
+        owner_id: booking.owner_id,
+        booking_id: booking.id,
+        kind: "provider",
+        method: "myfatoorah",
+        amount_qr: Number(mapping.amount ?? booking.amount_qr),
+        currency: mapping.currency ?? booking.currency,
+        paid_at: nowIso,
+        provider: MYFATOORAH_PROVIDER,
+        provider_payment_id: mapping.paymentId,
+      });
+      if (error && error.code !== PG_UNIQUE_VIOLATION) deps.log.warn("payments.record_insert_failed", { bookingId: booking.id, error: error.message });
+    }
   } catch (err) {
     deps.log.warn("payments.record_insert_failed", { bookingId: booking.id, error: err instanceof Error ? err.message : "unknown" });
   }

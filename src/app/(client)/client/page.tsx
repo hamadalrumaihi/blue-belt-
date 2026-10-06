@@ -19,7 +19,7 @@ export default async function ClientPortalPage() {
   const viewer = await resolveViewer();
   if (!viewer) redirect("/client/login");
   const studioView = isStudioRole(viewer.role);
-  const [people, pub] = await Promise.all([loadMyPeople(viewer.userId), loadPublicStudio()]);
+  const [people, pub] = await Promise.all([loadMyPeople(viewer.userId, viewer.email), loadPublicStudio()]);
   const items = await listMyBookings(people.map((p) => p.id));
   const contactHref = pub?.studio.whatsapp ? `https://wa.me/${pub.studio.whatsapp.replace(/\D/g, "")}` : pub?.studio.email ? `mailto:${pub.studio.email}` : "/contact";
 

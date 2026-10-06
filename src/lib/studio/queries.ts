@@ -42,7 +42,13 @@ export const loadPublicStudio = cache(async (): Promise<PublicStudio | null> => 
 });
 
 export async function loadPublicStudioWith(supabase: Client): Promise<PublicStudio | null> {
-  const { data: studio } = await supabase.from("photo_studio").select("*").eq("public_booking", true).order("created_at", { ascending: true }).limit(1).maybeSingle();
+  // Single tenant. STUDIO_OWNER_ID pins which owner the public site serves;
+  // otherwise the earliest studio row with public booking on. Only
+  // owner/staff profiles can create studio rows (RLS: photo_is_studio_user).
+  let q = supabase.from("photo_studio").select("*").eq("public_booking", true);
+  const pinned = process.env.STUDIO_OWNER_ID?.trim();
+  if (pinned) q = q.eq("owner_id", pinned);
+  const { data: studio } = await q.order("created_at", { ascending: true }).limit(1).maybeSingle();
   if (!studio) return null;
   const { data: services } = await supabase
     .from("photo_services")

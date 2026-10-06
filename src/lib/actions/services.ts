@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import type { ActionState } from "./types";
 import { writeAudit } from "@/lib/audit";
 import { DEFAULT_SERVICES, parseServiceForm } from "@/lib/services/form";
+import { requireStudioUser } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
 import { isUuid } from "@/lib/validation";
 
@@ -21,6 +22,7 @@ export async function createService(_prev: ActionState, formData: FormData): Pro
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "You are signed out." };
+  if (!(await requireStudioUser()).ok) return { error: "This action is for the studio team only." };
   const { fieldErrors, values } = parseServiceForm(formData);
   if (!values) return { fieldErrors };
   const { data, error } = await supabase.from("photo_services").insert({ ...values, owner_id: user.id }).select("id").single();
@@ -35,6 +37,7 @@ export async function updateService(id: string, _prev: ActionState, formData: Fo
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "You are signed out." };
+  if (!(await requireStudioUser()).ok) return { error: "This action is for the studio team only." };
   const { fieldErrors, values } = parseServiceForm(formData);
   if (!values) return { fieldErrors };
   const { error, count } = await supabase.from("photo_services").update(values, { count: "exact" }).eq("id", id).eq("owner_id", user.id);
@@ -51,6 +54,7 @@ export async function setServiceActive(id: string, active: boolean): Promise<Res
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "You are signed out." };
+  if (!(await requireStudioUser()).ok) return { ok: false, error: "This action is for the studio team only." };
   const { error, count } = await supabase.from("photo_services").update({ active: Boolean(active) }, { count: "exact" }).eq("id", id).eq("owner_id", user.id);
   if (error) return { ok: false, error: error.message };
   if (!count) return { ok: false, error: "Package not found or you do not have access to it." };
@@ -64,6 +68,7 @@ export async function deleteService(id: string): Promise<Result> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "You are signed out." };
+  if (!(await requireStudioUser()).ok) return { ok: false, error: "This action is for the studio team only." };
   const { error, count } = await supabase.from("photo_services").delete({ count: "exact" }).eq("id", id).eq("owner_id", user.id);
   if (error) return { ok: false, error: error.code === "23503" ? "This package is used by bookings. Archive it instead." : error.message };
   if (!count) return { ok: false, error: "Package not found or you do not have access to it." };
@@ -77,6 +82,7 @@ export async function seedDefaultServices(): Promise<Result & { inserted?: numbe
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "You are signed out." };
+  if (!(await requireStudioUser()).ok) return { ok: false, error: "This action is for the studio team only." };
   const { count, error: countError } = await supabase.from("photo_services").select("id", { count: "exact", head: true }).eq("owner_id", user.id);
   if (countError) return { ok: false, error: countError.message };
   if ((count ?? 0) > 0) return { ok: false, error: "You already have packages. Add more one by one." };

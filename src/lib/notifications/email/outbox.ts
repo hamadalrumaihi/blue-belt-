@@ -138,7 +138,7 @@ async function patch(supabase: Client, row: PhotoNotificationDeliveryRow, update
 export function defaultEmailSender(log: Logger): SendEmail {
   if (isEmailDryRun()) {
     return async (draft) => {
-      log.info("email.dry_run", { to: draft.to, subject: draft.subject.slice(0, 60) });
+      log.info("email.dry_run", { to: draft.to.replace(/^(.).*?(@.*)$/, "$1***$2"), subject: draft.subject.slice(0, 60) });
       return { id: null };
     };
   }

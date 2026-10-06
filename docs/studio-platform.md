@@ -165,10 +165,19 @@ and failures show on `/notifications` with a Retry button.
 - **Owner id** is taken from the session, the studio row or an intake
   credential — never from a form. Public actions use the service role only
   after loading the studio row with `public_booking = true`.
-- **Tenant isolation**: owner RLS on every new table; client SELECT
-  policies only through `photo_is_my_person(client_id)`; drafts and
-  not-ready galleries are invisible to clients; `photo_people` self-select
-  only by `user_id`.
+- **Tenant isolation**: owner RLS on every `photo_*` table additionally
+  requires an owner/staff profile (`photo_is_studio_user()`), so a
+  self-registered portal account can never create its own tenant, studio
+  row or outgoing e-mail. Every studio server action also calls
+  `requireStudioUser()`. Clients read only through the SECURITY DEFINER
+  views `photo_client_{people,bookings,galleries,payments}_v`, which expose
+  client-safe columns (no internal notes, metadata, assignments or
+  provider ids); documents stay readable through RLS because the agreement
+  is the client's own. Drafts and not-ready galleries are invisible.
+- **Public forms never re-link people**: a website submission matches an
+  existing person by e-mail only and never writes contact details onto an
+  existing row (a phone-only match could otherwise hand a stranger an
+  existing client's portal).
 - **Documents**: tokens are random (`bbs_` + 40 chars), stored hashed,
   single-use per document, expire; the signed body is hash-locked; signing
   is an atomic guarded update; signer name must contain letters.
@@ -205,6 +214,7 @@ no refund API; e-mail deliverability depends on a verified Resend domain.
 | `EMAIL_FROM` | Verified sender, e.g. `Blue Belt Media <bookings@domain>` |
 | `EMAIL_REPLY_TO` | Optional reply-to |
 | `EMAIL_DRY_RUN` | `1` logs instead of sending |
+| `STUDIO_OWNER_ID` | Optional: pins which owner the public site serves |
 
 Unchanged but now used by new features: `PAYMENTS_MYFATOORAH_ENABLED`,
 `MYFATOORAH_*`, `ORDERS_INTAKE_ENABLED` (also gates `/api/galleries/intake`),

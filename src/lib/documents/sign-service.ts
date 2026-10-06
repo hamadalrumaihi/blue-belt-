@@ -191,7 +191,8 @@ export async function signDocument(token: string, input: SignInput, deps: Signin
     now,
   });
 
-  const to = signerEmail ?? (await prefillOf(supabase, doc)).email;
+  // The copy goes to the address the studio has on file; the typed address is evidence only.
+  const to = (await prefillOf(supabase, doc)).email ?? signerEmail;
   if (to) {
     const draft = buildEmail(to, {
       kind: "CONTRACT_SIGNED",
