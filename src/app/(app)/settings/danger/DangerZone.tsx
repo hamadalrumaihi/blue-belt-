@@ -17,7 +17,7 @@ export function DangerZone({ counts, events }: { counts: Counts; events: EventSu
           <div><dt className="text-[10px] font-bold uppercase text-muted">Matches</dt><dd className="text-xl font-black">{counts.matches}</dd></div>
           <div><dt className="text-[10px] font-bold uppercase text-muted">Changes</dt><dd className="text-xl font-black">{counts.history}</dd></div>
         </dl>
-        <p className="mt-3 text-xs text-muted">Tournament Watcher is temporary operational data. Galleries, customers and sales stay in Pic-Time and are never touched here.</p>
+        <p className="mt-3 text-xs text-muted">The Tournament Watcher holds temporary operational data. Bookings, clients, contracts, galleries and payments are not touched here; photos and photo sales stay in Pic-Time.</p>
       </div>
 
       <section className="card p-4">
@@ -78,7 +78,7 @@ export function DangerZone({ counts, events }: { counts: Counts; events: EventSu
 
       <section className="card border-danger/40 p-4">
         <h2 className="text-sm font-extrabold uppercase tracking-wider text-danger">Delete everything</h2>
-        <p className="mt-1 text-xs text-muted">Wipes every Tournament Watcher row you own. Pic-Time is unaffected.</p>
+        <p className="mt-1 text-xs text-muted">Wipes every Tournament Watcher row you own (events, athletes, matches, history). Bookings, clients and Pic-Time are unaffected.</p>
         <div className="mt-3">
           <DeleteDialog
             trigger="Delete everything"
