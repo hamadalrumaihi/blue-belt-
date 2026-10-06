@@ -80,3 +80,15 @@ export async function markCaptureRejected(supabase: Client, ownerId: string, id:
   const { error } = await supabase.from("photo_captures").update({ status: "rejected", reject_code: code, diagnostics }).eq("id", id).eq("owner_id", ownerId);
   if (error) throw new Error(`photo_captures rejected: ${error.message}`);
 }
+
+/**
+ * Gives up this request's in-flight claim on a capture that wrote nothing
+ * (every athlete lost the version race or failed transiently). The row stays
+ * "received" but its received_at is pushed past the in-flight grace window, so
+ * the uploader's retry takes it over at once instead of being told it is still
+ * in flight (or, worse, that it was refused for good).
+ */
+export async function releaseCapture(supabase: Client, ownerId: string, id: string): Promise<void> {
+  const { error } = await supabase.from("photo_captures").update({ received_at: new Date(0).toISOString() }).eq("id", id).eq("owner_id", ownerId).eq("status", "received");
+  if (error) throw new Error(`photo_captures release: ${error.message}`);
+}

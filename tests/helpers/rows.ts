@@ -68,6 +68,7 @@ export function athleteRow(overrides: Partial<AthleteRow> = {}): AthleteRow {
     last_final_url: null,
     last_elapsed_ms: null,
     refresh_version: 0,
+    last_capture_at: null,
     active: true,
     created_at: "2026-03-01T00:00:00.000Z",
     updated_at: "2026-03-01T00:00:00.000Z",
