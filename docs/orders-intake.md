@@ -128,6 +128,22 @@ fulfilled); `/orders/<id>` shows payment, buyer, items and record data with:
 `payment_confirmed_at/by`, optional note), **Mark fulfilled** / undo, and
 **Cancel order** (record only; nothing is sent to Pic-Time).
 
+## Invoice drafts for new buyers (owner review only)
+
+At intake the buyer is compared with your clients (`photo_athletes` email,
+or the last 8 digits of the phone). When the buyer is **not** a client and the
+order is open, unpaid and not a card order (card orders are settled in
+Pic-Time), the `[Orders]` Telegram message carries an **invoice draft**: bill-to,
+the order's own lines (prices are never invented) and total, plus a link
+(`/orders?ref=<Pic-Time ref>`) to the order. Existing clients are named instead.
+A failed client lookup never blocks the order; the message says so.
+
+On `/orders/<id>` the Invoice card shows the same draft (checked against the
+current client list), **Copy invoice text**, **Open in email** / **Open in
+WhatsApp** (your own app opens with the text filled in), and **Mark invoice
+sent** (stored as `metadata.invoice_sent_at`). Nothing is sent to the buyer,
+charged or created at a payment provider by any of this.
+
 ## Tests
 
 `tests/orders-contract.test.ts` (normalisation, Fawran rule, refusals,

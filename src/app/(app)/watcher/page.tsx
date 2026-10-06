@@ -6,6 +6,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { EventSwitcher } from "@/components/EventSwitcher";
 import { EyeIcon } from "@/components/icons";
 import { listAthletes, listEvents, listHistory, pickCurrentEvent } from "@/lib/queries";
+import { OpenIssuesLink } from "@/components/OpenIssuesLink";
 import { WatcherLive } from "./WatcherLive";
 
 export const metadata: Metadata = { title: "Match Watcher" };
@@ -34,6 +35,7 @@ export default async function WatcherPage({ searchParams }: PageProps<"/watcher"
     <>
       <BrandHeader title="Match Watcher" subtitle={current.name} actions={<EventSwitcher events={events} currentId={current.id} />} />
       <PageBody>
+        <OpenIssuesLink />
         <WatcherLive event={current} athletes={athletes} history={history} />
       </PageBody>
     </>

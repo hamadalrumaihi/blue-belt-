@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { BrandHeader } from "@/components/BrandHeader";
 import { PageBody } from "@/components/AppShell";
 import { EmptyState } from "@/components/EmptyState";
 import { isOrdersIntakeEnabled } from "@/lib/orders/config";
 import { METHOD_LABEL, paymentLabel, type PaymentMethod, type PaymentState } from "@/lib/orders/contract";
-import { listOrders, orderCounts, type OrderFilter } from "@/lib/orders/queries";
+import { draftOrderOf, invoiceNeed, invoiceSentAt, matchClient } from "@/lib/orders/invoice-draft";
+import { findOrderIdByRef, listClientContacts, listOrders, orderCounts, type OrderFilter } from "@/lib/orders/queries";
 import { formatDateTime, zoneLabel } from "@/lib/time";
 import { cn } from "@/lib/utils";
 
@@ -26,8 +28,13 @@ const FILTERS: Array<{ key: OrderFilter; label: string }> = [
  */
 export default async function OrdersPage({ searchParams }: PageProps<"/orders">) {
   const params = await searchParams;
+  // Telegram [Orders] links carry the Pic-Time reference; open that order directly.
+  if (typeof params.ref === "string" && params.ref) {
+    const id = await findOrderIdByRef(params.ref);
+    if (id) redirect(`/orders/${id}`);
+  }
   const filter = (FILTERS.find((f) => f.key === params.filter)?.key ?? "all") as OrderFilter;
-  const [orders, counts] = await Promise.all([listOrders(filter), orderCounts()]);
+  const [orders, counts, clients] = await Promise.all([listOrders(filter), orderCounts(), listClientContacts()]);
   const intake = isOrdersIntakeEnabled();
 
   return (
@@ -52,12 +59,15 @@ export default async function OrdersPage({ searchParams }: PageProps<"/orders">)
               const method = o.payment_method as PaymentMethod;
               const state = o.payment_state as PaymentState;
               const needs = state !== "paid" && state !== "refunded" && o.status !== "cancelled";
+              const need = invoiceNeed(draftOrderOf(o), matchClient({ email: o.customer_email, phone: o.customer_phone }, clients));
+              const invoice = need.kind === "draft" ? (invoiceSentAt(o.metadata) ? "Invoice sent" : "Invoice draft ready") : need.kind === "client" ? "Existing client" : null;
               return (
                 <li key={o.id}>
                   <Link href={`/orders/${o.id}`} className="flex min-h-16 items-center gap-3 px-4 py-3 hover:bg-page">
                     <div className="min-w-0 flex-1">
                       <p className="truncate font-extrabold text-ink">{o.customer_name}{o.gallery_name ? <span className="font-normal text-muted"> · {o.gallery_name}</span> : null}</p>
                       <p className={cn("break-words text-xs", needs ? "font-semibold text-amber-800" : "text-muted")}>{needs && <span className="mr-1 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide">Action needed</span>}{paymentLabel(method, state)} · {METHOD_LABEL[method] ?? method}{o.status === "fulfilled" ? " · fulfilled" : o.status === "cancelled" ? " · cancelled" : ""}</p>
+                      {invoice && <p className={cn("mt-0.5 text-[11px] font-semibold", invoice === "Invoice draft ready" ? "text-amber-800" : "text-muted")}>{invoice}</p>}
                       <p className="text-[11px] text-muted">{o.external_ref ?? o.pictime_order_id ?? "—"} · {formatDateTime(o.placed_at ?? o.received_at ?? o.created_at)} {zoneLabel()}</p>
                     </div>
                     <p className="shrink-0 text-right text-base font-black tabular-nums text-ink">{Number(o.amount_qr).toFixed(2)} <span className="text-xs font-bold text-muted">{o.currency}</span></p>

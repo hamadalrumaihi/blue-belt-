@@ -1,5 +1,5 @@
 import type { ComponentType } from "react";
-import { CalendarIcon, CheckIcon, EyeIcon, HistoryIcon, HomeIcon, MoreIcon, ReceiptIcon, SettingsIcon, UsersIcon } from "./icons";
+import { AlertIcon, CalendarIcon, CheckIcon, EyeIcon, HistoryIcon, HomeIcon, MoreIcon, ReceiptIcon, SettingsIcon, UsersIcon } from "./icons";
 
 export type NavItem = {
   href: string;
@@ -16,6 +16,7 @@ export const SIDEBAR_ITEMS: NavItem[] = [
   { href: "/events", label: "Events", icon: CalendarIcon, ownerOnly: true },
   { href: "/clients", label: "Clients", icon: UsersIcon, ownerOnly: true },
   { href: "/watcher", label: "Match Watcher", icon: EyeIcon, ownerOnly: true },
+  { href: "/issues", label: "Issues", icon: AlertIcon, ownerOnly: true },
   { href: "/coverage", label: "My coverage", icon: CheckIcon },
   { href: "/orders", label: "Orders", icon: ReceiptIcon, ownerOnly: true },
   { href: "/history", label: "History", icon: HistoryIcon, ownerOnly: true },

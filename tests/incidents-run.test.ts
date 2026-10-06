@@ -61,4 +61,23 @@ describe("runIncidentNotifier", () => {
     await run(db, "2026-10-03T11:10:00.000Z", ok());
     expect(recoveries(db)).toHaveLength(2);
   });
+
+  it("a new cycle clears an earlier Done mark, and never sends the column to a database without it", async () => {
+    const db = new FakeSupabase();
+    await run(db, "2026-10-03T10:00:00.000Z", blocked());
+    db.tables.photo_incidents[0].acknowledged_at = "2026-10-03T10:02:00.000Z"; // owner pressed Done
+    await run(db, "2026-10-03T10:05:00.000Z", blocked());
+    expect(db.tables.photo_incidents[0].acknowledged_at).toBe("2026-10-03T10:02:00.000Z"); // same cycle: stays done
+    await run(db, "2026-10-03T10:10:00.000Z", ok());
+    await run(db, "2026-10-03T11:00:00.000Z", blocked());
+    expect(db.tables.photo_incidents[0].acknowledged_at).toBeNull();
+
+    const legacy = new FakeSupabase(); // migration not applied yet: rows have no acknowledged_at key
+    await run(legacy, "2026-10-03T10:00:00.000Z", blocked());
+    await run(legacy, "2026-10-03T10:10:00.000Z", ok());
+    await run(legacy, "2026-10-03T11:00:00.000Z", blocked());
+    const reopen = legacy.calls.filter((c) => c.table === "photo_incidents" && c.op === "update").at(-1);
+    expect(reopen?.payload).not.toHaveProperty("acknowledged_at");
+    expect(legacy.tables.photo_incidents[0]).toMatchObject({ status: "open" });
+  });
 });

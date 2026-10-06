@@ -48,7 +48,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: parsed.error, code: parsed.code }, { status: 400, headers: auth.ctx.headers });
   }
 
-  const outcome = await recordIntakeOrder(supabase, { ownerId: credential.owner_id, order: parsed.order, raw, now, log: auth.ctx.log });
+  const appUrl = process.env.NEXT_PUBLIC_SITE_URL ?? process.env.APP_URL ?? null;
+  const outcome = await recordIntakeOrder(supabase, { ownerId: credential.owner_id, order: parsed.order, raw, now, log: auth.ctx.log, appUrl });
   await touchCredential(supabase, credential, now);
   if (!outcome.ok) return NextResponse.json({ error: "Could not record the order.", code: "RECORD_FAILED" }, { status: 500, headers: auth.ctx.headers });
   return NextResponse.json(

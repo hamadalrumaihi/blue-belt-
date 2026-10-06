@@ -109,3 +109,25 @@ export async function cancelOrder(orderId: string): Promise<OrderActionResult> {
   revalidatePath(`/orders/${orderId}`);
   return { ok: true };
 }
+
+/**
+ * The owner's own record that they sent the invoice (draft) to the buyer
+ * themselves. Stored on the order's metadata; nothing is sent from here.
+ */
+export async function markInvoiceSent(orderId: string, sent = true): Promise<OrderActionResult> {
+  if (!isUuid(orderId)) return { ok: false, error: "Invalid order." };
+  const { supabase, user } = await owner();
+  if (!user) return { ok: false, error: "You are signed out." };
+  const { data: order } = await supabase.from("photo_orders").select("id,metadata").eq("id", orderId).eq("owner_id", user.id).maybeSingle();
+  if (!order) return { ok: false, error: "Order not found." };
+  const metadata = order.metadata && typeof order.metadata === "object" && !Array.isArray(order.metadata) ? (order.metadata as Record<string, unknown>) : {};
+  const { error } = await supabase
+    .from("photo_orders")
+    .update({ metadata: { ...metadata, invoice_sent_at: sent ? new Date().toISOString() : null } })
+    .eq("id", orderId)
+    .eq("owner_id", user.id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/orders");
+  revalidatePath(`/orders/${orderId}`);
+  return { ok: true };
+}

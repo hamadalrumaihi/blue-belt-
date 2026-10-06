@@ -66,6 +66,7 @@ describe("buildIncidentDrafts", () => {
     expect(d.text).toContain("Previous schedule retained.");
     expect(d.text).toContain("Action:");
     expect(d.text).toContain(`Open: ${APP}/events/${EVENT}`);
+    expect(d.text).toContain(`Mark it done: ${APP}/issues`);
     expect(d.text).toMatch(/Ref: [0-9a-f]{8}/);
   });
 

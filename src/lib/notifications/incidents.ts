@@ -28,7 +28,7 @@ export type IncidentDraft = {
   ref: string;
 };
 
-const KIND_LABEL: Record<IncidentKind, string> = {
+export const KIND_LABEL: Record<IncidentKind, string> = {
   CHALLENGE: "Refresh blocked",
   WORKER_DOWN: "Watcher unavailable",
   SOURCE_ERROR: "Source unreachable",
@@ -37,7 +37,7 @@ const KIND_LABEL: Record<IncidentKind, string> = {
   PERSIST_ERROR: "Refresh not saved",
 };
 
-const KIND_REASON: Record<IncidentKind, string> = {
+export const KIND_REASON: Record<IncidentKind, string> = {
   CHALLENGE: "The source showed an anti-bot / human check (e.g. Cloudflare). The watcher stopped this check and does not try to get past it.",
   WORKER_DOWN: "The browser worker was unavailable.",
   SOURCE_ERROR: "The source site did not respond.",
@@ -46,7 +46,7 @@ const KIND_REASON: Record<IncidentKind, string> = {
   PERSIST_ERROR: "The update could not be saved.",
 };
 
-const KIND_ACTION: Record<IncidentKind, string> = {
+export const KIND_ACTION: Record<IncidentKind, string> = {
   CHALLENGE: "Open the source page in your browser and import it (More → Import a page).",
   WORKER_DOWN: "No action needed yet; automatic refresh resumes when the worker is back. Import a page if you need times now.",
   SOURCE_ERROR: "Check the source is up; it will retry automatically. Import a page if you need times now.",
@@ -159,6 +159,7 @@ export function buildIncidentDrafts(
       `Action: ${esc(KIND_ACTION[g.kind])}`,
     ];
     if (link) lines.push(`Open: ${link}`);
+    if (base) lines.push(`Handled it? Mark it done: ${base}/issues`);
     lines.push(`Ref: ${g.ref}`);
     g.text = lines.join("\n");
   }

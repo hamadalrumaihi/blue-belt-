@@ -82,7 +82,10 @@ async function processOwnerIncidents(
       cycleStart = existing.first_seen_at;
       await supabase.from("photo_incidents").update({ last_seen_at: now, occurrences: (existing.occurrences ?? 1) + 1, athlete_count: d.athleteIds.length, updated_at: now }).eq("id", existing.id);
     } else if (existing) {
-      await supabase.from("photo_incidents").update({ status: "open", resolved_at: null, first_seen_at: now, last_seen_at: now, occurrences: 1, athlete_count: d.athleteIds.length, updated_at: now }).eq("id", existing.id);
+      // A new cycle clears an earlier "Done" mark. Only sent when the column
+      // exists (select * returned it), so an unmigrated database still works.
+      const clearAck = "acknowledged_at" in existing ? { acknowledged_at: null } : {};
+      await supabase.from("photo_incidents").update({ status: "open", resolved_at: null, first_seen_at: now, last_seen_at: now, occurrences: 1, athlete_count: d.athleteIds.length, updated_at: now, ...clearAck }).eq("id", existing.id);
     } else {
       await supabase.from("photo_incidents").insert({ owner_id: ownerId, incident_key: d.key, kind: d.kind, event_id: d.eventId, source_host: d.sourceHost, athlete_count: d.athleteIds.length, status: "open", first_seen_at: now, last_seen_at: now, occurrences: 1 });
     }
