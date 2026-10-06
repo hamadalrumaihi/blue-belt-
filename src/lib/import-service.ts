@@ -2,7 +2,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { buildEnvelope, checkCaptureTiming, redactDiagnostics, type CaptureCompleteness, type CaptureEnvelope, type CaptureMeta, type CaptureTransport } from "./capture/envelope";
 import { sameSource, sourceKey } from "./capture/source-identity";
-import { latestAppliedCaptureAt, markCaptureApplied, markCaptureRejected, registerCapture } from "./capture/store";
+import { latestAppliedCaptureAt, markCaptureApplied, markCaptureRejected, registerCapture, releaseCapture } from "./capture/store";
 import { createLogger, type Logger } from "./log";
 import type { Database, Json } from "./supabase/database.types";
 import type { AthleteRow, EventRow } from "./types";
@@ -21,7 +21,8 @@ export type ImportFailureCode =
   | "CAPTURE_TIMING"
   | "FINAL_URL_MISMATCH"
   | "STALE_CAPTURE"
-  | "CAPTURE_IN_PROGRESS";
+  | "CAPTURE_IN_PROGRESS"
+  | "CAPTURE_RETRY";
 
 /** What the caller learns about the capture that was (or was not) applied. */
 export type ImportCaptureSummary = {
@@ -231,19 +232,69 @@ export async function importPage(supabase: Client, input: ImportInput): Promise<
     now,
     staggerMs: 0,
     concurrency: 4,
+    captureAt: env.capturedAt,
     watch: async (athlete: AthleteRow, event: EventRow | null) =>
       parseImportedHtml(url, input.html, { athleteName: athlete.name, timezone: event?.timezone ?? null, eventDate: event?.event_date ?? null, now, log: log.child({ athleteId: athlete.id }) }),
   });
   const statuses = results.reduce<Record<string, number>>((acc, r) => ({ ...acc, [r.status]: (acc[r.status] ?? 0) + 1 }), {});
   const checkedAt = now.toISOString();
-  await markCaptureApplied(supabase, input.ownerId, registered.row.id, {
+
+  // How many athletes this capture actually persisted. A result is "applied"
+  // unless it was skipped (superseded by a newer capture, or lost the version
+  // race) or errored. The capture is marked applied only when something was
+  // written, so a capture that changed nothing is never recorded as a success.
+  const appliedCount = results.filter((r) => !r.skipped && r.code !== "REFRESH_ERROR").length;
+  const supersededCount = results.filter((r) => r.skipped === "SUPERSEDED").length;
+  const errorCount = results.filter((r) => r.code === "REFRESH_ERROR").length;
+
+  if (appliedCount === 0) {
+    if (supersededCount > 0 && errorCount === 0) {
+      // A newer capture of this page already won for every athlete: a durable,
+      // final verdict. Record it so a resend of this capture replays it.
+      await markCaptureRejected(supabase, input.ownerId, registered.row.id, "STALE_CAPTURE").catch((err: unknown) =>
+        log.warn("import.capture_mark_failed", { error: err instanceof Error ? err.message : String(err) }),
+      );
+      log.info("import.not_applied", { url, code: "STALE_CAPTURE", superseded: supersededCount, athletes: athletes.length });
+      return { ok: false, code: "STALE_CAPTURE", message: "A newer capture of this page was already applied; this older one was not.", url, capture: summary(false) };
+    }
+    // Nothing was written because every athlete lost the version race or hit a
+    // transient error. That is not a verdict on the capture: release the
+    // in-flight claim and answer with a retryable status (503), so the agent
+    // keeps the capture and resends it rather than deleting it.
+    await releaseCapture(supabase, input.ownerId, registered.row.id).catch((err: unknown) =>
+      log.warn("import.capture_release_failed", { error: err instanceof Error ? err.message : String(err) }),
+    );
+    log.warn("import.not_applied", { url, code: "CAPTURE_RETRY", errors: errorCount, superseded: supersededCount, athletes: athletes.length });
+    const message = errorCount > 0 ? "The page could not be applied right now. Try again in a moment." : "Another refresh was applying this page. Try again in a moment.";
+    return { ok: false, code: "CAPTURE_RETRY", message, url, capture: summary(false) };
+  }
+
+  await markCaptureAppliedWithRetry(supabase, input.ownerId, registered.row.id, {
     appliedAt: checkedAt,
-    athleteCount: athletes.length,
-    outcome: { matched: athletes.length, checkedAt, statuses } as Json,
+    athleteCount: appliedCount,
+    outcome: { matched: appliedCount, checkedAt, statuses } as Json,
     diagnostics: redactDiagnostics({ ...(results[0]?.diagnostics ?? {}), transport: env.transport, completeness: env.completeness, bytes: env.bytes }) as Json,
-  }).catch((err: unknown) => log.warn("import.capture_mark_failed", { error: err instanceof Error ? err.message : String(err) }));
-  log.info("import.applied", { url, athletes: athletes.length, htmlBytes: input.html.length, transport: env.transport, completeness: env.completeness, statuses });
-  return { ok: true, url, matched: athletes.length, results, checkedAt, capture: summary(false) };
+  }, log);
+  log.info("import.applied", { url, athletes: athletes.length, applied: appliedCount, superseded: supersededCount, htmlBytes: input.html.length, transport: env.transport, completeness: env.completeness, statuses });
+  return { ok: true, url, matched: appliedCount, results, checkedAt, capture: summary(false) };
+}
+
+/** Marks a capture applied, retrying the ledger write once so a transient DB hiccup does not leave it stuck "received". */
+async function markCaptureAppliedWithRetry(
+  supabase: Client,
+  ownerId: string,
+  id: string,
+  update: { appliedAt: string; athleteCount: number; outcome: Json; diagnostics: Json },
+  log: Logger,
+): Promise<void> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await markCaptureApplied(supabase, ownerId, id, update);
+      return;
+    } catch (err) {
+      if (attempt === 1) log.warn("import.capture_mark_failed", { error: err instanceof Error ? err.message : String(err) });
+    }
+  }
 }
 
 /** Shape of a capture envelope exposed for tests / other transports. */
@@ -263,6 +314,8 @@ export function failureStatus(code: string): number {
     case "STALE_CAPTURE":
     case "CAPTURE_IN_PROGRESS":
       return 409;
+    case "CAPTURE_RETRY":
+      return 503;
     default:
       return 400;
   }

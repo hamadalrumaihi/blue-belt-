@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient, isServiceClientConfigured } from "@/lib/supabase/service";
 import type { CollaboratorBoardRow, CollaboratorEventRow, PhotoCoverageRow } from "@/lib/supabase/database.types";
@@ -9,6 +10,29 @@ export async function loadCollaboratorEvents(): Promise<CollaboratorEventRow[]> 
   const { data } = await supabase.rpc("photo_collaborator_events");
   return (data ?? []) as CollaboratorEventRow[];
 }
+
+/**
+ * Which nav a signed-in user should see. "Collaborator-only" means they own no
+ * events of their own but are a member of at least one event they were invited
+ * to: they work from the coverage board and must never see owner surfaces such
+ * as Orders (financial / customer data). An owner who is also invited elsewhere
+ * (owns >= 1 event) keeps the full owner nav. A brand-new user with nothing yet
+ * is treated as an owner so they can set up. photo_collaborator_events() returns
+ * membership rows only, never owned events, so the two counts don't overlap.
+ */
+export const resolveViewerMode = cache(async (): Promise<{ collaboratorOnly: boolean }> => {
+  const supabase = await createClient();
+  const [owned, collab] = await Promise.all([
+    supabase.from("photo_events").select("id", { count: "exact", head: true }),
+    supabase.rpc("photo_collaborator_events"),
+  ]);
+  // Fail open to the owner nav: a transient error must never hide the owner's
+  // own surfaces. This only decides what the nav offers; RLS still guards data.
+  if (owned.error || collab.error) return { collaboratorOnly: false };
+  const ownedCount = owned.count ?? 0;
+  const collabCount = (collab.data as CollaboratorEventRow[] | null)?.length ?? 0;
+  return { collaboratorOnly: ownedCount === 0 && collabCount > 0 };
+});
 
 /** The caller's assigned clients for one event (operational fields only). */
 export async function loadCollaboratorBoard(eventId: string): Promise<CollaboratorBoardRow[]> {

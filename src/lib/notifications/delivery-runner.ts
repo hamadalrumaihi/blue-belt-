@@ -6,6 +6,10 @@ import { backoffDelayMs, classifyTelegramError, formatTelegramMessage, TELEGRAM_
 import { categoryForKind, type MessageCategory } from "./telegram/kinds";
 
 type Client = SupabaseClient<Database>;
+
+/** Tries to record a delivered message as sent before giving up (see the send loop). */
+const SENT_WRITE_ATTEMPTS = 3;
+const SENT_WRITE_RETRY_MS = 250;
 export type SendMessage = (chatId: number, html: string) => Promise<void>;
 
 export type DeliveryBatchOptions = {
@@ -85,9 +89,6 @@ export async function runDeliveryBatch(opts: DeliveryBatchOptions): Promise<Deli
     const text = textOf(row);
     try {
       await sendMessage(chatId, text);
-      lastSentAt.set(chatId, Date.now());
-      await patch(supabase, row, { status: "sent", sent_at: now.toISOString(), last_error: null, next_attempt_at: null, leased_until: null, updated_at: now.toISOString() });
-      summary.sent += 1;
     } catch (err) {
       const klass = classifyTelegramError(err);
       if (klass.transient) {
@@ -118,7 +119,28 @@ export async function runDeliveryBatch(opts: DeliveryBatchOptions): Promise<Deli
         if (linkError) log.warn("delivery.disable_link_failed", { error: linkError.message });
         links.set(row.owner_id, null);
       }
+      continue;
     }
+
+    // The message is out. Record it as sent. A failure to write the status here
+    // must NOT be classified as a send error and rescheduled through backoff.
+    // Retry the write briefly: if it never lands, the row's lease expires and a
+    // later claim resends it (at-least-once), so these retries are what keeps a
+    // one-off database hiccup from turning into a duplicate Telegram message.
+    lastSentAt.set(chatId, Date.now());
+    for (let attempt = 1; attempt <= SENT_WRITE_ATTEMPTS; attempt += 1) {
+      try {
+        await patch(supabase, row, { status: "sent", sent_at: now.toISOString(), last_error: null, next_attempt_at: null, leased_until: null, updated_at: now.toISOString() });
+        break;
+      } catch (perr) {
+        if (attempt === SENT_WRITE_ATTEMPTS) {
+          log.warn("delivery.mark_sent_failed", { deliveryId: row.id, attempts: attempt, error: perr instanceof Error ? perr.message : String(perr) });
+        } else {
+          await sleep(SENT_WRITE_RETRY_MS * attempt);
+        }
+      }
+    }
+    summary.sent += 1;
   }
   if (summary.sent || summary.failed || summary.retried || summary.skipped) log.info("delivery.batch", { ...summary, worker });
   return summary;

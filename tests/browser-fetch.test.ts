@@ -65,6 +65,19 @@ describe("browserFetchHtml against the worker (MSW)", () => {
     expect(seen).toEqual([{ auth: `Bearer ${TOKEN}`, body: { url: TARGET.toString() } }]);
   });
 
+  it("forwards x-request-id to the worker when given, and omits it otherwise", async () => {
+    const ids: Array<string | null> = [];
+    server.use(
+      http.post(`${WORKER}/render`, async ({ request }) => {
+        ids.push(request.headers.get("x-request-id"));
+        return HttpResponse.json({ ok: true, html: "<html>x</html>", finalUrl: TARGET.toString(), status: 200, elapsedMs: 1 });
+      }),
+    );
+    await browserFetchHtml(TARGET, { sleep: noSleep, requestId: "req-abc-123" });
+    await browserFetchHtml(TARGET, { sleep: noSleep });
+    expect(ids).toEqual(["req-abc-123", null]);
+  });
+
   it("CHALLENGE_NOT_CLEARED from the worker is not retried", async () => {
     let calls = 0;
     server.use(

@@ -133,6 +133,14 @@ class FakeQuery {
     this.filters.push((r) => r[col] !== null && r[col] !== undefined && String(r[col]) < String(val));
     return this;
   }
+  gt(col: string, val: unknown) {
+    this.filters.push((r) => r[col] !== null && r[col] !== undefined && String(r[col]) > String(val));
+    return this;
+  }
+  lte(col: string, val: unknown) {
+    this.filters.push((r) => r[col] !== null && r[col] !== undefined && String(r[col]) <= String(val));
+    return this;
+  }
   order(col: string, opts?: { ascending?: boolean }) {
     this.orderBy = { col, asc: opts?.ascending !== false };
     return this;

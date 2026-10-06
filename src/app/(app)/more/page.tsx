@@ -5,19 +5,25 @@ import { PageBody } from "@/components/AppShell";
 import { Logo } from "@/components/Logo";
 import { ChevronRightIcon, EyeIcon, HistoryIcon, LogoutIcon, ReceiptIcon, SettingsIcon, ShieldIcon } from "@/components/icons";
 import { signOut } from "@/lib/actions/auth";
+import { resolveViewerMode } from "@/lib/collaborator";
 import { getUser } from "@/lib/supabase/server";
 
 export const metadata: Metadata = { title: "More" };
 
 export default async function MorePage() {
   const user = await getUser();
-  const items = [
-    { href: "/orders", label: "Orders (Pic-Time)", icon: ReceiptIcon },
-    { href: "/history", label: "Activity / change history", icon: HistoryIcon },
-    { href: "/import", label: "Import a page (CAPTCHA workaround)", icon: EyeIcon },
-    { href: "/settings", label: "Settings", icon: SettingsIcon },
-    { href: "/settings/danger", label: "Danger zone / delete management", icon: ShieldIcon },
+  const { collaboratorOnly } = await resolveViewerMode();
+  // Owner surfaces (Orders, history, import, danger zone) are hidden for a
+  // collaborator-only account; Settings stays so they can manage their own
+  // Telegram link. Keeps this list in step with the sidebar/bottom nav.
+  const allItems = [
+    { href: "/orders", label: "Orders (Pic-Time)", icon: ReceiptIcon, ownerOnly: true },
+    { href: "/history", label: "Activity / change history", icon: HistoryIcon, ownerOnly: true },
+    { href: "/import", label: "Import a page (CAPTCHA workaround)", icon: EyeIcon, ownerOnly: true },
+    { href: "/settings", label: "Settings", icon: SettingsIcon, ownerOnly: false },
+    { href: "/settings/danger", label: "Danger zone / delete management", icon: ShieldIcon, ownerOnly: true },
   ];
+  const items = collaboratorOnly ? allItems.filter((item) => !item.ownerOnly) : allItems;
   return (
     <>
       <BrandHeader title="More" />

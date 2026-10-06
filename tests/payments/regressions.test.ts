@@ -74,13 +74,37 @@ describe("payment regressions (Phase F)", () => {
     ({ db, deps } = setup([]));
     expect(await processWebhook({ body: paymentEvent(), signatureValid: true }, deps)).toMatchObject({ result: "booking_not_found", bookingId: null });
     expect(db.tables.photo_payment_attempts).toHaveLength(0);
-    expect((await replayUnmatchedEvents(deps))).toEqual({ scanned: 1, applied: 0 }); // still no booking
+    expect((await replayUnmatchedEvents(deps))).toEqual({ scanned: 1, applied: 0, abandoned: 0 }); // still no booking
 
     db.seed("photo_bookings", [booking()]);
-    expect(await replayUnmatchedEvents(deps)).toEqual({ scanned: 1, applied: 1 });
+    expect(await replayUnmatchedEvents(deps)).toEqual({ scanned: 1, applied: 1, abandoned: 0 });
     expect(row(db).status).toBe("paid");
     expect(db.tables.photo_payment_events[0]).toMatchObject({ processing_result: "processed", booking_id: BOOKING_ID, owner_id: OWNER });
-    expect(await replayUnmatchedEvents(deps)).toEqual({ scanned: 0, applied: 0 });
+    expect(await replayUnmatchedEvents(deps)).toEqual({ scanned: 0, applied: 0, abandoned: 0 });
+  });
+
+  it("retires unmatched events older than the age window as abandoned, so they stop being re-scanned forever", async () => {
+    ({ db, deps } = setup([]));
+    db.seed("photo_payment_events", [
+      { id: 1, provider: "MYFATOORAH", provider_event_id: "stale-1", event_type: "PAYMENT_STATUS_CHANGED", signature_valid: true, processing_result: "booking_not_found", received_at: "2026-09-01T00:00:00.000Z", payload: {} },
+    ]);
+    const res = await replayUnmatchedEvents(deps);
+    expect(res).toMatchObject({ scanned: 0, applied: 0, abandoned: 1 });
+    expect(db.tables.photo_payment_events[0].processing_result).toBe("abandoned");
+    // A later tick neither scans nor re-abandons it.
+    expect(await replayUnmatchedEvents(deps)).toEqual({ scanned: 0, applied: 0, abandoned: 0 });
+  });
+
+  it("reconcile stops polling invoices older than the age window (scanned none, so no provider call)", async () => {
+    // Beyond the window the booking is not even selected, so the provider stub
+    // is never reached; scanned === 0 is the proof.
+    const provider = { name: "MYFATOORAH" } as unknown as PaymentProvider;
+    ({ db, deps } = setup([]));
+    db.seed("photo_bookings", [
+      { id: BOOKING_ID, owner_id: OWNER, provider: "MYFATOORAH", provider_invoice_id: "old-inv", status: "pending", created_at: "2026-09-01T00:00:00.000Z", amount_qr: 100, currency: "QAR", customer_name: "A", package_name: "P" },
+    ]);
+    const out = await reconcilePendingBookings(provider, deps, { olderThanMinutes: 10 });
+    expect(out.scanned).toBe(0);
   });
 
   it("isolation: an event for owner B's invoice never touches owner A's booking, and every row carries B's owner id", async () => {

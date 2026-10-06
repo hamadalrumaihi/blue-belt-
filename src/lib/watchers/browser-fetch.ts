@@ -35,7 +35,7 @@ type RenderOnce =
 
 export type BrowserFetchResult = RenderOnce & { attempts: number };
 
-export type BrowserFetchOptions = { fetchImpl?: typeof fetch; sleep?: (ms: number) => Promise<void> };
+export type BrowserFetchOptions = { fetchImpl?: typeof fetch; sleep?: (ms: number) => Promise<void>; requestId?: string | null };
 
 export function isBrowserWorkerConfigured(): boolean {
   return Boolean(process.env.WATCHER_WORKER_URL && process.env.WATCHER_WORKER_TOKEN);
@@ -72,23 +72,31 @@ function retryable(code: BrowserFetchCode): boolean {
 
 export async function browserFetchHtml(url: URL, options: BrowserFetchOptions = {}): Promise<BrowserFetchResult> {
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  const first = await renderOnce(url, options.fetchImpl ?? fetch);
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const requestId = options.requestId ?? null;
+  const first = await renderOnce(url, fetchImpl, requestId);
   if (first.ok || !retryable(first.code)) return { ...first, attempts: 1 };
   await sleep(RETRY_DELAY_MS);
-  const second = await renderOnce(url, options.fetchImpl ?? fetch);
+  const second = await renderOnce(url, fetchImpl, requestId);
   return { ...second, attempts: 2 };
 }
 
-async function renderOnce(url: URL, fetchImpl: typeof fetch): Promise<RenderOnce> {
+async function renderOnce(url: URL, fetchImpl: typeof fetch, requestId: string | null = null): Promise<RenderOnce> {
   const base = process.env.WATCHER_WORKER_URL?.replace(/\/$/, "");
   const token = process.env.WATCHER_WORKER_TOKEN;
   if (!base || !token) return { ok: false, code: "NOT_CONFIGURED", message: "Browser worker is not configured." };
+
+  // Forward the request correlation id so a render shows up under the same id in
+  // the worker's logs. The worker honors inbound x-request-id (see worker/src/server.mjs);
+  // when we have none it mints its own.
+  const headers: Record<string, string> = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+  if (requestId) headers["x-request-id"] = requestId;
 
   let response: Response;
   try {
     response = await fetchImpl(`${base}/render`, {
       method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      headers,
       body: JSON.stringify({ url: url.toString() }),
       cache: "no-store",
       signal: AbortSignal.timeout(WORKER_TIMEOUT_MS),

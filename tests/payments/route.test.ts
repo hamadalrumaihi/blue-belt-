@@ -64,6 +64,21 @@ describe("POST /api/payments/myfatoorah/webhook", () => {
     expect((await POST(post("{}"))).status).toBe(404);
   });
 
+  it("rejects an oversized body with 413 before parsing or storing anything", async () => {
+    const { POST } = await loadRoute();
+    const big = "x".repeat(64 * 1024 + 1);
+    expect((await POST(post(big, "sig"))).status).toBe(413);
+    expect(db.tables.photo_payment_events).toHaveLength(0);
+  });
+
+  it("measures the cap in bytes, so a multi-byte body under 64K characters is still refused", async () => {
+    const { POST } = await loadRoute();
+    const multiByte = JSON.stringify({ a: "€".repeat(30_000) }); // ~30K chars, ~90 KB UTF-8
+    expect(multiByte.length).toBeLessThan(64 * 1024);
+    expect((await POST(post(multiByte, "sig"))).status).toBe(413);
+    expect(db.tables.photo_payment_events).toHaveLength(0);
+  });
+
   it("answers 400 for malformed JSON and non-object bodies", async () => {
     const { POST } = await loadRoute();
     expect((await POST(post("{not json", "x"))).status).toBe(400);

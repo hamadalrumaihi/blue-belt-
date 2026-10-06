@@ -32,8 +32,12 @@ export type RefreshResult = {
   diagnostics?: WatchDiagnostics;
   /** Parsed matches kept apart because they could belong to several stored rows. */
   ambiguous: number;
-  /** Set when nothing was fetched: another refresh won the race, or a cooldown applied. */
-  skipped?: "CONCURRENT" | "COOLDOWN";
+  /**
+   * Set when nothing was applied: another refresh won the race (CONCURRENT), a
+   * cooldown applied (COOLDOWN), or a newer capture already covers this athlete
+   * so this older capture was refused (SUPERSEDED).
+   */
+  skipped?: "CONCURRENT" | "COOLDOWN" | "SUPERSEDED";
 };
 
 export type RefreshOptions = {
@@ -55,7 +59,18 @@ export type RefreshOptions = {
    * creates one per batch; single refreshes run without it.
    */
   pageCache?: PageCache;
+  /**
+   * captured_at of the capture being applied (ISO). Set only on the import /
+   * machine-intake path. When present, the apply is ordered by capture time:
+   * an older capture never overwrites a newer one, and a CONFLICT is retried
+   * against the fresh version so capture time — not arrival order — wins.
+   * Live refreshes and the cron sweep leave this unset (unchanged behaviour).
+   */
+  captureAt?: string;
 };
+
+/** How many times a capture apply re-reads the fresh version and retries a CONFLICT. */
+const MAX_CAPTURE_CONFLICT_RETRIES = 3;
 
 const STAGGER_MS = 350;
 const CONCURRENCY = 2;
@@ -108,51 +123,90 @@ export async function refreshAthlete(supabase: Client, athlete: AthleteRow, even
   }
 
   try {
-    const existing = await loadMatches(supabase, athlete.id);
+    let existing = await loadMatches(supabase, athlete.id);
     const timezone = event?.timezone ?? DEFAULT_TIMEZONE;
     const result = options.watch
       ? await options.watch(athlete, event)
       : await watchUrl(athlete.source_url, { athleteName: athlete.name, timezone, eventDate: event?.event_date ?? null, now, log, pageCache: options.pageCache, cacheKey: options.pageCache ? captureKey(athlete) : undefined });
-    const plan = buildRefreshPlan(existing, result, checkedAt, timezone);
 
-    const applied = await applyRefresh(supabase, {
-      p_athlete_id: athlete.id,
-      p_expected_version: athlete.refresh_version ?? 0,
-      p_checked_at: checkedAt,
-      p_ok: plan.ok,
-      p_status: result.status,
-      p_code: result.code ?? null,
-      p_message: result.message ?? null,
-      p_diag: diagJson(result.diagnostics),
-      ...planToRpcArgs(plan),
-    });
+    const captureAt = options.captureAt;
+    const maxRetries = captureAt ? MAX_CAPTURE_CONFLICT_RETRIES : 0;
+    let expectedVersion = athlete.refresh_version ?? 0;
 
-    if (!applied.ok && applied.code === "CONFLICT") {
-      // Another refresh persisted first; its rows are the truth now.
-      log.info("refresh.conflict", { version: applied.version });
-      const fresh = await loadAthlete(supabase, athlete.id);
-      return {
-        ...base,
-        status: fresh ? statusOf(fresh) : result.status,
-        code: "SKIPPED",
-        message: fresh?.last_watch_message ?? result.message,
-        matches: applied.matches,
-        changes: [],
-        skipped: "CONCURRENT",
-        health: fresh ? healthOf(fresh) : base.health,
-        checkedAt: fresh?.last_checked_at ?? checkedAt,
-      };
-    }
-    if (!applied.ok) {
+    for (let attempt = 0; ; attempt += 1) {
+      const plan = buildRefreshPlan(existing, result, checkedAt, timezone);
+      const applied = await applyRefresh(supabase, {
+        p_athlete_id: athlete.id,
+        p_expected_version: expectedVersion,
+        p_checked_at: checkedAt,
+        p_ok: plan.ok,
+        p_status: result.status,
+        p_code: result.code ?? null,
+        p_message: result.message ?? null,
+        // The capture time rides in p_diag under `captureAt`; the RPC orders
+        // applies by it so an older capture never overwrites a newer one.
+        p_diag: withCaptureAt(diagJson(result.diagnostics), captureAt),
+        ...planToRpcArgs(plan),
+      });
+
+      if (applied.ok) {
+        const changes = plan.history.map((h) => ({ ...h, match_id: h.match_id ?? applied.inserted_ids[h.match_ref ?? -1] })).filter((h) => Boolean(h.match_id));
+        const health: SourceHealth = plan.ok
+          ? { lastAttemptAt: checkedAt, lastSuccessAt: checkedAt, consecutiveFailures: 0 }
+          : { lastAttemptAt: checkedAt, lastSuccessAt: athlete.last_success_at ?? null, consecutiveFailures: (athlete.consecutive_failures ?? 0) + 1 };
+        return { ...base, status: result.status, code: result.code ?? null, message: result.message, matches: applied.matches, changes, health, diagnostics: result.diagnostics, ambiguous: plan.ambiguous };
+      }
+
+      if (applied.code === "STALE") {
+        // A newer capture of this source already covers this athlete; this
+        // older capture is refused rather than overwriting fresher data.
+        log.info("refresh.superseded", { version: applied.version });
+        const fresh = await loadAthlete(supabase, athlete.id);
+        return {
+          ...base,
+          status: fresh ? statusOf(fresh) : result.status,
+          code: "SKIPPED",
+          message: fresh?.last_watch_message ?? result.message,
+          matches: applied.matches,
+          changes: [],
+          skipped: "SUPERSEDED",
+          health: fresh ? healthOf(fresh) : base.health,
+          checkedAt: fresh?.last_checked_at ?? checkedAt,
+        };
+      }
+
+      if (applied.code === "CONFLICT") {
+        // Another apply persisted first. On the capture path, re-plan against
+        // the rows it wrote and retry with the fresh version: the RPC's
+        // capture-time guard then decides the winner (older → STALE).
+        // Known limit: live/cron refreshes do not advance last_capture_at, so a
+        // capture retried after a live refresh can still overwrite it with the
+        // capture's (slightly older) view. Live data refreshes again on its next
+        // tick; ordering captures against live checks would need clock-aligned
+        // timestamps across devices and is deliberately out of scope here.
+        if (attempt < maxRetries) {
+          expectedVersion = applied.version;
+          existing = applied.matches;
+          continue;
+        }
+        log.info("refresh.conflict", { version: applied.version });
+        const fresh = await loadAthlete(supabase, athlete.id);
+        return {
+          ...base,
+          status: fresh ? statusOf(fresh) : result.status,
+          code: "SKIPPED",
+          message: fresh?.last_watch_message ?? result.message,
+          matches: applied.matches,
+          changes: [],
+          skipped: "CONCURRENT",
+          health: fresh ? healthOf(fresh) : base.health,
+          checkedAt: fresh?.last_checked_at ?? checkedAt,
+        };
+      }
+
+      // NOT_FOUND
       return { ...base, status: "ERROR", code: "REFRESH_ERROR", message: "Client no longer exists.", matches: existing, changes: [] };
     }
-
-    const changes = plan.history.map((h) => ({ ...h, match_id: h.match_id ?? applied.inserted_ids[h.match_ref ?? -1] })).filter((h) => Boolean(h.match_id));
-    const health: SourceHealth = plan.ok
-      ? { lastAttemptAt: checkedAt, lastSuccessAt: checkedAt, consecutiveFailures: 0 }
-      : { lastAttemptAt: checkedAt, lastSuccessAt: athlete.last_success_at ?? null, consecutiveFailures: (athlete.consecutive_failures ?? 0) + 1 };
-
-    return { ...base, status: result.status, code: result.code ?? null, message: result.message, matches: applied.matches, changes, health, diagnostics: result.diagnostics, ambiguous: plan.ambiguous };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unable to refresh";
     log.error("refresh.failed", { error: message });
@@ -192,6 +246,7 @@ export function parseApplyResult(data: Json): ApplyRefreshResult {
     return { ok: true, version: Number(o.version ?? 0), matches, inserted_ids: Array.isArray(o.inserted_ids) ? (o.inserted_ids as string[]) : [] };
   }
   if (o.code === "CONFLICT") return { ok: false, code: "CONFLICT", version: Number(o.version ?? 0), matches };
+  if (o.code === "STALE") return { ok: false, code: "STALE", version: Number(o.version ?? 0), matches };
   return { ok: false, code: "NOT_FOUND" };
 }
 
@@ -232,6 +287,17 @@ function diagJson(d: WatchDiagnostics | undefined): Json {
     ...(d.readiness ? { readiness: d.readiness } : {}),
     ...(d.shared ? { shared: true } : {}),
   };
+}
+
+/**
+ * Attaches the capture time to the diagnostics payload under `captureAt`, the
+ * reserved key photo_apply_refresh reads to order captures (an older capture is
+ * refused as STALE). Returns the diag unchanged for live refreshes (no capture).
+ */
+function withCaptureAt(diag: Json, captureAt: string | undefined): Json {
+  if (!captureAt) return diag;
+  const base = diag && typeof diag === "object" && !Array.isArray(diag) ? diag : {};
+  return { ...base, captureAt };
 }
 
 /** Owner-scoped capture key: the same page is never fetched once for two owners. */

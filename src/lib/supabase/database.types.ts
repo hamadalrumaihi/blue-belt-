@@ -71,6 +71,8 @@ export type PhotoAthleteRow = {
   last_elapsed_ms: number | null;
   /** Bumped by photo_apply_refresh on every successful persist (optimistic concurrency). */
   refresh_version: number;
+  /** captured_at of the newest capture applied to this athlete; gates out-of-order captures. */
+  last_capture_at: string | null;
   active: boolean;
   created_at: string;
   updated_at: string;
@@ -437,6 +439,7 @@ export type ApplyRefreshArgs = {
 export type ApplyRefreshResult =
   | { ok: true; version: number; matches: PhotoMatchRow[]; inserted_ids: string[] }
   | { ok: false; code: "CONFLICT"; version: number; matches: PhotoMatchRow[] }
+  | { ok: false; code: "STALE"; version: number; matches: PhotoMatchRow[] }
   | { ok: false; code: "NOT_FOUND" };
 
 // ---------------------------------------------------------------------------
@@ -486,6 +489,7 @@ export type Database = {
           | "last_final_url"
           | "last_elapsed_ms"
           | "refresh_version"
+          | "last_capture_at"
           | "active"
         >;
         Update: Partial<Omit<PhotoAthleteRow, "name_key">>;

@@ -264,3 +264,67 @@ describe("helpers", () => {
     expect(healthOf({ last_attempt_at: null, last_success_at: null, consecutive_failures: 0 })).toEqual({ lastAttemptAt: null, lastSuccessAt: null, consecutiveFailures: 0 });
   });
 });
+
+describe("capture ordering (p_capture_at)", () => {
+  const CAP_OLDER = "2026-03-14T05:00:00.000Z";
+  const CAP_NEWER = "2026-03-14T06:00:00.000Z";
+
+  it("retries a CONFLICT against the fresh version and carries p_capture_at on every attempt", async () => {
+    const athlete = athleteRow({ refresh_version: 0 });
+    let calls = 0;
+    const fake = fakeSupabase({ matches: [], athlete, version: 0 }, async () => {
+      calls += 1;
+      if (calls === 1) return { data: { ok: false, code: "CONFLICT", version: 1, matches: [] as unknown as Json }, error: null };
+      return { data: { ok: true, version: 2, matches: [] as unknown as Json, inserted_ids: [] }, error: null };
+    });
+    watchUrlMock.mockResolvedValue(watchResult({ matches: [], status: "NO_MATCHES", code: "NO_MATCH_ROWS" }));
+
+    const result = await refreshAthlete(fake.client, athlete, eventRow(), { now: NOW, captureAt: CAP_NEWER });
+
+    expect(result.skipped).toBeUndefined();
+    expect(result.status).toBe("NO_MATCHES");
+    expect(fake.rpcCalls).toHaveLength(2);
+    expect(fake.rpcCalls[0].args.p_expected_version).toBe(0);
+    expect(fake.rpcCalls[1].args.p_expected_version).toBe(1);
+    expect(fake.rpcCalls.every((c) => (c.args.p_diag as { captureAt?: string } | undefined)?.captureAt === CAP_NEWER)).toBe(true);
+  });
+
+  it("surfaces a STALE result (a newer capture already applied) as skipped SUPERSEDED without retrying", async () => {
+    const athlete = athleteRow({ refresh_version: 0 });
+    const fake = fakeSupabase({ matches: [], athlete, version: 0 }, async () => ({ data: { ok: false, code: "STALE", version: 5, matches: [] as unknown as Json }, error: null }));
+    watchUrlMock.mockResolvedValue(watchResult({ matches: [], status: "NO_MATCHES", code: "NO_MATCH_ROWS" }));
+
+    const result = await refreshAthlete(fake.client, athlete, eventRow(), { now: NOW, captureAt: CAP_OLDER });
+
+    expect(result.skipped).toBe("SUPERSEDED");
+    expect(result.code).toBe("SKIPPED");
+    expect(fake.rpcCalls).toHaveLength(1);
+  });
+
+  it("leaves the live path unchanged: a CONFLICT without captureAt is not retried and sends no p_capture_at", async () => {
+    const athlete = athleteRow({ refresh_version: 0 });
+    const fake = fakeSupabase({ matches: [], athlete, version: 3 });
+    watchUrlMock.mockResolvedValue(watchResult({ matches: [] }));
+
+    const result = await refreshAthlete(fake.client, athlete, eventRow(), { now: NOW });
+
+    expect(result.skipped).toBe("CONCURRENT");
+    expect(fake.rpcCalls).toHaveLength(1);
+    expect((fake.rpcCalls[0].args.p_diag as { captureAt?: string } | undefined)?.captureAt).toBeUndefined();
+  });
+
+  it("gives up after the retry bound and reports CONCURRENT rather than looping forever", async () => {
+    const athlete = athleteRow({ refresh_version: 0 });
+    let v = 0;
+    const fake = fakeSupabase({ matches: [], athlete, version: 0 }, async () => {
+      v += 1;
+      return { data: { ok: false, code: "CONFLICT", version: v, matches: [] as unknown as Json }, error: null };
+    });
+    watchUrlMock.mockResolvedValue(watchResult({ matches: [], status: "NO_MATCHES", code: "NO_MATCH_ROWS" }));
+
+    const result = await refreshAthlete(fake.client, athlete, eventRow(), { now: NOW, captureAt: CAP_NEWER });
+
+    expect(result.skipped).toBe("CONCURRENT");
+    expect(fake.rpcCalls).toHaveLength(4); // first attempt + 3 retries
+  });
+});

@@ -2,7 +2,7 @@ import { dateInZone } from "./time";
 import type { EventRow } from "./types";
 
 /** True when `now` falls on the event date ±1 day in the event's timezone. */
-export function isEventDay(event: Pick<EventRow, "event_date" | "timezone">, now: Date): boolean {
+export function isEventDay(event: { event_date: EventRow["event_date"]; timezone: EventRow["timezone"] | null }, now: Date): boolean {
   if (!event.event_date) return false;
   const [y, m, d] = event.event_date.split("-").map(Number);
   if (!y || !m || !d) return false;

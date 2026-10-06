@@ -69,10 +69,17 @@ describe("processWebhook", () => {
     expect(providerEventIdOf(c)).not.toBe(providerEventIdOf(a));
   });
 
-  it("stores an invalid-signature delivery without touching bookings", async () => {
+  it("stores an invalid-signature delivery without touching bookings, and keeps only a hash of the raw body", async () => {
     const out = await processWebhook({ body: paymentEvent(), signatureValid: false }, deps);
     expect(out).toMatchObject({ result: "invalid_signature", bookingId: null });
     expect(db.tables.photo_payment_events[0]).toMatchObject({ signature_valid: false, processing_result: "invalid_signature", booking_id: null });
+    // The unverified body is attacker-controlled: only a hash + size is stored.
+    const payload = db.tables.photo_payment_events[0].payload as Record<string, unknown>;
+    expect(payload).toMatchObject({ unverified: true });
+    expect(typeof payload.hash).toBe("string");
+    expect((payload.hash as string).length).toBe(64);
+    expect(payload.Data).toBeUndefined();
+    expect(payload.Event).toBeUndefined();
     expect(bookingRow(db).status).toBe("pending");
     expect(db.tables.photo_payment_attempts).toHaveLength(0);
     expect(db.calls.some((c) => c.table === "photo_bookings")).toBe(false);
