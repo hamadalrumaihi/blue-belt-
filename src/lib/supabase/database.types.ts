@@ -412,6 +412,8 @@ export type PhotoOrderRow = {
   payment_confirmed_at: string | null;
   payment_confirmed_by: string | null;
   fulfilled_at: string | null;
+  /** Set while one caller is creating this order's MyFatoorah invoice (see invoicing.ts). */
+  invoice_claimed_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -677,6 +679,7 @@ export type Database = {
           | "payment_confirmed_at"
           | "payment_confirmed_by"
           | "fulfilled_at"
+          | "invoice_claimed_at"
         >;
         Update: Partial<PhotoOrderRow>;
         Relationships: [];

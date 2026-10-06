@@ -285,14 +285,25 @@ existing flags (nothing runs until payments are activated):
     never auto-invoiced (no double charge).
 - **Direct / standalone invoice (option a).** `createStandaloneInvoice` inserts
   a `photo_bookings` row and invoices it with the booking id as the reference,
-  so it flows through the existing webhook/reconcile path. (Library + action in
-  place; a dedicated owner form is the remaining UI increment.)
+  so it flows through the existing webhook/reconcile path. (Library only for
+  now: no owner action or form calls it yet.)
+- **No double invoices.** Before calling SendPayment the order is claimed
+  (`invoice_claimed_at`, set only if the order has no invoice and no live
+  claim), and the invoice is recorded only if the order still has none. A
+  claim older than 10 minutes means an earlier attempt died mid-way: the
+  invoice is looked up at MyFatoorah by CustomerReference (the order id) and
+  re-linked, never created twice. The invoice-id index is unique. The
+  automatic path stops after 3 provider failures per order and works within a
+  time budget.
 - **The webhook/reconcile now resolve orders too.** When an invoice does not
   match a standalone booking, `processWebhook` / `replayUnmatchedEvents` look it
   up as an order (by `provider` + `provider_invoice_id`) and set the order's
   `payment_state` (paid / failed / refunded), `paid_at`, and
-  `photo_payment_events.order_id`. On the first transition to **paid** an owner
-  `[Orders]` confirmation is enqueued.
+  `photo_payment_events.order_id`. Paid never regresses to failed (a late
+  FAILED attempt is ignored), the update is conditional on the state it was
+  read in, and the buyer-reported state is left as Pic-Time sent it. A failed
+  order update is retried by the replay job. On the first transition to
+  **paid** an owner `[Orders]` confirmation is enqueued.
 
 ### What this does NOT do (owner's decision)
 
