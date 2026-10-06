@@ -131,9 +131,14 @@ still recorded with `signature_valid=false`, `processing_result='invalid_signatu
   (`refund:<id>` / `dispute:<id>:<status>` for the other events); a duplicate
   id is ignored.
 - Route status codes: 200 processed/duplicate/ignored/unchanged/not-found,
-  400 malformed JSON, 401 signature, 404 flag off, 429 rate limit (120/min),
-  503 service client not configured, 500 only if the delivery row could not
-  be written (so MyFatoorah retries).
+  400 malformed JSON, 401 signature, 404 flag off, 413 body over 64 KB,
+  429 rate limit (120/min **per client IP**, so one abusive source cannot
+  starve the provider's genuine deliveries), 503 service client not configured,
+  500 only if the delivery row could not be written (so MyFatoorah retries).
+- Pre-activation hardening: the body is capped at 64 KB before it is read, and
+  an **unverified** delivery (bad/missing signature) stores only a SHA-256 hash
+  and byte count as evidence — never the raw attacker-controlled blob. A later
+  real, signed copy upgrades the row to the full body.
 - Logs (`src/lib/log.ts`) carry result, event id/type, booking id and the
   signature verdict; never the payload, header or secrets.
 
@@ -147,6 +152,13 @@ and attempt-row write as the webhook. It is safe to run on a schedule or by
 hand; use it for `Failed` webhooks listed by `GetWebhooks`, or as the
 belt-and-braces check the docs recommend ("rely on both the webhook and
 GetPaymentStatus").
+
+`reconcilePendingBookings` and `replayUnmatchedEvents` are both bounded in age
+(default 14 days): an invoice a customer never pays stops being polled past the
+window (the owner reconciles it by hand), and a verified event still unmatched
+past the window is retired to `processing_result='abandoned'` so it is not
+re-scanned every tick. Without this an abandoned invoice would cost one provider
+call, and an unmatchable event one lookup, on every run forever.
 
 ## Phase F: regressions, atomic state, confirmation job, fulfilment
 
