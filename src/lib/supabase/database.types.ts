@@ -678,8 +678,51 @@ export type PhotoAuditLogRow = {
   created_at: string;
 };
 
+// ---------------------------------------------------------------------------
+// Pricing research + quote suggestions (owner only; RLS via photo_is_owner_user)
+// ---------------------------------------------------------------------------
+
+export type PhotoPriceReferenceRow = {
+  id: string;
+  owner_id: string;
+  provider: string;
+  source_url: string | null;
+  /** YYYY-MM-DD: when the owner last checked this price. */
+  checked_on: string;
+  location: string | null;
+  service_type: BookingType;
+  price_from: number;
+  price_to: number | null;
+  currency: string;
+  /** Free-form scope (see src/lib/pricing/form.ts PriceReferenceIncludes). */
+  includes: Json;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type QuoteStatus = "draft" | "applied" | "discarded";
+
+export type PhotoQuoteRow = {
+  id: string;
+  owner_id: string;
+  booking_id: string | null;
+  status: QuoteStatus;
+  /** Job inputs (see src/lib/pricing/form.ts QuoteInputs). */
+  inputs: Json;
+  /** The breakdown (see src/lib/pricing/suggest.ts QuoteSuggestion). */
+  calculation: Json;
+  suggested_from: number | null;
+  suggested_to: number | null;
+  chosen_amount_qr: number | null;
+  currency: string;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 /** Client-portal views (SECURITY DEFINER): only client-safe columns. */
-export type ClientPersonView = Pick<PhotoPersonRow, "id" | "owner_id" | "full_name" | "email" | "phone" | "instagram" | "whatsapp" | "created_at">;
+export type ClientPersonView =Pick<PhotoPersonRow, "id" | "owner_id" | "full_name" | "email" | "phone" | "instagram" | "whatsapp" | "created_at">;
 export type ClientBookingView = Pick<
   PhotoBookingRow,
   | "id"
@@ -1117,6 +1160,18 @@ export type Database = {
         Update: Partial<PhotoAuditLogRow>;
         Relationships: [];
       };
+      photo_price_references: {
+        Row: PhotoPriceReferenceRow;
+        Insert: Optional<PhotoPriceReferenceRow, GeneratedCols | "source_url" | "checked_on" | "location" | "price_to" | "currency" | "includes" | "notes">;
+        Update: Partial<PhotoPriceReferenceRow>;
+        Relationships: [];
+      };
+      photo_quotes: {
+        Row: PhotoQuoteRow;
+        Insert: Optional<PhotoQuoteRow, GeneratedCols | "booking_id" | "status" | "suggested_from" | "suggested_to" | "chosen_amount_qr" | "currency" | "notes">;
+        Update: Partial<PhotoQuoteRow>;
+        Relationships: [];
+      };
     };
     Views: {
       photo_client_people_v: { Row: ClientPersonView; Relationships: [] };
@@ -1174,6 +1229,10 @@ export type Database = {
         Returns: boolean;
       };
       photo_is_studio_user: {
+        Args: Record<string, never>;
+        Returns: boolean;
+      };
+      photo_is_owner_user: {
         Args: Record<string, never>;
         Returns: boolean;
       };

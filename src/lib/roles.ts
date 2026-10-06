@@ -52,6 +52,18 @@ export async function requireStudioUser(): Promise<StudioUser> {
   return { ok: true, viewer };
 }
 
+/**
+ * Guard for owner-only surfaces (pricing research, quotes): the role must be
+ * exactly "owner". Staff and client accounts are refused here and again by
+ * RLS (photo_is_owner_user), so a bypass of this check still reads nothing.
+ */
+export async function requireOwner(): Promise<StudioUser> {
+  const viewer = await resolveViewer();
+  if (!viewer) return { ok: false, error: "You are signed out." };
+  if (viewer.role !== "owner") return { ok: false, error: "Only the studio owner can use pricing." };
+  return { ok: true, viewer };
+}
+
 export function isStudioRole(role: ProfileRole): boolean {
   return role === "owner" || role === "staff";
 }
