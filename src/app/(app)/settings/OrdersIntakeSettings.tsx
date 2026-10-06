@@ -46,6 +46,9 @@ export function OrdersIntakeSettings({ enabled, credentials, endpoint, now }: Pr
         <dd className="font-mono text-ink">Authorization: Bearer &lt;credential below&gt;</dd>
         <dd className="text-muted">Field mapping: docs/orders-intake.md</dd>
       </dl>
+      <p className="text-xs text-muted">
+        The same credential also authorises gallery events at <code className="break-all font-mono text-ink">{endpoint.replace(/\/api\/orders\/intake$/, "/api/galleries/intake")}</code>: point the Pic-Time Zapier triggers “Main Client Gallery Invite Sent” and “New Gallery Visitor” there with the same header. An invite marks the matching gallery ready and a visit bumps its counter; nothing is e-mailed to clients from these events.
+      </p>
 
       {issued ? (
         <div className="rounded-xl border-2 border-primary bg-lightblue/40 p-4" aria-live="polite">
