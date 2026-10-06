@@ -182,6 +182,25 @@ describe("POST /api/galleries/intake", () => {
     expect(doha.pictime_project_id).toBe("P-doha");
   });
 
+  it("stores the studio's Pic-Time custom-domain link from the webhook without any Settings entry", async () => {
+    const created = await post({ event: "gallery_created", galleryName: "Dalob finals", galleryUrl: "https://galleries.bluebelt.media/client/dalob", galleryId: "P-dalob" });
+    expect(created.status).toBe(201);
+    const body = await created.json();
+    const row = fake.tables.photo_galleries.find((g) => g.id === body.galleryId)!;
+    expect(row).toMatchObject({ owner_id: OWNER, pictime_url: "https://galleries.bluebelt.media/client/dalob", pictime_project_id: "P-dalob", status: "created" });
+
+    // The invite fills an empty link on an existing gallery with the custom-domain url too.
+    fake.tables.photo_galleries.push(gallery({ id: "gal-nolink", name: "No link yet", pictime_url: null, pictime_project_id: "P-nolink", status: "pending" }));
+    const invite = await post({ event: "gallery_invite_sent", galleryName: "No link yet", galleryId: "P-nolink", galleryUrl: "https://galleries.bluebelt.media/client/nolink/2026" });
+    expect(invite.status).toBe(200);
+    expect(fake.tables.photo_galleries.find((g) => g.id === "gal-nolink")).toMatchObject({ pictime_url: "https://galleries.bluebelt.media/client/nolink/2026", status: "ready" });
+
+    // A look-alike host is still dropped.
+    const lookalike = await post({ event: "gallery_created", galleryName: "Fake", galleryUrl: "https://galleries.bluebelt.media.evil.example/client/x", galleryId: "P-fake" });
+    const lookalikeBody = await lookalike.json();
+    expect(fake.tables.photo_galleries.find((g) => g.id === lookalikeBody.galleryId)!.pictime_url).toBeNull();
+  });
+
   it("honours the studio's extra gallery hosts and never takes an owner id from the body", async () => {
     fake.tables.photo_studio.push({ owner_id: OWNER, settings: { galleryHosts: ["gallery.bluebelt.qa"] } });
     const res = await post({ event: "gallery_created", galleryName: "Custom domain", galleryUrl: "https://gallery.bluebelt.qa/x", ownerId: OTHER, owner_id: OTHER });

@@ -5,6 +5,8 @@ import { useActionState } from "react";
 import { FormError, FormField } from "@/components/FormField";
 import { ExternalIcon } from "@/components/icons";
 import { saveStudio, type StudioState } from "@/lib/actions/studio";
+import { galleryHostsOf } from "@/lib/galleries/form";
+import { STUDIO_GALLERY_HOSTS } from "@/lib/galleries/state";
 import type { PhotoStudioRow } from "@/lib/supabase/database.types";
 import { cn } from "@/lib/utils";
 
@@ -15,6 +17,7 @@ export function StudioSettings({ studio, defaults, publicSiteReady }: Props) {
   const fe = state?.fieldErrors ?? {};
   const v = studio ?? defaults;
   const open = studio?.public_booking ?? false;
+  const hosts = galleryHostsOf(studio?.settings).join(", ");
   return (
     <section className="card space-y-4 p-5" aria-labelledby="studio-heading">
       <div className="flex items-start justify-between gap-3">
@@ -54,6 +57,9 @@ export function StudioSettings({ studio, defaults, publicSiteReady }: Props) {
             <input id="instagram" name="instagram" className="input" defaultValue={v.instagram ?? ""} placeholder="@handle" autoComplete="off" />
           </FormField>
         </div>
+        <FormField label="Extra gallery domains" htmlFor="gallery_hosts" error={fe.gallery_hosts} hint={`pic-time.com and ${STUDIO_GALLERY_HOSTS.join(", ")} are always allowed for gallery links. Add any other hostname clients open galleries on, comma-separated.`}>
+          <input id="gallery_hosts" name="gallery_hosts" className="input" defaultValue={hosts} placeholder="photos.example.com" autoComplete="off" spellCheck={false} inputMode="url" />
+        </FormField>
         <label className="flex min-h-11 items-start gap-3 rounded-xl border border-line px-3 py-2">
           <input type="checkbox" name="public_booking" className="mt-1 h-5 w-5 accent-primary" defaultChecked={open} />
           <span className="text-sm text-ink">

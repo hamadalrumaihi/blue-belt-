@@ -5,6 +5,8 @@ import { writeAudit } from "@/lib/audit";
 import { normalizeInstagram } from "@/lib/people/match";
 import { requireStudioUser } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
+import { parseGalleryHosts } from "@/lib/galleries/form";
+import type { Json } from "@/lib/supabase/database.types";
 import { isValidEmail, trimOrNull } from "@/lib/utils";
 
 export type StudioState = { error?: string; fieldErrors?: Record<string, string>; saved?: boolean } | null;
@@ -13,8 +15,9 @@ const LIMITS = { business_name: 80, tagline: 140, about: 2000, city: 80, phone: 
 
 /**
  * Settings → Public site. Upserts the owner's photo_studio row (owner_id =
- * the signed-in user; RLS rejects anyone else). `settings` jsonb is left
- * untouched so hand-edited website content survives a save.
+ * the signed-in user; RLS rejects anyone else). Inside `settings` jsonb only
+ * `galleryHosts` is replaced; every other key (testimonials, portfolio…) is
+ * kept so hand-edited website content survives a save.
  */
 export async function saveStudio(_prev: StudioState, formData: FormData): Promise<StudioState> {
   const supabase = await createClient();
@@ -32,6 +35,8 @@ export async function saveStudio(_prev: StudioState, formData: FormData): Promis
   const whatsapp = trimOrNull(formData.get("whatsapp"));
   const instagramRaw = trimOrNull(formData.get("instagram"));
   const public_booking = formData.get("public_booking") === "on" || formData.get("public_booking") === "1";
+  const galleryHosts = parseGalleryHosts(trimOrNull(formData.get("gallery_hosts")));
+  if (galleryHosts.error) fieldErrors.gallery_hosts = galleryHosts.error;
 
   if (!business_name) fieldErrors.business_name = "Business name is required.";
   else if (business_name.length > LIMITS.business_name) fieldErrors.business_name = `Keep it under ${LIMITS.business_name} characters.`;
@@ -45,11 +50,14 @@ export async function saveStudio(_prev: StudioState, formData: FormData): Promis
   if (instagramRaw && !instagram) fieldErrors.instagram = "Enter just the handle, e.g. @bluebeltmedia.";
   if (Object.keys(fieldErrors).length) return { fieldErrors };
 
+  const { data: current } = await supabase.from("photo_studio").select("settings").eq("owner_id", user.id).maybeSingle();
+  const previous = current?.settings && typeof current.settings === "object" && !Array.isArray(current.settings) ? (current.settings as Record<string, Json | undefined>) : {};
+  const settings = { ...previous, galleryHosts: galleryHosts.hosts } as Json;
   const { error } = await supabase
     .from("photo_studio")
-    .upsert({ owner_id: user.id, business_name: business_name!, tagline, about, city, email, phone, whatsapp, instagram, public_booking }, { onConflict: "owner_id" });
+    .upsert({ owner_id: user.id, business_name: business_name!, tagline, about, city, email, phone, whatsapp, instagram, public_booking, settings }, { onConflict: "owner_id" });
   if (error) return { error: error.message };
   await writeAudit(supabase, { ownerId: user.id, actorId: user.id, entity: "studio", entityId: user.id, action: "studio.saved", data: { public_booking } });
-  for (const p of ["/settings", "/", "/services", "/portfolio", "/contact", "/book", "/privacy", "/terms"]) revalidatePath(p);
+  for (const p of ["/settings", "/", "/services", "/portfolio", "/contact", "/book", "/privacy", "/terms", "/galleries"]) revalidatePath(p);
   return { saved: true };
 }

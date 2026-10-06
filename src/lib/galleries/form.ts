@@ -1,7 +1,7 @@
 import type { Json } from "@/lib/supabase/database.types";
 import { trimOrNull } from "@/lib/utils";
 import { isUuid } from "@/lib/validation";
-import { isAllowedGalleryUrl } from "./state";
+import { GALLERY_URL_HELP, isAllowedGalleryUrl, isValidGalleryHost } from "./state";
 
 /**
  * Pure parsing for the gallery form (new / edit). No I/O: the action loads
@@ -51,7 +51,7 @@ export function parseGalleryForm(fd: FormData, opts: { extraHosts?: readonly str
 
   const url = trimOrNull(fd.get("pictime_url"));
   if (url && (url.length > GALLERY_URL_MAX || !isAllowedGalleryUrl(url, opts.extraHosts ?? []))) {
-    fieldErrors.pictime_url = "Use the https link to the gallery on pic-time.com (or a gallery domain allowed in Settings).";
+    fieldErrors.pictime_url = GALLERY_URL_HELP;
   }
 
   const projectId = trimOrNull(fd.get("pictime_project_id"));
@@ -68,4 +68,22 @@ export function parseGalleryForm(fd: FormData, opts: { extraHosts?: readonly str
     fieldErrors,
     values: { name, pictime_url: url, pictime_project_id: projectId, booking_id, client_id, event_id, notes },
   };
+}
+
+export const GALLERY_HOSTS_MAX = 10;
+
+/**
+ * Settings → Public site → "Extra gallery domains": a comma/space/newline
+ * separated list of bare hostnames. Returns the clean list or the first bad
+ * entry, so the form can point at it.
+ */
+export function parseGalleryHosts(raw: string | null | undefined): { hosts: string[]; error?: string } {
+  const parts = (raw ?? "").split(/[\s,;]+/).map((h) => h.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "")).filter(Boolean);
+  const hosts: string[] = [];
+  for (const h of parts) {
+    if (!isValidGalleryHost(h)) return { hosts: [], error: `"${h}" is not a hostname. Use just the domain, e.g. photos.example.com.` };
+    if (!hosts.includes(h)) hosts.push(h);
+  }
+  if (hosts.length > GALLERY_HOSTS_MAX) return { hosts: [], error: `Keep it to ${GALLERY_HOSTS_MAX} domains.` };
+  return { hosts };
 }
