@@ -70,8 +70,8 @@ async function attachMatches(athletes: AthleteRow[]): Promise<AthleteWithMatches
   const [{ data: matches }, { data: events }] = await Promise.all([
     supabase.from("photo_matches").select("*").in("athlete_id", ids),
     eventIds.length
-      ? supabase.from("photo_events").select("id,name,timezone,platform").in("id", eventIds)
-      : Promise.resolve({ data: [] as Pick<EventRow, "id" | "name" | "timezone" | "platform">[] }),
+      ? supabase.from("photo_events").select("id,name,timezone,platform,tracking_mode,event_date").in("id", eventIds)
+      : Promise.resolve({ data: [] as Pick<EventRow, "id" | "name" | "timezone" | "platform" | "tracking_mode" | "event_date">[] }),
   ]);
 
   const byAthlete = new Map<string, MatchRow[]>();

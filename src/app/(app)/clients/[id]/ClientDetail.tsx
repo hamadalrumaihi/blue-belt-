@@ -12,6 +12,7 @@ import { SourceLinkButton } from "@/components/SourceLinkButton";
 import { StatusBadge } from "@/components/StatusBadge";
 import { EditIcon, MailIcon, PhoneIcon } from "@/components/icons";
 import { ManualCorrection } from "@/components/ManualCorrection";
+import { ManualMatchForm } from "@/components/ManualMatchForm";
 import { PauseWatchButton } from "@/components/PauseWatchButton";
 import { SourceHealthBadge } from "@/components/SourceHealthBadge";
 import { isWatchFailure, watchStateCopy } from "@/components/watchStateCopy";
@@ -19,7 +20,7 @@ import { useLiveAthletes } from "@/hooks/useLiveAthletes";
 import { deleteAthlete, deleteMatchDataForAthlete } from "@/lib/actions/danger";
 import { computeEta, STATUS_LABEL, matchStatusOf } from "@/lib/eta";
 import { formatDateTime, formatStamp, formatTime, zoneLabel } from "@/lib/time";
-import type { AthleteWithMatches, HistoryEntry } from "@/lib/types";
+import { isManualEvent, type AthleteWithMatches, type HistoryEntry } from "@/lib/types";
 import { cn, initials } from "@/lib/utils";
 
 type Props = { athlete: AthleteWithMatches; history: HistoryEntry[] };
@@ -36,8 +37,10 @@ export function ClientDetail({ athlete: initialAthlete, history: initialHistory 
   const eta = entry?.eta ?? computeEta(null);
   const status = state?.status ?? athlete.last_watch_status;
   const code = state?.code ?? athlete.last_watch_code;
-  const copy = watchStateCopy(status, state?.message ?? athlete.last_watch_message, code);
-  const failed = isWatchFailure(status);
+  const manual = isManualEvent(athlete.event);
+  const eventDate = athlete.event?.event_date ?? null;
+  const copy = manual ? "No matches entered yet. Add the first match below." : watchStateCopy(status, state?.message ?? athlete.last_watch_message, code);
+  const failed = !manual && isWatchFailure(status);
   const matches = [...athlete.matches].sort((a, b) => (a.scheduled_at ?? "").localeCompare(b.scheduled_at ?? ""));
 
   return (
@@ -75,15 +78,31 @@ export function ClientDetail({ athlete: initialAthlete, history: initialHistory 
             <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">Needs review: this match looked like several stored matches, so it was kept as a separate row instead of merged.</p>
           )}
           <div className="mt-3">
-            {/* With no match the box above already states the failure; the badge detail would repeat it. */}
-            <SourceHealthBadge athlete={{ ...athlete, last_watch_status: status, last_watch_code: code }} now={now} hasMatches={athlete.matches.length > 0} showDetail={Boolean(current) || !failed} />
+            {manual ? (
+              <span className="inline-flex items-center gap-1.5 text-[11px] text-muted">
+                <span className="rounded-full bg-lightblue px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">Tracked by hand</span>
+                Nothing is checked automatically; you enter and update matches.
+              </span>
+            ) : (
+              /* With no match the box above already states the failure; the badge detail would repeat it. */
+              <SourceHealthBadge athlete={{ ...athlete, last_watch_status: status, last_watch_code: code }} now={now} hasMatches={athlete.matches.length > 0} showDetail={Boolean(current) || !failed} />
+            )}
           </div>
-          {current && <ManualCorrection match={current} timezone={tz} />}
+          {current && !current.is_manual && <ManualCorrection match={current} timezone={tz} />}
           <div className="mt-4 flex flex-wrap gap-2">
-            <RefreshButton onClick={() => refresh([athlete.id])} loading={state?.loading} label={failed ? "Retry refresh" : "Refresh Match Data"} variant="primary" disabled={!athlete.source_url} />
-            <SourceLinkButton url={athlete.source_url} platform={athlete.platform} />
-            {athlete.source_url && (
-              <Link href={`/import?url=${encodeURIComponent(athlete.source_url)}`} className="btn-ghost">Import page</Link>
+            {manual ? (
+              <>
+                <ManualMatchForm athleteId={athlete.id} timezone={tz} eventDate={eventDate} />
+                {athlete.source_url && <SourceLinkButton url={athlete.source_url} platform={athlete.platform} />}
+              </>
+            ) : (
+              <>
+                <RefreshButton onClick={() => refresh([athlete.id])} loading={state?.loading} label={failed ? "Retry refresh" : "Refresh Match Data"} variant="primary" disabled={!athlete.source_url} />
+                <SourceLinkButton url={athlete.source_url} platform={athlete.platform} />
+                {athlete.source_url && (
+                  <Link href={`/import?url=${encodeURIComponent(athlete.source_url)}`} className="btn-ghost">Import page</Link>
+                )}
+              </>
             )}
           </div>
         </section>
@@ -107,7 +126,10 @@ export function ClientDetail({ athlete: initialAthlete, history: initialHistory 
             <Row label="Email" value={athlete.email} />
             <Row label="Academy" value={athlete.academy} />
             <Row label="Division" value={athlete.division} />
-            <Row label="Weight" value={athlete.weight} />
+            <Row label="Age group" value={athlete.age_category} />
+            <Row label="Birth date" value={athlete.birth_date ?? (athlete.birth_year ? `${athlete.birth_year} (year)` : null)} />
+            <Row label="Weight (kg)" value={athlete.weight_kg != null ? `${Number(athlete.weight_kg)} kg` : null} />
+            <Row label="Weight division" value={athlete.weight} />
             <Row label="Belt" value={athlete.belt} />
             <Row label="Gender" value={athlete.gender} />
             <Row label="Age category" value={athlete.age_category} />
@@ -116,9 +138,9 @@ export function ClientDetail({ athlete: initialAthlete, history: initialHistory 
             <Row label="Source URL" value={athlete.source_url ? <a href={athlete.source_url} target="_blank" rel="noopener noreferrer" className="break-all text-primary hover:underline">{athlete.source_url}</a> : null} />
             <Row label="Notes" value={athlete.notes} />
             <Row label="Internal notes" value={athlete.internal_notes} />
-            <Row label="Tracking" value={athlete.active ? "Active — checked automatically" : "Paused — not checked automatically"} />
+            <Row label="Tracking" value={manual ? "By hand — no automatic checks" : athlete.active ? "Active — checked automatically" : "Paused — not checked automatically"} />
           </dl>
-          <details className="mt-4 rounded-xl border border-line px-3 py-2 text-xs text-muted">
+          {!manual && <details className="mt-4 rounded-xl border border-line px-3 py-2 text-xs text-muted">
             <summary className="cursor-pointer font-semibold text-ink">Source diagnostics</summary>
             <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
               <dt>Last attempt</dt><dd className="text-ink">{formatDateTime(athlete.last_attempt_at, tz)} {athlete.last_attempt_at ? zoneLabel(tz) : ""}</dd>
@@ -130,10 +152,10 @@ export function ClientDetail({ athlete: initialAthlete, history: initialHistory 
               <dt>Elapsed</dt><dd className="text-ink">{athlete.last_elapsed_ms != null ? `${athlete.last_elapsed_ms} ms` : "—"}</dd>
               <dt>Final URL</dt><dd className="break-all text-ink">{athlete.last_final_url ?? "—"}</dd>
             </dl>
-          </details>
+          </details>}
           <div className="mt-4 grid gap-2 sm:grid-cols-2 sm:items-start">
             <Link href={`/clients/${athlete.id}/edit`} className="btn-secondary w-full"><EditIcon size={16} /> Edit Client</Link>
-            <PauseWatchButton athleteId={athlete.id} active={athlete.active} />
+            {!manual && <PauseWatchButton athleteId={athlete.id} active={athlete.active} />}
           </div>
         </section>
       </div>
@@ -143,18 +165,22 @@ export function ClientDetail({ athlete: initialAthlete, history: initialHistory 
         <section aria-label="Schedule history">
           <h3 className="mb-2 text-sm font-extrabold uppercase tracking-wider text-muted">Schedule</h3>
           {matches.length === 0 ? (
-            <p className="card px-4 py-3 text-sm text-muted">No matches tracked yet.</p>
+            <p className="card px-4 py-3 text-sm text-muted">{manual ? "No matches entered yet." : "No matches tracked yet."}</p>
           ) : (
             <ul className="card divide-y divide-line">
               {matches.map((m) => {
                 const e = computeEta(m, now ?? new Date(0));
                 return (
-                  <li key={m.id} className="flex items-center gap-3 px-4 py-3">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-bold text-ink">{m.mat ?? "Mat —"} · {formatTime(m.estimated_at ?? m.scheduled_at, tz)}{snapshotNumber(m) ? ` · #${snapshotNumber(m)}` : ""}</p>
-                      <p className="truncate text-xs text-muted">vs {m.opponent ?? "Unknown"} · {STATUS_LABEL[matchStatusOf(m)]} · changed {formatDateTime(m.last_changed_at, tz)}</p>
+                  <li key={m.id} className="px-4 py-3">
+                    <div className="flex items-center gap-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-bold text-ink">{m.round ? `${m.round} · ` : ""}{m.mat ?? "Mat —"} · {formatTime(m.estimated_at ?? m.scheduled_at, tz)}{snapshotNumber(m) ? ` · #${snapshotNumber(m)}` : ""}</p>
+                        <p className="break-words text-xs text-muted">vs {m.opponent ?? "Unknown"} · {STATUS_LABEL[matchStatusOf(m)]}{m.result ? ` · ${m.result}` : ""} · {m.is_manual ? "entered by hand" : "changed"} {formatDateTime(m.last_changed_at, tz)}</p>
+                        {m.next_round && <p className="mt-0.5 break-words text-xs text-ink"><span className="font-semibold">Next:</span> {m.next_round}</p>}
+                      </div>
+                      {now && <StatusBadge bucket={e.bucket} size="sm" />}
                     </div>
-                    {now && <StatusBadge bucket={e.bucket} size="sm" />}
+                    {m.is_manual && <div className="mt-2"><ManualMatchForm athleteId={athlete.id} timezone={tz} eventDate={eventDate} match={m} compact /></div>}
                   </li>
                 );
               })}

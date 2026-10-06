@@ -14,10 +14,12 @@ type Props = {
   error?: string | null;
   trackedCount: number;
   connectivity?: ConnectivityState;
+  /** The event is tracked by hand: no automatic checks run. */
+  manual?: boolean;
 };
 
 /** "Last check 12s ago · Next in 48s" + auto-refresh toggle + Refresh All. */
-export function LiveToolbar({ lastCheckedAt, refreshing, onRefreshAll, error, trackedCount, connectivity }: Props) {
+export function LiveToolbar({ lastCheckedAt, refreshing, onRefreshAll, error, trackedCount, connectivity, manual }: Props) {
   const [settings, update] = useSettings();
   const [tick, setTick] = useState(0);
   useEffect(() => {
@@ -36,6 +38,15 @@ export function LiveToolbar({ lastCheckedAt, refreshing, onRefreshAll, error, tr
         : next
           ? `Next check ${next}`
           : null;
+
+  if (manual) {
+    return (
+      <div className="card flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3" role="status">
+        <span className="rounded-full bg-lightblue px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">Tracked by hand</span>
+        <p className="min-w-0 flex-1 text-xs text-muted">No bracket page is checked automatically. Times and mats are what you entered; update a client’s matches from their page.</p>
+      </div>
+    );
+  }
 
   return (
     <div className="card flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">

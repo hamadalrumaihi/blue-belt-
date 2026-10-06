@@ -11,7 +11,7 @@ import { useLiveAthletes } from "@/hooks/useLiveAthletes";
 import { buildAlerts } from "@/lib/alerts";
 import type { AthleteEta, EtaBucket } from "@/lib/eta";
 import { needsAttention, sourceHealth, type WatchAttention } from "@/lib/source-health";
-import type { AthleteWithMatches, EventRow, HistoryEntry } from "@/lib/types";
+import { isManualEvent, type AthleteWithMatches, type EventRow, type HistoryEntry } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type Props = { event: EventRow; athletes: AthleteWithMatches[]; history: HistoryEntry[] };
@@ -45,6 +45,7 @@ function passesQuick(entry: AthleteEta, f: QuickFilter): boolean {
 export function WatcherLive({ event, athletes: initialAthletes, history: initialHistory }: Props) {
   const { ranked, history, states, now, lastCheckedAt, refreshingAll, globalError, refresh, settings, connectivity } = useLiveAthletes({ initialAthletes, initialHistory });
   const tz = event.timezone || settings.timezone;
+  const manual = isManualEvent(event);
   const [query, setQuery] = useState("");
   const [quick, setQuick] = useState<QuickFilter>("all");
   const [mat, setMat] = useState("");
@@ -56,14 +57,14 @@ export function WatcherLive({ event, athletes: initialAthletes, history: initial
   // Health is derived on the client only (it depends on "now"), so the first render matches the server.
   const attentionById = useMemo(() => {
     const map = new Map<string, WatchAttention>();
-    if (!now) return map;
+    if (!now || manual) return map;
     for (const r of active) {
       if (!r.athlete.source_url) continue;
       const h = sourceHealth(r.athlete, now, r.athlete.matches.length > 0);
       if (needsAttention(h)) map.set(r.athlete.id, h.attention);
     }
     return map;
-  }, [active, now]);
+  }, [active, now, manual]);
   const mats = useMemo(() => [...new Set(active.map((r) => r.match?.mat).filter((v): v is string => Boolean(v)))].sort(), [active]);
   const academies = useMemo(() => [...new Set(active.map((r) => r.athlete.academy).filter((v): v is string => Boolean(v)))].sort(), [active]);
   const platforms = useMemo(() => [...new Set(active.map((r) => r.athlete.platform))].sort(), [active]);
@@ -104,7 +105,7 @@ export function WatcherLive({ event, athletes: initialAthletes, history: initial
       <EmptyState
         icon={<UsersIcon />}
         title="No clients added yet."
-        description="Add each pre-booked athlete with their AJP or Smoothcomp link."
+        description={manual ? "Add each athlete by name; this event is tracked by hand, so no link is needed." : "Add each pre-booked athlete with their AJP or Smoothcomp link."}
         action={<Link href={`/clients/new?event=${event.id}`} className="btn-primary"><PlusIcon size={18} /> Add First Client</Link>}
       />
     );
@@ -124,7 +125,7 @@ export function WatcherLive({ event, athletes: initialAthletes, history: initial
         </div>
       )}
       <div className="sticky top-14 z-10 -mx-4 space-y-2 bg-page/95 px-4 pb-2 pt-1 backdrop-blur lg:-mx-8 lg:px-8">
-        <LiveToolbar lastCheckedAt={lastCheckedAt} refreshing={refreshingAll} onRefreshAll={() => refresh()} error={globalError} trackedCount={tracked} connectivity={connectivity} />
+        <LiveToolbar lastCheckedAt={lastCheckedAt} refreshing={refreshingAll} onRefreshAll={() => refresh()} error={globalError} trackedCount={tracked} connectivity={connectivity} manual={manual} />
         <div className="relative">
           <SearchIcon size={18} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
           <input
@@ -179,7 +180,7 @@ export function WatcherLive({ event, athletes: initialAthletes, history: initial
         <ul className="space-y-2">
           {visible.map((entry) => (
             <li key={entry.athlete.id}>
-              <MatchCard entry={entry} timezone={tz} state={states[entry.athlete.id]} onRefresh={() => refresh([entry.athlete.id])} now={now} />
+              <MatchCard entry={entry} timezone={tz} state={states[entry.athlete.id]} onRefresh={() => refresh([entry.athlete.id])} now={now} manual={manual} />
             </li>
           ))}
         </ul>

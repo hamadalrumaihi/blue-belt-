@@ -9,7 +9,9 @@ import { eventStatus } from "@/components/EventCard";
 import { LiveIndicator } from "@/components/LiveIndicator";
 import { PlatformBadge } from "@/components/PlatformBadge";
 import { SourceLinkButton } from "@/components/SourceLinkButton";
-import { EditIcon, EyeIcon, MapPinIcon, PlusIcon, UsersIcon } from "@/components/icons";
+import { EditIcon, EyeIcon, MapPinIcon, PlusIcon, ReceiptIcon, UsersIcon } from "@/components/icons";
+import { rulesOf } from "@/lib/local-divisions";
+import { isManualEvent } from "@/lib/types";
 import { rankAthletes } from "@/lib/eta";
 import { getEvent, listAthletes, listHistory } from "@/lib/queries";
 import { formatEventDate } from "@/lib/time";
@@ -36,6 +38,8 @@ export default async function EventDetailPage({ params }: PageProps<"/events/[id
   const ranked = rankAthletes(athletes);
   const matchCount = athletes.reduce((n, a) => n + a.matches.length, 0);
   const next = ranked.find((r) => r.match && r.eta.bucket !== "COMPLETE" && r.eta.bucket !== "UNKNOWN");
+  const manual = isManualEvent(event);
+  const rules = rulesOf(event);
 
   return (
     <>
@@ -47,6 +51,7 @@ export default async function EventDetailPage({ params }: PageProps<"/events/[id
               <div className="flex flex-wrap items-center gap-2">
                 <PlatformBadge platform={event.platform} />
                 <LiveIndicator status={eventStatus(event)} />
+                {manual && <span className="rounded-full bg-lightblue px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">Tracked by hand</span>}
                 {!event.active && <span className="rounded-full border border-line bg-page px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted">Paused — not checked</span>}
               </div>
               <h2 className="mt-2 text-xl font-extrabold leading-snug text-ink">{event.name}</h2>
@@ -62,15 +67,40 @@ export default async function EventDetailPage({ params }: PageProps<"/events/[id
                 <Link href={`/clients/new?event=${event.id}`} className="btn-secondary"><PlusIcon size={18} /> Add client</Link>
                 {event.source_url && <SourceLinkButton url={event.source_url} platform={event.platform} label="Event page" />}
               </div>
-              <PauseWatchButton eventId={event.id} active={event.active} className="mt-4 max-w-sm border-t border-line pt-3" />
+              {!manual && <PauseWatchButton eventId={event.id} active={event.active} className="mt-4 max-w-sm border-t border-line pt-3" />}
             </section>
+
+            {manual && (
+              <section className="card p-4" aria-label="Manual tracking">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-sm font-extrabold uppercase tracking-wider text-muted">Tracked by hand</h3>
+                  <span className="text-xs text-muted">No bracket page is checked automatically.</span>
+                </div>
+                <p className="mt-2 text-sm text-ink">Enter brackets and matches yourself, from a CSV, a bracket photo, or match by match on each client’s page. Mats and times shown are what you entered.</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Link href={`/events/${event.id}/brackets`} className="btn-primary"><ReceiptIcon size={18} /> Import brackets</Link>
+                  <Link href={`/clients/import?event=${event.id}`} className="btn-secondary">Import athletes (CSV)</Link>
+                  <Link href={`/events/${event.id}/edit`} className="btn-secondary">Edit divisions</Link>
+                </div>
+                {rules && (
+                  <details className="mt-3 rounded-xl border border-line px-3 py-2 text-xs">
+                    <summary className="cursor-pointer font-semibold text-ink">This competition’s divisions ({rules.ageGroups.length} age groups)</summary>
+                    <ul className="mt-2 space-y-1 text-muted">
+                      {rules.ageGroups.map((g) => (
+                        <li key={g.id}><span className="font-semibold text-ink">{g.label}</span> · ages {g.minAge}–{g.maxAge} · {g.divisions.map((d) => `${d.label} ≤${d.maxKg} kg`).join(", ")}</li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+              </section>
+            )}
 
             <section>
               <h3 className="mb-2 text-sm font-extrabold uppercase tracking-wider text-muted">Clients</h3>
               {athletes.length === 0 ? (
                 <EmptyState compact icon={<UsersIcon />} title="No clients added yet." action={<Link href={`/clients/new?event=${event.id}`} className="btn-primary"><PlusIcon size={18} /> Add First Client</Link>} />
               ) : (
-                <EventClientsList entries={ranked} timezone={event.timezone} />
+                <EventClientsList entries={ranked} timezone={event.timezone} manual={manual} />
               )}
             </section>
           </div>

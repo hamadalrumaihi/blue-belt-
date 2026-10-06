@@ -6,7 +6,7 @@
  */
 import { isPlatform } from "@/lib/types";
 import { isValidEmail, isValidHttpUrl, trimOrNull } from "@/lib/utils";
-import { isUuid } from "@/lib/validation";
+import { isUuid, isValidCalendarDate } from "@/lib/validation";
 import { validateSourceUrl } from "@/lib/watchers/url-policy";
 
 /** Same normalisation as the generated photo_athletes.name_key column. */
@@ -34,7 +34,15 @@ export type ParsedClientForm = {
     package_name: string | null;
     internal_notes: string | null;
     active: boolean;
+    birth_date: string | null;
+    birth_year: number | null;
+    weight_kg: number | null;
   };
+};
+
+export type ParseClientOptions = {
+  /** False for a manually tracked event: there may be no public bracket page. */
+  requireSourceUrl?: boolean;
 };
 
 /**
@@ -44,7 +52,8 @@ export type ParsedClientForm = {
  * to invent a phone number, email or academy. Email format is still checked
  * when a value is given.
  */
-export function parseClientForm(formData: FormData): ParsedClientForm {
+export function parseClientForm(formData: FormData, options: ParseClientOptions = {}): ParsedClientForm {
+  const requireSourceUrl = options.requireSourceUrl ?? true;
   const fieldErrors: Record<string, string> = {};
   const name = trimOrNull(formData.get("name"));
   const phone = trimOrNull(formData.get("phone"));
@@ -59,9 +68,10 @@ export function parseClientForm(formData: FormData): ParsedClientForm {
   if (!event_id) fieldErrors.event_id = "Choose an event.";
   else if (!isUuid(event_id)) fieldErrors.event_id = "Choose a valid event.";
   if (!isPlatform(platform)) fieldErrors.platform = "Choose a platform.";
-  if (!source_url) fieldErrors.source_url = "Player / schedule URL is required.";
-  else if (!isValidHttpUrl(source_url)) fieldErrors.source_url = "Enter a full URL starting with https://";
-  else if (platform !== "OTHER") {
+  if (!source_url) {
+    if (requireSourceUrl) fieldErrors.source_url = "Player / schedule URL is required.";
+  } else if (!isValidHttpUrl(source_url)) fieldErrors.source_url = "Enter a full URL starting with https://";
+  else if (platform !== "OTHER" && platform !== "LOCAL") {
     const policy = validateSourceUrl(source_url);
     if (!policy.ok) fieldErrors.source_url = policy.message;
     else if (policy.platform !== platform) fieldErrors.source_url = `This looks like a ${policy.platform === "AJP" ? "AJP" : "Smoothcomp"} link. Change the platform or the URL.`;
@@ -72,6 +82,16 @@ export function parseClientForm(formData: FormData): ParsedClientForm {
   // active by default; present sentinel = honour the checkbox state exactly.
   const activePresent = formData.get("active_present") === "1";
   const active = activePresent ? formData.get("active") === "on" : true;
+
+  // Local competitions: real birth date / year and weight in kg (all optional).
+  const birth_date = trimOrNull(formData.get("birth_date"));
+  if (birth_date && !isValidCalendarDate(birth_date)) fieldErrors.birth_date = "Enter a real date (YYYY-MM-DD).";
+  const birthYearRaw = trimOrNull(formData.get("birth_year"));
+  const birth_year = birthYearRaw ? Number(birthYearRaw) : null;
+  if (birth_year !== null && (!Number.isInteger(birth_year) || birth_year < 1900 || birth_year > 2100)) fieldErrors.birth_year = "Enter a four-digit year.";
+  const weightRaw = trimOrNull(formData.get("weight_kg"));
+  const weight_kg = weightRaw ? Number(weightRaw) : null;
+  if (weight_kg !== null && (!Number.isFinite(weight_kg) || weight_kg <= 0 || weight_kg >= 400)) fieldErrors.weight_kg = "Enter the weight in kg, e.g. 36 or 36.5.";
 
   return {
     fieldErrors,
@@ -93,6 +113,9 @@ export function parseClientForm(formData: FormData): ParsedClientForm {
       package_name: trimOrNull(formData.get("package_name")),
       internal_notes: trimOrNull(formData.get("internal_notes")),
       active,
+      birth_date,
+      birth_year: birth_year !== null && Number.isInteger(birth_year) ? birth_year : null,
+      weight_kg: weight_kg !== null && Number.isFinite(weight_kg) ? Math.round(weight_kg * 100) / 100 : null,
     },
   };
 }

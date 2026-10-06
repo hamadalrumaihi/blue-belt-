@@ -1,10 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import type { ActionState } from "@/lib/actions/types";
-import type { EventRow } from "@/lib/types";
+import { rulesOf } from "@/lib/local-divisions";
+import type { EventRow, TrackingMode } from "@/lib/types";
 import { PLATFORMS } from "@/lib/types";
+import { cn } from "@/lib/utils";
+import { DivisionRulesEditor } from "./DivisionRulesEditor";
 import { FormError, FormField } from "./FormField";
 
 type Props = {
@@ -19,6 +22,19 @@ type Props = {
 export function EventForm({ action, initial, submitLabel = "Save event", cancelHref = "/events", defaultTimezone = "Asia/Qatar", defaultPlatform = "AJP" }: Props) {
   const [state, formAction, pending] = useActionState(action, null);
   const fe = state?.fieldErrors ?? {};
+  const [platform, setPlatform] = useState<string>(initial?.platform ?? defaultPlatform);
+  // A local competition is tracked by hand unless the owner says otherwise.
+  const [mode, setMode] = useState<TrackingMode>(initial?.tracking_mode ?? (platform === "LOCAL" ? "manual" : "watcher"));
+  const [ownDivisions, setOwnDivisions] = useState<boolean>(Boolean(initial?.division_rules) || platform === "LOCAL");
+  const localRules = rulesOf(initial ? { platform: initial.platform, division_rules: initial.division_rules } : null);
+
+  function onPlatform(next: string) {
+    setPlatform(next);
+    if (next === "LOCAL") {
+      if (!initial?.id) setMode("manual");
+      setOwnDivisions(true);
+    }
+  }
 
   return (
     <form action={formAction} className="card space-y-5 p-5" noValidate>
@@ -33,7 +49,7 @@ export function EventForm({ action, initial, submitLabel = "Save event", cancelH
           <input id="event_date" name="event_date" type="date" className="input" defaultValue={initial?.event_date ?? ""} />
         </FormField>
         <FormField label="Platform" htmlFor="platform" required error={fe.platform}>
-          <select id="platform" name="platform" className="input" defaultValue={initial?.platform ?? defaultPlatform}>
+          <select id="platform" name="platform" className="input" value={platform} onChange={(e) => onPlatform(e.target.value)}>
             {PLATFORMS.map((p) => (
               <option key={p.value} value={p.value}>{p.label}</option>
             ))}
@@ -54,9 +70,39 @@ export function EventForm({ action, initial, submitLabel = "Save event", cancelH
         </FormField>
       </div>
 
-      <FormField label="Official event URL" htmlFor="source_url" error={fe.source_url} hint="The AJP / Smoothcomp event page (optional)">
+      <fieldset>
+        <legend className="label">How are brackets followed?</legend>
+        <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Tracking mode">
+          {([
+            { value: "watcher", title: "Watch a public bracket page", body: "AJP / Smoothcomp pages are checked automatically. Each client needs their bracket or profile URL." },
+            { value: "manual", title: "Track by hand", body: "No usable public URL, or brackets shared privately. You enter athletes and matches; nothing is checked automatically." },
+          ] as const).map((o) => (
+            <label key={o.value} className={cn("flex cursor-pointer gap-3 rounded-xl border p-3", mode === o.value ? "border-primary bg-lightblue" : "border-line bg-white")}>
+              <input type="radio" name="tracking_mode" value={o.value} checked={mode === o.value} onChange={() => setMode(o.value)} className="mt-1 h-4 w-4 accent-primary" />
+              <span className="min-w-0">
+                <span className="block text-sm font-bold text-ink">{o.title}</span>
+                <span className="block text-xs text-muted">{o.body}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+        {fe.tracking_mode && <p className="mt-1 text-xs font-semibold text-danger" role="alert">{fe.tracking_mode}</p>}
+      </fieldset>
+
+      <FormField label="Official event URL" htmlFor="source_url" error={fe.source_url} hint={mode === "manual" ? "Optional. Private or missing brackets are fine — the event is tracked by hand." : "The AJP / Smoothcomp event page (optional)"}>
         <input id="source_url" name="source_url" type="url" inputMode="url" className="input" defaultValue={initial?.source_url ?? ""} placeholder="https://ajptour.com/en/event/…" />
       </FormField>
+
+      <div className="space-y-3 rounded-xl border border-line p-3">
+        <label className="flex min-h-11 items-center gap-3">
+          <input type="checkbox" name="own_divisions" value="1" className="h-5 w-5 accent-primary" checked={ownDivisions} onChange={(e) => setOwnDivisions(e.target.checked)} />
+          <span className="text-sm font-semibold text-ink">
+            This competition uses its own age groups and weight divisions
+            <span className="block text-xs font-normal text-muted">{ownDivisions ? "Clients are checked against the chart below, not AJP rules." : "Off: clients use the AJP Qatar National tables."}</span>
+          </span>
+        </label>
+        {ownDivisions && <DivisionRulesEditor initial={localRules} error={fe.division_rules} />}
+      </div>
 
       <label className="flex min-h-11 items-center gap-3 rounded-xl border border-line px-3">
         <input type="checkbox" name="active" className="h-5 w-5 accent-primary" defaultChecked={initial?.active ?? true} />

@@ -21,6 +21,8 @@ type Props = {
   state?: AthleteRefreshState;
   onRefresh: () => void;
   now?: Date | null;
+  /** The event is tracked by hand: no health badge, no refresh; edit on the client page. */
+  manual?: boolean;
 };
 
 const BORDER: Record<string, string> = {
@@ -32,15 +34,15 @@ const BORDER: Record<string, string> = {
 };
 
 /** Dense Match Watcher row: athlete, opponent, mat, time, ETA, match #, status. */
-export function MatchCard({ entry, timezone, state, onRefresh, now = null }: Props) {
+export function MatchCard({ entry, timezone, state, onRefresh, now = null, manual = false }: Props) {
   const { athlete, match, eta } = entry;
   const time = match ? (match.estimated_at ?? match.scheduled_at) : null;
   const status = state?.status ?? athlete.last_watch_status;
-  const failed = isWatchFailure(status);
-  const copy = watchStateCopy(status, state?.message ?? athlete.last_watch_message, state?.code ?? athlete.last_watch_code);
+  const failed = !manual && isWatchFailure(status);
+  const copy = manual ? "No match entered yet." : watchStateCopy(status, state?.message ?? athlete.last_watch_message, state?.code ?? athlete.last_watch_code);
   const needsReview = match?.identity_confidence === "ambiguous";
-  const manual = Boolean(match?.manual?.mat || match?.manual?.time);
-  const health = now ? sourceHealth({ ...athlete, last_watch_status: status, last_watch_code: state?.code ?? athlete.last_watch_code }, now, athlete.matches.length > 0) : null;
+  const corrected = Boolean(match?.manual?.mat || match?.manual?.time);
+  const health = now && !manual ? sourceHealth({ ...athlete, last_watch_status: status, last_watch_code: state?.code ?? athlete.last_watch_code }, now, athlete.matches.length > 0) : null;
   const blocked = health?.attention === "blocked";
   const notFound = health?.attention === "not_found";
 
@@ -90,9 +92,24 @@ export function MatchCard({ entry, timezone, state, onRefresh, now = null }: Pro
         <p className={cn("mt-3 rounded-xl px-3 py-2 text-xs font-semibold", notFound ? "bg-amber-50 text-amber-800" : "bg-page text-muted")}>{copy}</p>
       ) : null}
 
+      {match && (match.round || match.result || match.next_round) && (
+        <p className="mt-2 break-words text-xs text-muted">
+          {match.round && <span className="font-semibold text-ink">{match.round}</span>}
+          {match.round && (match.result || match.next_round) ? " · " : ""}
+          {match.result}
+          {match.result && match.next_round ? " · " : ""}
+          {match.next_round && <><span className="font-semibold text-ink">Next:</span> {match.next_round}</>}
+        </p>
+      )}
       {needsReview && <p className="mt-2 rounded-lg bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-800">Needs review: similar matches were found, so this row was kept separate.</p>}
-      {manual && <p className="mt-2 rounded-lg bg-lightblue px-2 py-1 text-[11px] font-semibold text-primary">Manual correction by the owner is in effect for this match.</p>}
+      {corrected && <p className="mt-2 rounded-lg bg-lightblue px-2 py-1 text-[11px] font-semibold text-primary">Manual correction by the owner is in effect for this match.</p>}
 
+      {manual && (
+        <p className="mt-3 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] text-muted">
+          <span className="rounded-full bg-lightblue px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">Tracked by hand</span>
+          <span>{match?.last_changed_at && now ? `Entered ${formatStamp(match.last_changed_at, timezone, now)}` : "Not checked automatically"}</span>
+        </p>
+      )}
       {health && now && (
         <p className="mt-3 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] text-muted">
           <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide", healthTone(health))}>{health.label}</span>
@@ -107,11 +124,20 @@ export function MatchCard({ entry, timezone, state, onRefresh, now = null }: Pro
       )}
 
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        <SourceLinkButton url={match?.source_url ?? athlete.source_url} platform={athlete.platform} size="sm" />
-        {blocked && athlete.source_url && (
-          <Link href={`/import?url=${encodeURIComponent(athlete.source_url)}`} className="btn-secondary min-h-9 px-3 text-xs">Import page</Link>
+        {manual ? (
+          <>
+            <Link href={`/clients/${athlete.id}`} className="btn-secondary min-h-9 px-3 text-xs">{match ? "Update match" : "Add match"}</Link>
+            {(match?.source_url ?? athlete.source_url) && <SourceLinkButton url={match?.source_url ?? athlete.source_url} platform={athlete.platform} size="sm" />}
+          </>
+        ) : (
+          <>
+            <SourceLinkButton url={match?.source_url ?? athlete.source_url} platform={athlete.platform} size="sm" />
+            {blocked && athlete.source_url && (
+              <Link href={`/import?url=${encodeURIComponent(athlete.source_url)}`} className="btn-secondary min-h-9 px-3 text-xs">Import page</Link>
+            )}
+            <RefreshButton onClick={onRefresh} loading={state?.loading} label={failed ? "Retry" : "Refresh"} className="min-h-9 px-3 text-xs" />
+          </>
         )}
-        <RefreshButton onClick={onRefresh} loading={state?.loading} label={failed ? "Retry" : "Refresh"} className="min-h-9 px-3 text-xs" />
       </div>
     </article>
   );

@@ -2,9 +2,11 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import type { Json } from "@/lib/supabase/database.types";
 import { createClient } from "@/lib/supabase/server";
+import { parseDivisionRules } from "@/lib/local-divisions";
 import { isValidTimeZone } from "@/lib/time";
-import { isPlatform } from "@/lib/types";
+import { isPlatform, isTrackingMode } from "@/lib/types";
 import { isValidHttpUrl, trimOrNull } from "@/lib/utils";
 import { isUuid, isValidCalendarDate } from "@/lib/validation";
 
@@ -18,9 +20,23 @@ function parseEventForm(formData: FormData) {
   const timezone = trimOrNull(formData.get("timezone")) ?? "Asia/Qatar";
   const source_url = trimOrNull(formData.get("source_url"));
   const event_date = trimOrNull(formData.get("event_date"));
+  // Older forms post no tracking_mode: a local competition is manual, the rest watched.
+  const tracking_mode = trimOrNull(formData.get("tracking_mode")) ?? (platform === "LOCAL" ? "manual" : "watcher");
+  const ownDivisions = formData.get("own_divisions") === "1" || platform === "LOCAL";
+  let division_rules: ReturnType<typeof parseDivisionRules> | null = null;
+  if (ownDivisions) {
+    const raw = trimOrNull(formData.get("division_rules"));
+    try {
+      division_rules = parseDivisionRules(raw ? JSON.parse(raw) : null);
+    } catch {
+      division_rules = { ok: false, error: "The division chart could not be read. Reload the page and try again." };
+    }
+    if (!division_rules.ok) fieldErrors.division_rules = division_rules.error;
+  }
 
   if (!name) fieldErrors.name = "Event name is required.";
   if (!isPlatform(platform)) fieldErrors.platform = "Choose a platform.";
+  if (!isTrackingMode(tracking_mode)) fieldErrors.tracking_mode = "Choose how brackets are followed.";
   if (!isValidTimeZone(timezone)) fieldErrors.timezone = "Unknown timezone.";
   if (source_url && !isValidHttpUrl(source_url)) fieldErrors.source_url = "Enter a full URL starting with https://";
   if (event_date && !isValidCalendarDate(event_date)) fieldErrors.event_date = "Enter a real date (YYYY-MM-DD).";
@@ -36,6 +52,8 @@ function parseEventForm(formData: FormData) {
       venue: trimOrNull(formData.get("venue")),
       country: trimOrNull(formData.get("country")),
       active: formData.get("active") === "on" || formData.get("active") === "true",
+      tracking_mode: isTrackingMode(tracking_mode) ? tracking_mode : "watcher",
+      division_rules: division_rules?.ok ? (division_rules.rules as unknown as Json) : null,
     },
   };
 }

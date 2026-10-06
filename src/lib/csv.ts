@@ -42,5 +42,5 @@ export function parseCsv(text: string): { headers: string[]; rows: Record<string
   return { headers, rows };
 }
 
-export const CLIENT_CSV_COLUMNS = ["name", "source_url", "phone", "email", "academy", "division", "belt", "weight", "gender", "age_category", "package_name", "notes"] as const;
+export const CLIENT_CSV_COLUMNS = ["name", "source_url", "phone", "email", "academy", "division", "belt", "weight", "gender", "age_category", "birth_date", "birth_year", "weight_kg", "package_name", "notes"] as const;
 export type ClientCsvColumn = (typeof CLIENT_CSV_COLUMNS)[number];

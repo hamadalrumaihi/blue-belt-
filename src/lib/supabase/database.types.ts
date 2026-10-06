@@ -30,6 +30,10 @@ export type PhotoEventRow = {
   source_url: string | null;
   timezone: string;
   active: boolean;
+  /** 'watcher' = brackets read from a public page; 'manual' = entered by hand (no usable URL). */
+  tracking_mode: "watcher" | "manual";
+  /** The event's own age groups / weight divisions (DivisionRules JSON); null = platform defaults. */
+  division_rules: Json | null;
   created_at: string;
   updated_at: string;
 };
@@ -74,6 +78,10 @@ export type PhotoAthleteRow = {
   /** captured_at of the newest capture applied to this athlete; gates out-of-order captures. */
   last_capture_at: string | null;
   active: boolean;
+  /** Local competitions: real age on the event date and real weight drive the division checks. */
+  birth_date: string | null;
+  birth_year: number | null;
+  weight_kg: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -103,6 +111,11 @@ export type PhotoMatchRow = {
   override_at: string | null;
   override_reason: string | null;
   override_until: string | null;
+  /** Entered by hand (manual tracking); the watcher never changes or removes it. */
+  is_manual: boolean;
+  round: string | null;
+  result: string | null;
+  next_round: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -457,7 +470,7 @@ export type Database = {
     Tables: {
       photo_events: {
         Row: PhotoEventRow;
-        Insert: Optional<PhotoEventRow, GeneratedCols | "venue" | "country" | "event_date" | "source_url" | "timezone" | "active">;
+        Insert: Optional<PhotoEventRow, GeneratedCols | "venue" | "country" | "event_date" | "source_url" | "timezone" | "active" | "tracking_mode" | "division_rules">;
         Update: Partial<PhotoEventRow>;
         Relationships: [];
       };
@@ -495,6 +508,9 @@ export type Database = {
           | "refresh_version"
           | "last_capture_at"
           | "active"
+          | "birth_date"
+          | "birth_year"
+          | "weight_kg"
         >;
         Update: Partial<Omit<PhotoAthleteRow, "name_key">>;
         Relationships: [];
@@ -516,6 +532,10 @@ export type Database = {
           | "last_changed_at"
           | "raw_snapshot"
           | "identity_confidence"
+          | "is_manual"
+          | "round"
+          | "result"
+          | "next_round"
           | "override_mat"
           | "override_scheduled_at"
           | "override_by"

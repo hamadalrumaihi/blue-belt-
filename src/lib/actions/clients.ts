@@ -6,11 +6,12 @@ import type { ActionState } from "./types";
 import { requireOwnedAthlete, requireOwnedEvent } from "@/lib/authz";
 import { nameCollisions, normaliseName, parseClientForm } from "@/lib/client-form";
 import { parseCsv } from "@/lib/csv";
+import { composeLocalDivision, divisionForWeight, divisionLabel, findAgeGroup, findWeightDivision, rulesOf } from "@/lib/local-divisions";
 import { createClient } from "@/lib/supabase/server";
 import type { Database } from "@/lib/supabase/database.types";
 import { type Platform } from "@/lib/types";
 import { isValidEmail, trimOrNull } from "@/lib/utils";
-import { isUuid } from "@/lib/validation";
+import { isUuid, isValidCalendarDate } from "@/lib/validation";
 import { guessPlatform, validateSourceUrl } from "@/lib/watchers/url-policy";
 
 type AthleteInsert = Database["public"]["Tables"]["photo_athletes"]["Insert"];
@@ -26,13 +27,20 @@ async function findDuplicates(supabase: Awaited<ReturnType<typeof createClient>>
   return nameCollisions(data ?? [], name, excludeId);
 }
 
-export async function createAthlete(_prev: ActionState, formData: FormData): Promise<ActionState> {
-  const { fieldErrors, values, allowDuplicate } = parseClientForm(formData);
-  if (Object.keys(fieldErrors).length) return { fieldErrors };
+/** The event facts a client form depends on: tracked by hand → no URL needed. */
+async function clientEvent(supabase: Awaited<ReturnType<typeof createClient>>, eventId: string | null) {
+  if (!eventId || !isUuid(eventId)) return null;
+  const { data } = await supabase.from("photo_events").select("id,platform,tracking_mode").eq("id", eventId).maybeSingle();
+  return data ?? null;
+}
 
+export async function createAthlete(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "You are signed out." };
+  const ev = await clientEvent(supabase, trimOrNull(formData.get("event_id")));
+  const { fieldErrors, values, allowDuplicate } = parseClientForm(formData, { requireSourceUrl: ev?.tracking_mode !== "manual" });
+  if (Object.keys(fieldErrors).length) return { fieldErrors };
   const event = await requireOwnedEvent(supabase, values.event_id!);
   if (!event.ok) return { fieldErrors: { event_id: event.error } };
 
@@ -56,10 +64,11 @@ export async function createAthlete(_prev: ActionState, formData: FormData): Pro
 
 export async function updateAthlete(id: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
   if (!isUuid(id)) return { error: "Invalid client id." };
-  const { fieldErrors, values, allowDuplicate } = parseClientForm(formData);
+  const supabase = await createClient();
+  const ev = await clientEvent(supabase, trimOrNull(formData.get("event_id")));
+  const { fieldErrors, values, allowDuplicate } = parseClientForm(formData, { requireSourceUrl: ev?.tracking_mode !== "manual" });
   if (Object.keys(fieldErrors).length) return { fieldErrors };
 
-  const supabase = await createClient();
   const owned = await requireOwnedAthlete(supabase, id);
   if (!owned.ok) return { error: owned.error };
   const event = await requireOwnedEvent(supabase, values.event_id!);
@@ -106,18 +115,19 @@ export async function createAthleteQuick(_prev: ActionState, formData: FormData)
 
   if (!name) fieldErrors.name = "Name is required.";
   if (!event_id || !isUuid(event_id)) fieldErrors.event_id = "Choose an event.";
-  let platform: Platform = "OTHER";
-  if (!source_url) fieldErrors.source_url = "Player / schedule URL is required.";
-  else {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "You are signed out." };
+  const ev = await clientEvent(supabase, event_id);
+  let platform: Platform = ev?.platform === "LOCAL" ? "LOCAL" : "OTHER";
+  if (!source_url) {
+    if (ev?.tracking_mode !== "manual") fieldErrors.source_url = "Player / schedule URL is required.";
+  } else {
     const policy = validateSourceUrl(source_url);
     if (!policy.ok) fieldErrors.source_url = policy.message;
     else platform = policy.platform;
   }
   if (Object.keys(fieldErrors).length) return { fieldErrors };
-
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { error: "You are signed out." };
   const event = await requireOwnedEvent(supabase, event_id!);
   if (!event.ok) return { fieldErrors: { event_id: event.error } };
 
@@ -145,8 +155,9 @@ export type ImportReport = {
 export type ImportState = { error?: string; fieldErrors?: Record<string, string>; report?: ImportReport } | null;
 
 /**
- * CSV import: header row with any of name, source_url, phone, email, academy,
- * division, belt, weight, gender, age_category, package_name, notes.
+ * CSV import: header row with any of name, source_url, phone, email, academy
+ * (or team), division, belt, weight, gender, age_category (or age_group),
+ * birth_date, birth_year, weight_kg, package_name, notes.
  * Rows are validated individually; duplicates (same name or URL in the event)
  * are skipped unless "import duplicates" is ticked. Nothing is deleted.
  */
@@ -167,6 +178,8 @@ export async function importAthletesCsv(_prev: ImportState, formData: FormData):
   if (!user) return { error: "You are signed out." };
   const event = await requireOwnedEvent(supabase, event_id);
   if (!event.ok) return { fieldErrors: { event_id: event.error } };
+  const ev = await clientEvent(supabase, event_id);
+  const rules = rulesOf(ev ? { platform: ev.platform } : null);
 
   const { headers, rows } = parseCsv(text);
   if (!headers.includes("name")) return { fieldErrors: { csv: 'The header row must include a "name" column.' } };
@@ -194,13 +207,35 @@ export async function importAthletesCsv(_prev: ImportState, formData: FormData):
       }
       platform = policy.platform;
     } else {
-      platform = guessPlatform(null) ?? "OTHER";
+      platform = ev?.platform === "LOCAL" ? "LOCAL" : guessPlatform(null) ?? "OTHER";
     }
     const email = r.email?.trim() || null;
     if (email && !isValidEmail(email)) {
       report.errors.push({ row: rowNo, reason: `${name}: invalid email.` });
       return;
     }
+    const birthDate = r.birth_date?.trim() || null;
+    if (birthDate && !isValidCalendarDate(birthDate)) {
+      report.errors.push({ row: rowNo, reason: `${name}: birth_date must be YYYY-MM-DD.` });
+      return;
+    }
+    const birthYear = r.birth_year?.trim() ? Number(r.birth_year) : null;
+    if (birthYear !== null && (!Number.isInteger(birthYear) || birthYear < 1900 || birthYear > 2100)) {
+      report.errors.push({ row: rowNo, reason: `${name}: birth_year must be a four-digit year.` });
+      return;
+    }
+    const weightKg = r.weight_kg?.trim() ? Number(r.weight_kg.replace(",", ".")) : null;
+    if (weightKg !== null && (!Number.isFinite(weightKg) || weightKg <= 0 || weightKg >= 400)) {
+      report.errors.push({ row: rowNo, reason: `${name}: weight_kg must be a number of kilograms.` });
+      return;
+    }
+    // Local rules: map the sheet's group / division names onto the event's chart so the labels match the form.
+    const ageCategoryRaw = r.age_category?.trim() || r.age_group?.trim() || null;
+    const group = rules ? findAgeGroup(rules, ageCategoryRaw) : null;
+    const weightDiv = rules && group ? findWeightDivision(group, r.weight?.trim() || null) ?? (weightKg !== null ? divisionForWeight(group, weightKg) : null) : null;
+    const ageCategory = group?.label ?? ageCategoryRaw;
+    const weightLabel = weightDiv ? divisionLabel(weightDiv) : r.weight?.trim() || null;
+    const division = r.division?.trim() || (rules ? composeLocalDivision(group, weightDiv) || null : null);
     const key = normaliseName(name);
     if (!allowDuplicate && seenNames.has(key)) {
       report.skipped.push({ row: rowNo, name, reason: "Already in this event (same name)." });
@@ -215,12 +250,15 @@ export async function importAthletesCsv(_prev: ImportState, formData: FormData):
       platform,
       phone: r.phone?.trim() || null,
       email,
-      academy: r.academy?.trim() || null,
-      division: r.division?.trim() || null,
+      academy: r.academy?.trim() || r.team?.trim() || null,
+      division,
       belt: r.belt?.trim() || null,
-      weight: r.weight?.trim() || null,
+      weight: weightLabel,
       gender: r.gender?.trim() || null,
-      age_category: r.age_category?.trim() || null,
+      age_category: ageCategory,
+      birth_date: birthDate,
+      birth_year: birthYear,
+      weight_kg: weightKg !== null ? Math.round(weightKg * 100) / 100 : null,
       package_name: r.package_name?.trim() || null,
       notes: r.notes?.trim() || null,
     });

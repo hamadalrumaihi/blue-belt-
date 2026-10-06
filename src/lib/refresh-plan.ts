@@ -13,7 +13,8 @@ import type { NormalizedMatch, WatchResult } from "./watchers/types";
  * same plan is never applied twice (the RPC rejects a stale version).
  */
 
-export type MatchPatch = Omit<MatchRow, "id" | "owner_id" | "athlete_id" | "created_at" | "updated_at">;
+/** What a refresh writes. Manual-entry columns are never part of a watcher patch. */
+export type MatchPatch = Omit<MatchRow, "id" | "owner_id" | "athlete_id" | "created_at" | "updated_at" | "is_manual" | "round" | "result" | "next_round">;
 
 export type PlannedChange = DetectedChange & {
   /** Set for changes to an existing row. */

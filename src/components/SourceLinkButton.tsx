@@ -10,7 +10,7 @@ type Props = {
   size?: "sm" | "md";
 };
 
-const PLATFORM_LABEL: Record<string, string> = { AJP: "Open AJP", SMOOTHCOMP: "Open Smoothcomp", OTHER: "Open source" };
+const PLATFORM_LABEL: Record<string, string> = { AJP: "Open AJP", SMOOTHCOMP: "Open Smoothcomp", LOCAL: "Open bracket", OTHER: "Open source" };
 
 /** Opens the athlete's AJP / Smoothcomp page in a new tab. */
 export function SourceLinkButton({ url, platform, label, variant = "secondary", className, size = "md" }: Props) {
