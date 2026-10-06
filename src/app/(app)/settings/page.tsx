@@ -4,6 +4,7 @@ import { PageBody } from "@/components/AppShell";
 import { CaptureAgentSection } from "./CaptureAgentSection";
 import { OrdersIntakeSection } from "./OrdersIntakeSection";
 import { SettingsForm } from "./SettingsForm";
+import { StudioSection } from "./StudioSection";
 import { TelegramSection } from "./TelegramSection";
 
 export const metadata: Metadata = { title: "Settings" };
@@ -14,6 +15,9 @@ export default function SettingsPage() {
       <BrandHeader title="Settings" subtitle="Display preferences stay on this device; Telegram, capture and order settings are saved to your account" />
       <PageBody className="max-w-2xl">
         <SettingsForm />
+        <div className="mt-4">
+          <StudioSection />
+        </div>
         <div className="mt-4">
           <TelegramSection />
         </div>
