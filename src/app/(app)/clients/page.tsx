@@ -13,6 +13,7 @@ export const dynamic = "force-dynamic";
 export default async function ClientsPage({ searchParams }: PageProps<"/clients">) {
   const params = await searchParams;
   const eventFilter = typeof params.event === "string" ? params.event : null;
+  const showPaused = params.paused === "1";
   const [athletes, events] = await Promise.all([listAthletes(), listEvents()]);
 
   return (
@@ -33,7 +34,7 @@ export default async function ClientsPage({ searchParams }: PageProps<"/clients"
           />
         ) : (
           <>
-            <ClientsList athletes={athletes} events={events} initialEventId={eventFilter} />
+            <ClientsList athletes={athletes} events={events} initialEventId={eventFilter} initialShowPaused={showPaused} />
             <p className="pt-3 text-center text-xs text-muted">
               <Link href="/clients/import" className="font-semibold text-primary">Import clients from CSV</Link>
             </p>

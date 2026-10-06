@@ -65,6 +65,7 @@ export function DashboardLive({ event, athletes: initialAthletes, history: initi
         timezone={tz}
         onRefresh={next ? () => refresh([next.athlete.id]) : undefined}
         refreshing={next ? states[next.athlete.id]?.loading : false}
+        now={now}
         note={next ? watchStateCopy(states[next.athlete.id]?.status ?? next.athlete.last_watch_status, states[next.athlete.id]?.message ?? next.athlete.last_watch_message, states[next.athlete.id]?.code ?? next.athlete.last_watch_code) : undefined}
       />
 
@@ -77,7 +78,14 @@ export function DashboardLive({ event, athletes: initialAthletes, history: initi
           <h2 className="text-sm font-extrabold uppercase tracking-wider text-muted">Upcoming clients</h2>
           <Link href={`/clients/new?event=${event.id}`} className="btn-ghost min-h-9 px-2 text-xs text-primary"><PlusIcon size={16} /> Add client</Link>
         </div>
-        {active.length === 0 ? (
+        {active.length === 0 && ranked.length > 0 ? (
+          <EmptyState
+            icon={<UsersIcon />}
+            title="Every client for this event is paused."
+            description="Paused clients are not checked. Resume a client from their page to watch them again."
+            action={<Link href={`/clients?event=${event.id}&paused=1`} className="btn-primary">Show paused clients</Link>}
+          />
+        ) : active.length === 0 ? (
           <EmptyState
             icon={<UsersIcon />}
             title="No clients added yet."

@@ -5,6 +5,7 @@ import { useState, useTransition } from "react";
 import { createLinkCode, disableTelegram, enableTelegram, saveTelegramSubscription } from "@/lib/actions/telegram";
 import { TELEGRAM_ALERT_KINDS, TELEGRAM_KIND_LABELS, type TelegramAlertKind } from "@/lib/notifications/telegram/kinds";
 import type { TelegramSettingsState } from "@/lib/notifications/telegram/settings";
+import { formatStamp } from "@/lib/time";
 import { cn } from "@/lib/utils";
 
 type Props = {
@@ -71,7 +72,7 @@ export function TelegramSettings({ configured, botUsername, state }: Props) {
         <p className="hint">Telegram alerts are off on this server. Set <code>TELEGRAM_ENABLED=1</code> and <code>TELEGRAM_BOT_TOKEN</code> (see <code>docs/telegram.md</code>) to turn them on.</p>
       ) : (
         <>
-          <p className="text-sm text-ink">{state.linked ? "Match alerts for your clients are sent to the linked Telegram chat whenever a refresh runs." : "Get match alerts in Telegram: link a chat once, then the bot messages you when a client is up."}</p>
+          <p className="text-sm text-ink">{state.linked ? "Match alerts for your clients are sent to the linked Telegram chat whenever a refresh runs." : "Get match alerts in Telegram: link a chat once, then the bot messages you when a client is up."} Blocked or failing checks are reported there too, with the reason and what to do next.</p>
 
           <div className="space-y-2">
             <div className="flex flex-col gap-2 sm:flex-row">
@@ -93,7 +94,7 @@ export function TelegramSettings({ configured, botUsername, state }: Props) {
                   <li>Send <code className="select-all font-semibold">/start {code.code}</code></li>
                   <li>Come back and tap “Check status”.</li>
                 </ol>
-                <p className="hint">Expires {new Date(code.expiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}. One use only.</p>
+                <p className="hint">Expires {formatStamp(code.expiresAt)}. One use only.</p>
               </div>
             ) : null}
           </div>

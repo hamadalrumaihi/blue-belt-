@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import type { AthleteEta } from "@/lib/eta";
+import { isWatchFailure } from "@/lib/source-health";
 import { formatTime } from "@/lib/time";
 import { cn, initials } from "@/lib/utils";
 import { EtaBadge } from "./EtaBadge";
@@ -48,7 +49,7 @@ export function ClientCard({ entry, timezone, note, className, now = null }: Pro
             <SourceHealthBadge athlete={athlete} now={now} hasMatches={athlete.matches.length > 0} />
           </span>
         ) : (
-          <span className="mt-1.5 block text-xs font-semibold text-muted">{note ?? "Schedule not published yet."}</span>
+          <span className={cn("mt-1.5 block text-xs font-semibold", isWatchFailure(athlete.last_watch_status) ? "text-danger" : "text-muted")}>{note ?? "Schedule not published yet."}</span>
         )}
       </span>
       <span className="flex shrink-0 flex-col items-end gap-1.5">

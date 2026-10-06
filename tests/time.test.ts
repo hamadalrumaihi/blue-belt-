@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_TIMEZONE, dateInZone, formatAgo, formatDateTime, formatEventDate, formatTime, isValidTimeZone, secondsAgo, tzOffsetMinutes, wallClockToIso, zonedToUtc } from "@/lib/time";
+import { DEFAULT_TIMEZONE, dateInZone, formatAgo, formatDateTime, formatEventDate, formatTime, formatIn, formatStamp, isValidTimeZone, secondsAgo, tzOffsetMinutes, wallClockToIso, zonedToUtc, zoneLabel } from "@/lib/time";
 
 describe("wallClockToIso", () => {
   it("handles Europe/London across DST (BST in July, GMT in January)", () => {
@@ -108,5 +108,32 @@ describe("formatting", () => {
   it("isValidTimeZone", () => {
     expect(isValidTimeZone("Asia/Qatar")).toBe(true);
     expect(isValidTimeZone("Not/AZone")).toBe(false);
+  });
+});
+
+describe("zoneLabel / formatStamp / formatIn", () => {
+  const now = new Date("2026-10-06T11:00:00.000Z"); // 14:00 in Qatar
+
+  it("names the clock: Qatar time for the default zone, the short zone name otherwise", () => {
+    expect(zoneLabel()).toBe("Qatar time");
+    expect(zoneLabel("Asia/Qatar")).toBe("Qatar time");
+    expect(zoneLabel("Asia/Dubai", now)).toBe("GMT+4");
+    expect(zoneLabel("Not/AZone")).toBe("Not/AZone");
+  });
+
+  it("labels the zone and adds the date only when it is not today there", () => {
+    expect(formatStamp("2026-10-06T10:05:00.000Z", "Asia/Qatar", now)).toBe("13:05 Qatar time");
+    expect(formatStamp("2026-10-05T10:05:00.000Z", "Asia/Qatar", now)).toBe("5 Oct, 13:05 Qatar time");
+    // 21:30Z on the 5th is already the 6th in Qatar.
+    expect(formatStamp("2026-10-05T21:30:00.000Z", "Asia/Qatar", now)).toBe("00:30 Qatar time");
+    expect(formatStamp(null)).toBe("—");
+    expect(formatStamp("garbage")).toBe("—");
+  });
+
+  it("counts down to the next check", () => {
+    expect(formatIn("2026-10-06T11:00:42.000Z", now)).toBe("in 42s");
+    expect(formatIn("2026-10-06T11:02:30.000Z", now)).toBe("in 3 min");
+    expect(formatIn("2026-10-06T10:59:00.000Z", now)).toBe("now");
+    expect(formatIn(null, now)).toBeNull();
   });
 });

@@ -10,8 +10,11 @@ type Client = SupabaseClient<Database>;
 /**
  * Enqueues operational-incident and recovery messages into the Telegram
  * delivery table (the shared sender in notifier.ts flushes them). Dedup is by
- * the delivery alert_key, so an open incident notifies once; a recovery is sent
- * when a previously-open incident clears. State lives in photo_incidents.
+ * the delivery alert_key, which carries the incident's cycle start
+ * (first_seen_at): an open incident notifies once, and the same problem coming
+ * back after a recovery opens a new cycle and notifies again. A recovery is
+ * sent when a previously-open incident clears. State lives in photo_incidents
+ * (one row per owner + key, reopened in place).
  *
  * This never sends directly and never throws into the refresh: notifyAfterRefresh
  * wraps it, and runTelegramNotifier (called right after) does the sending.
@@ -62,18 +65,28 @@ async function processOwnerIncidents(
   const { data: open } = await supabase.from("photo_incidents").select("*").eq("owner_id", ownerId).eq("status", "open");
   const openRows = open ?? [];
   const draftKeys = new Set(drafts.map((d) => d.key));
+  // A key is unique per owner, so a problem that comes back after a recovery
+  // must reopen its resolved row rather than insert a second one.
+  const { data: known } = draftKeys.size
+    ? await supabase.from("photo_incidents").select("*").eq("owner_id", ownerId).in("incident_key", [...draftKeys])
+    : { data: [] };
+  const knownRows = known ?? [];
 
   const deliveries: Database["public"]["Tables"]["photo_notification_deliveries"]["Insert"][] = [];
 
-  // Open or refresh each current incident, and notify once per key.
+  // Open, reopen or refresh each current incident, and notify once per cycle.
   for (const d of drafts) {
-    const existing = openRows.find((r) => r.incident_key === d.key);
-    if (existing) {
-      await supabase.from("photo_incidents").update({ last_seen_at: now, occurrences: (existing.occurrences ?? 1) + 1, athlete_count: d.athleteIds.length, status: "open", resolved_at: null, updated_at: now }).eq("id", existing.id);
+    const existing = knownRows.find((r) => r.incident_key === d.key) ?? openRows.find((r) => r.incident_key === d.key);
+    let cycleStart = now;
+    if (existing?.status === "open") {
+      cycleStart = existing.first_seen_at;
+      await supabase.from("photo_incidents").update({ last_seen_at: now, occurrences: (existing.occurrences ?? 1) + 1, athlete_count: d.athleteIds.length, updated_at: now }).eq("id", existing.id);
+    } else if (existing) {
+      await supabase.from("photo_incidents").update({ status: "open", resolved_at: null, first_seen_at: now, last_seen_at: now, occurrences: 1, athlete_count: d.athleteIds.length, updated_at: now }).eq("id", existing.id);
     } else {
       await supabase.from("photo_incidents").insert({ owner_id: ownerId, incident_key: d.key, kind: d.kind, event_id: d.eventId, source_host: d.sourceHost, athlete_count: d.athleteIds.length, status: "open", first_seen_at: now, last_seen_at: now, occurrences: 1 });
     }
-    deliveries.push(deliveryInsert({ ownerId, alertKey: `incident:${d.key}`, kind: `INCIDENT_${d.kind}`, text: d.text, category: "system", now: new Date(now) }));
+    deliveries.push(deliveryInsert({ ownerId, alertKey: incidentAlertKey(d.key, cycleStart), kind: `INCIDENT_${d.kind}`, text: d.text, category: "system", now: new Date(now) }));
   }
 
   // Resolve open incidents that are no longer failing and whose event saw an OK read.
@@ -91,4 +104,10 @@ async function processOwnerIncidents(
   if (deliveries.length) {
     await supabase.from("photo_notification_deliveries").upsert(deliveries, { onConflict: "owner_id,channel,alert_key", ignoreDuplicates: true });
   }
+}
+
+/** One alert per incident cycle; the timestamp is normalised so DB round-trips match. */
+export function incidentAlertKey(incidentKey: string, cycleStart: string): string {
+  const t = new Date(cycleStart);
+  return `incident:${incidentKey}:${Number.isNaN(t.getTime()) ? cycleStart : t.toISOString()}`;
 }

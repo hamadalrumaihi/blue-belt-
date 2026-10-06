@@ -1,4 +1,5 @@
 import type { EventRow } from "@/lib/types";
+import { zoneLabel } from "@/lib/time";
 import type { RefreshResult } from "@/lib/watch-service";
 
 /**
@@ -37,7 +38,7 @@ const KIND_LABEL: Record<IncidentKind, string> = {
 };
 
 const KIND_REASON: Record<IncidentKind, string> = {
-  CHALLENGE: "A Cloudflare human check blocked the automatic watcher.",
+  CHALLENGE: "The source showed an anti-bot / human check (e.g. Cloudflare). The watcher stopped this check and does not try to get past it.",
   WORKER_DOWN: "The browser worker was unavailable.",
   SOURCE_ERROR: "The source site did not respond.",
   ATHLETE_NOT_FOUND: "The page loaded but did not name this athlete.",
@@ -153,7 +154,7 @@ export function buildIncidentDrafts(
     const lines = [
       `<b>${esc(KIND_LABEL[g.kind])} — ${esc(who)}${g.eventName ? `, ${esc(g.eventName)}` : ""}</b>`,
       `Reason: ${esc(KIND_REASON[g.kind])}`,
-      `Last verified: ${verified ?? "unknown"}.`,
+      `Last verified: ${verified ? `${verified} ${zoneLabel(tz)}` : "unknown"}.`,
       g.retained ? "Previous schedule retained." : "No previous schedule to show.",
       `Action: ${esc(KIND_ACTION[g.kind])}`,
     ];

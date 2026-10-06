@@ -12,12 +12,12 @@ import { formatTime } from "@/lib/time";
 import type { AthleteWithMatches, EventRow } from "@/lib/types";
 import { cn, initials } from "@/lib/utils";
 
-type Props = { athletes: AthleteWithMatches[]; events: EventRow[]; initialEventId: string | null };
+type Props = { athletes: AthleteWithMatches[]; events: EventRow[]; initialEventId: string | null; initialShowPaused?: boolean };
 
-export function ClientsList({ athletes, events, initialEventId }: Props) {
+export function ClientsList({ athletes, events, initialEventId, initialShowPaused = false }: Props) {
   const [query, setQuery] = useState("");
   const [eventId, setEventId] = useState(initialEventId ?? "");
-  const [showInactive, setShowInactive] = useState(false);
+  const [showInactive, setShowInactive] = useState(initialShowPaused);
   const now = useNow(30_000);
   const eventName = useMemo(() => new Map(events.map((e) => [e.id, e.name])), [events]);
 
@@ -31,6 +31,8 @@ export function ClientsList({ athletes, events, initialEventId }: Props) {
       return hay.includes(q);
     });
   }, [athletes, query, eventId, showInactive]);
+
+  const pausedCount = useMemo(() => athletes.filter((a) => !a.active && (!eventId || a.event_id === eventId)).length, [athletes, eventId]);
 
   const grouped = useMemo(() => {
     const map = new Map<string, AthleteWithMatches[]>();
@@ -52,8 +54,8 @@ export function ClientsList({ athletes, events, initialEventId }: Props) {
           <option value="">All events</option>
           {events.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
         </select>
-        <button type="button" onClick={() => setShowInactive((v) => !v)} className={cn("btn min-h-10 border px-3 text-xs", showInactive ? "border-primary bg-lightblue text-primary" : "border-line bg-white text-muted")}>
-          {showInactive ? "Hiding none" : "Hide paused"}
+        <button type="button" aria-pressed={showInactive} onClick={() => setShowInactive((v) => !v)} className={cn("btn min-h-10 border px-3 text-xs", showInactive ? "border-primary bg-lightblue text-primary" : "border-line bg-white text-muted")}>
+          {showInactive ? "Showing paused" : `Show paused (${pausedCount})`}
         </button>
       </div>
 
@@ -73,7 +75,7 @@ export function ClientsList({ athletes, events, initialEventId }: Props) {
                     <Link href={`/clients/${a.id}`} className={cn("flex items-center gap-3 px-3.5 py-3 hover:bg-page", !a.active && "opacity-60")}>
                       <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-lightblue text-sm font-extrabold text-primary">{initials(a.name)}</span>
                       <span className="min-w-0 flex-1">
-                        <span className="flex items-center gap-2"><span className="truncate text-sm font-bold text-ink">{a.name}</span><PlatformBadge platform={a.platform} /></span>
+                        <span className="flex items-center gap-2"><span className="truncate text-sm font-bold text-ink">{a.name}</span><PlatformBadge platform={a.platform} />{!a.active && <span className="shrink-0 rounded-full border border-line bg-page px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted">Paused</span>}</span>
                         <span className="block truncate text-xs text-muted">{[a.academy, a.division, a.belt].filter(Boolean).join(" · ") || "—"}</span>
                         {match && <span className="block text-xs font-semibold text-ink">{match.mat ?? "Mat —"} · {formatTime(match.estimated_at ?? match.scheduled_at, tz)}{match.opponent ? ` · vs ${match.opponent}` : ""}</span>}
                       </span>

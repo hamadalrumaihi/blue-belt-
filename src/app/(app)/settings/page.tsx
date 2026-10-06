@@ -11,7 +11,7 @@ export const metadata: Metadata = { title: "Settings" };
 export default function SettingsPage() {
   return (
     <>
-      <BrandHeader title="Settings" subtitle="Preferences are saved on this device" />
+      <BrandHeader title="Settings" subtitle="Display preferences stay on this device; Telegram, capture and order settings are saved to your account" />
       <PageBody className="max-w-2xl">
         <SettingsForm />
         <div className="mt-4">
