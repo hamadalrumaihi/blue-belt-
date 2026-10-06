@@ -3,14 +3,20 @@ import type { ReactNode } from "react";
 import { AppShell } from "@/components/AppShell";
 import { SettingsSync } from "@/components/SettingsSync";
 import { resolveViewerMode } from "@/lib/collaborator";
-import { getUser } from "@/lib/supabase/server";
+import { isStudioRole, resolveViewer } from "@/lib/roles";
 
+/**
+ * The private studio. Owners and staff only: a client account (portal
+ * sign-in) is sent to its own portal, never shown an empty studio.
+ */
 export default async function PrivateLayout({ children }: { children: ReactNode }) {
-  const user = await getUser();
-  if (!user) redirect("/login");
-  const { collaboratorOnly } = await resolveViewerMode();
+  const viewer = await resolveViewer();
+  if (!viewer) redirect("/login");
+  if (!isStudioRole(viewer.role)) redirect("/client");
+  const mode = await resolveViewerMode();
+  const collaboratorOnly = viewer.role === "staff" || mode.collaboratorOnly;
   return (
-    <AppShell email={user.email ?? null} collaboratorOnly={collaboratorOnly}>
+    <AppShell email={viewer.email} collaboratorOnly={collaboratorOnly}>
       <SettingsSync />
       {children}
     </AppShell>

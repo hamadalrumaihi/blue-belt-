@@ -4,7 +4,7 @@ import { BOTTOM_ITEMS, bottomGridClass, isActivePath, navItemsFor, SIDEBAR_ITEMS
 describe("navItemsFor", () => {
   it("keeps the owner's nav as it was (no collaborator shortcuts)", () => {
     expect(navItemsFor(SIDEBAR_ITEMS, false)).toEqual(SIDEBAR_ITEMS);
-    expect(navItemsFor(BOTTOM_ITEMS, false).map((i) => i.href)).toEqual(["/dashboard", "/events", "/clients", "/watcher", "/more"]);
+    expect(navItemsFor(BOTTOM_ITEMS, false).map((i) => i.href)).toEqual(["/studio", "/bookings", "/dashboard", "/watcher", "/more"]);
   });
 
   it("fits every viewer's bottom nav on one row", () => {
@@ -37,7 +37,7 @@ describe("isActivePath", () => {
   });
 
   it("groups owner sub-pages under More", () => {
-    for (const p of ["/more", "/history", "/settings", "/orders", "/orders/abc"]) {
+    for (const p of ["/more", "/history", "/settings", "/orders", "/orders/abc", "/people", "/documents/x", "/payments"]) {
       expect(isActivePath(p, "/more")).toBe(true);
     }
     expect(isActivePath("/coverage", "/more")).toBe(false);

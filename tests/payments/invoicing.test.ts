@@ -44,7 +44,7 @@ function order(overrides: Partial<PhotoOrderRow> = {}): PhotoOrderRow {
     payment_confirmed_at: null,
     payment_confirmed_by: null,
     fulfilled_at: null,
-    invoice_claimed_at: null,
+    invoice_claimed_at: null, client_id: null, gallery_id: null,
     created_at: "2026-10-02T10:00:00.000Z",
     updated_at: "2026-10-02T10:00:00.000Z",
     ...overrides,

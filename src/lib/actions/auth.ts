@@ -9,7 +9,7 @@ export type AuthState = { error?: string; success?: string } | null;
 
 function safeNext(value: FormDataEntryValue | null): string {
   const next = typeof value === "string" ? value : "";
-  return next.startsWith("/") && !next.startsWith("//") ? next : "/dashboard";
+  return next.startsWith("/") && !next.startsWith("//") ? next : "/studio";
 }
 
 export async function signIn(_prev: AuthState, formData: FormData): Promise<AuthState> {

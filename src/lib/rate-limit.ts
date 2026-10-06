@@ -75,4 +75,12 @@ export const RULES = {
   captureAuthPerIp: { max: 30, windowMs: 60_000 } satisfies RateLimitRule,
   /** MyFatoorah webhook, per client address, so one abusive IP cannot starve the provider's budget. */
   paymentsWebhookPerIp: { max: 120, windowMs: 60_000 } satisfies RateLimitRule,
+  /** Public website forms (booking, contact): per client IP, 10 minutes. */
+  publicFormPerIp: { max: 8, windowMs: 600_000 } satisfies RateLimitRule,
+  /** Signing page views / signatures per IP. */
+  signPerIp: { max: 30, windowMs: 600_000 } satisfies RateLimitRule,
+  /** Client portal magic-link requests per IP. */
+  clientLoginPerIp: { max: 6, windowMs: 600_000 } satisfies RateLimitRule,
+  /** Owner studio actions that call a provider (invoice creation) per user. */
+  providerActionPerUser: { max: 20, windowMs: 600_000 } satisfies RateLimitRule,
 };

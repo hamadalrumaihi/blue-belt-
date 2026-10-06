@@ -1,9 +1,14 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_PATHS = ["/login", "/forgot-password", "/reset-password", "/auth"];
+/**
+ * Paths that never require the studio session: the public website, the
+ * signing page, the client portal (which does its own sign-in) and auth.
+ */
+const PUBLIC_PATHS = ["/login", "/forgot-password", "/reset-password", "/auth", "/services", "/book", "/contact", "/portfolio", "/testimonials", "/sign", "/client", "/privacy", "/terms"];
 
 function isPublic(pathname: string) {
+  if (pathname === "/") return true;
   return PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
 
@@ -50,9 +55,10 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  if (user && (pathname === "/login" || pathname === "/")) {
+  if (user && pathname === "/login") {
+    // The studio layout bounces client accounts to /client, so this is safe for every role.
     const dash = request.nextUrl.clone();
-    dash.pathname = "/dashboard";
+    dash.pathname = "/studio";
     dash.search = "";
     return NextResponse.redirect(dash);
   }

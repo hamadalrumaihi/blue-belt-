@@ -1,8 +1,8 @@
 {
-  "name": "Blue Belt Media — Tournament Watcher",
+  "name": "Blue Belt Media Studio",
   "short_name": "Blue Belt Media",
-  "description": "Tournament Coverage Command Center",
-  "start_url": "/dashboard",
+  "description": "Bookings, contracts, payments, galleries and the Tournament Watcher for Blue Belt Media.",
+  "start_url": "/studio",
   "display": "standalone",
   "background_color": "#0b1f3a",
   "theme_color": "#0b1f3a",
