@@ -26,23 +26,36 @@ export type InvoiceDeps = {
 };
 
 export type CreateInvoiceForOrderResult =
-  | { ok: true; orderId: string; invoiceId: string; paymentUrl: string; alreadyInvoiced?: false }
-  | { ok: true; orderId: string; invoiceId: string; paymentUrl: string; alreadyInvoiced: true }
-  | { ok: false; orderId: string; reason: "already_paid" | "cancelled" | "no_amount" | "provider_error"; detail?: string };
+  | { ok: true; orderId: string; invoiceId: string; paymentUrl: string | null; alreadyInvoiced?: boolean; relinked?: boolean }
+  | { ok: false; orderId: string; reason: "already_paid" | "cancelled" | "no_amount" | "in_progress" | "provider_error"; detail?: string };
+
+/** How long one caller's invoice claim on an order is honoured before it counts as abandoned. */
+export const INVOICE_CLAIM_TTL_MS = 10 * 60_000;
+/** The automatic path stops retrying an order after this many provider failures (the owner's button still works). */
+export const MAX_AUTO_INVOICE_ATTEMPTS = 3;
+
+function metadataOf(order: Pick<PhotoOrderRow, "metadata">): Record<string, unknown> {
+  return isRecord(order.metadata) ? order.metadata : {};
+}
+
+function attemptsOf(order: PhotoOrderRow): number {
+  const n = metadataOf(order).invoice_attempts;
+  return typeof n === "number" && Number.isFinite(n) ? n : 0;
+}
 
 /**
  * An order is eligible for an AUTOMATIC invoice only when it is still unpaid,
- * not cancelled, carries a positive amount, has no invoice yet, and was paid by
- * an offline method (Fawran / bank transfer / cash). A card order is already
- * settled in Pic-Time, so auto-invoicing it would ask the buyer to pay twice —
- * never do that. Manual invoicing (the owner action) is less restrictive but
- * still refuses an order that is already paid or already invoiced.
+ * not cancelled, carries a positive amount, has no invoice yet, has not failed
+ * at the provider too often, and was paid by an offline method (Fawran / bank
+ * transfer / cash). A card order is already settled in Pic-Time, so
+ * auto-invoicing it would ask the buyer to pay twice — never do that.
  */
 export function eligibleForAutoInvoice(order: PhotoOrderRow): boolean {
   if (order.provider_invoice_id) return false;
   if (order.status === "cancelled") return false;
   if (order.payment_state === "paid" || order.payment_state === "refunded") return false;
   if (!(order.amount_qr > 0)) return false;
+  if (attemptsOf(order) >= MAX_AUTO_INVOICE_ATTEMPTS) return false;
   return OFFLINE_METHODS.includes(order.payment_method as (typeof OFFLINE_METHODS)[number]);
 }
 
@@ -60,53 +73,127 @@ export function invoiceInputForOrder(order: PhotoOrderRow): CreateInvoiceInput {
 }
 
 /**
- * Creates a MyFatoorah invoice for one order and writes the invoice id +
- * payment URL back onto the order row. Refuses an order that is already paid,
- * cancelled or has no amount. If the order already carries an invoice it is a
- * no-op success (returns the existing invoice), so the call is safe to repeat.
- * The caller must have checked `isPaymentsEnabled()`.
+ * Creates a MyFatoorah invoice for one order and records it on the order.
+ *
+ * Money safety:
+ *   1. CLAIM first: a conditional update stamps invoice_claimed_at only if the
+ *      order still has no invoice and no live claim. A concurrent caller (a
+ *      second cron run, a double click) gets `in_progress` and calls nothing.
+ *   2. A STALE claim (older than INVOICE_CLAIM_TTL_MS: the earlier caller died
+ *      after SendPayment but before recording it) is never answered by blindly
+ *      creating another invoice. MyFatoorah is asked for the invoice by
+ *      CustomerReference (the order id); a found invoice is re-linked. Only a
+ *      clear "no such invoice" lets this caller take the claim over. An
+ *      inconclusive answer (network, timeout) stops here.
+ *   3. The write-back is conditional on the order still having no invoice; a
+ *      lost race is logged as an orphan invoice id, not silently overwritten.
+ *   4. A provider failure releases the claim and counts an attempt.
+ * The caller must have checked `isPaymentsEnabled()`. Never messages the buyer.
  */
 export async function createInvoiceForOrder(order: PhotoOrderRow, provider: PaymentProvider, deps: InvoiceDeps): Promise<CreateInvoiceForOrderResult> {
-  if (order.provider_invoice_id && order.payment_url) {
+  if (order.provider_invoice_id) {
     return { ok: true, orderId: order.id, invoiceId: order.provider_invoice_id, paymentUrl: order.payment_url, alreadyInvoiced: true };
   }
   if (order.status === "cancelled") return { ok: false, orderId: order.id, reason: "cancelled" };
   if (order.payment_state === "paid" || order.payment_state === "refunded") return { ok: false, orderId: order.id, reason: "already_paid" };
   if (!(order.amount_qr > 0)) return { ok: false, orderId: order.id, reason: "no_amount" };
 
+  const now = deps.now();
+  const claimAt = now.toISOString();
+
+  // (1)/(2) Take the claim.
+  let claim = deps.supabase.from("photo_orders").update({ invoice_claimed_at: claimAt }).eq("id", order.id).eq("owner_id", order.owner_id).is("provider_invoice_id", null);
+  if (order.invoice_claimed_at) {
+    const age = now.getTime() - new Date(order.invoice_claimed_at).getTime();
+    if (age < INVOICE_CLAIM_TTL_MS) return { ok: false, orderId: order.id, reason: "in_progress" };
+    const existing = await provider.getPaymentStatus({ key: order.id, keyType: "CustomerReference" });
+    if (existing.ok) {
+      deps.log.warn("payments.order_invoice_relink", { orderId: order.id, invoiceId: existing.data.invoiceId });
+      return linkInvoice(order, { invoiceId: existing.data.invoiceId, paymentUrl: null, customerReference: existing.data.customerReference }, deps, true);
+    }
+    if (!isNotFound(existing.error)) {
+      deps.log.warn("payments.order_invoice_relink_unknown", { orderId: order.id, code: existing.error.code, httpStatus: existing.error.httpStatus });
+      return { ok: false, orderId: order.id, reason: "provider_error", detail: `relink_${existing.error.code}` };
+    }
+    claim = claim.eq("invoice_claimed_at", order.invoice_claimed_at);
+  } else {
+    claim = claim.is("invoice_claimed_at", null);
+  }
+  const { data: claimed, error: claimError } = await claim.select("id");
+  if (claimError) {
+    deps.log.error("payments.order_invoice_claim_failed", { orderId: order.id, error: claimError.message });
+    return { ok: false, orderId: order.id, reason: "provider_error", detail: "claim_failed" };
+  }
+  if (!claimed?.length) return { ok: false, orderId: order.id, reason: "in_progress" };
+
+  // (3) Create at the provider.
   const created = await provider.createInvoice(invoiceInputForOrder(order));
   if (!created.ok) {
     deps.log.warn("payments.order_invoice_failed", { orderId: order.id, code: created.error.code, httpStatus: created.error.httpStatus });
+    // (4) Release the claim and count the attempt so the automatic path backs off.
+    const metadata = metadataOf(order);
+    const { error: releaseError } = await deps.supabase
+      .from("photo_orders")
+      .update({ invoice_claimed_at: null, metadata: { ...metadata, invoice_attempts: attemptsOf(order) + 1, invoice_last_error: created.error.code } as Json })
+      .eq("id", order.id)
+      .eq("owner_id", order.owner_id)
+      .eq("invoice_claimed_at", claimAt);
+    if (releaseError) deps.log.warn("payments.order_invoice_release_failed", { orderId: order.id, error: releaseError.message });
     return { ok: false, orderId: order.id, reason: "provider_error", detail: created.error.code };
   }
 
-  const metadata = isRecord(order.metadata) ? order.metadata : {};
-  const { error } = await deps.supabase
+  return linkInvoice(order, { invoiceId: created.data.invoiceId, paymentUrl: created.data.paymentUrl, customerReference: created.data.customerReference }, deps, false);
+}
+
+/** A GetPaymentStatus answer that clearly means "no invoice with that reference" (not a transport failure). */
+function isNotFound(error: { code: string; httpStatus?: number }): boolean {
+  return error.code === "provider" || (error.code === "http" && (error.httpStatus === 400 || error.httpStatus === 404));
+}
+
+/** Records an invoice on the order, only if the order still has none (never overwrites another invoice). */
+async function linkInvoice(
+  order: PhotoOrderRow,
+  invoice: { invoiceId: string; paymentUrl: string | null; customerReference: string | null },
+  deps: InvoiceDeps,
+  relinked: boolean,
+): Promise<CreateInvoiceForOrderResult> {
+  const metadata = metadataOf(order);
+  const { invoice_attempts: _attempts, invoice_last_error: _lastError, ...rest } = metadata;
+  void _attempts;
+  void _lastError;
+  const { data, error } = await deps.supabase
     .from("photo_orders")
     .update({
       provider: MYFATOORAH_PROVIDER,
-      provider_invoice_id: created.data.invoiceId,
-      payment_url: created.data.paymentUrl,
-      metadata: { ...metadata, invoice: { provider: MYFATOORAH_PROVIDER, invoice_id: created.data.invoiceId, customer_reference: created.data.customerReference, created_at: deps.now().toISOString() } } as Json,
+      provider_invoice_id: invoice.invoiceId,
+      payment_url: invoice.paymentUrl,
+      invoice_claimed_at: null,
+      metadata: { ...rest, invoice: { provider: MYFATOORAH_PROVIDER, invoice_id: invoice.invoiceId, customer_reference: invoice.customerReference, created_at: deps.now().toISOString(), relinked } } as Json,
     })
     .eq("id", order.id)
-    .eq("owner_id", order.owner_id);
-  if (error) {
-    // The invoice exists at the provider but we failed to record it. Surface as
-    // a provider_error so a later run (reconcile/auto) can re-link by reference.
-    deps.log.error("payments.order_invoice_persist_failed", { orderId: order.id, invoiceId: created.data.invoiceId, error: error.message });
-    return { ok: false, orderId: order.id, reason: "provider_error", detail: "persist_failed" };
+    .eq("owner_id", order.owner_id)
+    .is("provider_invoice_id", null)
+    .select("id");
+  if (error || !data?.length) {
+    // The invoice exists at MyFatoorah but is not on the order. With the claim
+    // still in place, the next attempt after the TTL re-links it by reference.
+    deps.log.error("payments.order_invoice_orphan", { orderId: order.id, invoiceId: invoice.invoiceId, error: error?.message ?? "order already has an invoice" });
+    return { ok: false, orderId: order.id, reason: "provider_error", detail: error ? "persist_failed" : "orphan" };
   }
-  deps.log.info("payments.order_invoiced", { orderId: order.id, invoiceId: created.data.invoiceId });
-  return { ok: true, orderId: order.id, invoiceId: created.data.invoiceId, paymentUrl: created.data.paymentUrl };
+  deps.log.info(relinked ? "payments.order_invoice_relinked" : "payments.order_invoiced", { orderId: order.id, invoiceId: invoice.invoiceId });
+  return { ok: true, orderId: order.id, invoiceId: invoice.invoiceId, paymentUrl: invoice.paymentUrl, relinked };
 }
 
 /**
- * Automatic path (cron): invoices every eligible unpaid offline order that has
- * no invoice yet. Bounded by `limit`. Only called when both payments and
- * auto-invoicing are enabled; never messages the customer.
+ * Automatic path (cron): invoices eligible unpaid offline orders that have no
+ * invoice yet. Bounded by `limit` and by a wall-clock `budgetMs` (each provider
+ * call can take up to the client timeout, and the cron route shares its
+ * maxDuration with reconcile), so a slow provider cannot run the function into
+ * its hard limit mid-write. Never messages the customer.
  */
-export async function autoInvoiceOrders(provider: PaymentProvider, deps: InvoiceDeps, opts: { limit?: number } = {}): Promise<{ scanned: number; invoiced: number; failed: number }> {
+export async function autoInvoiceOrders(provider: PaymentProvider, deps: InvoiceDeps, opts: { limit?: number; budgetMs?: number } = {}): Promise<{ scanned: number; invoiced: number; failed: number }> {
+  const started = Date.now();
+  const budgetMs = opts.budgetMs ?? 25_000;
   const { data: orders } = await deps.supabase
     .from("photo_orders")
     .select("*")
@@ -115,16 +202,19 @@ export async function autoInvoiceOrders(provider: PaymentProvider, deps: Invoice
     .neq("status", "cancelled")
     .in("payment_method", OFFLINE_METHODS as unknown as string[])
     .order("received_at", { ascending: true })
-    .limit(opts.limit ?? 25);
+    .limit(opts.limit ?? 10);
   let invoiced = 0;
   let failed = 0;
+  let scanned = 0;
   for (const order of (orders ?? []) as PhotoOrderRow[]) {
+    if (Date.now() - started >= budgetMs) break;
+    scanned += 1;
     if (!eligibleForAutoInvoice(order)) continue;
     const result = await createInvoiceForOrder(order, provider, deps);
     if (result.ok) invoiced += 1;
-    else failed += 1;
+    else if (result.reason !== "in_progress") failed += 1;
   }
-  return { scanned: (orders ?? []).length, invoiced, failed };
+  return { scanned, invoiced, failed };
 }
 
 // ---------------------------------------------------------------------------
@@ -190,14 +280,27 @@ export async function createStandaloneInvoice(input: StandaloneInvoiceInput, pro
   });
   if (!created.ok) {
     deps.log.warn("payments.standalone_invoice_failed", { bookingId: booking.id, code: created.error.code });
+    // No invoice exists: don't leave a pending booking that can never be paid.
+    const { error: cancelError } = await deps.supabase
+      .from("photo_bookings")
+      .update({ status: "cancelled", notes: `Invoice creation failed (${created.error.code}).` })
+      .eq("id", booking.id)
+      .eq("owner_id", input.ownerId);
+    if (cancelError) deps.log.warn("payments.standalone_cancel_failed", { bookingId: booking.id, error: cancelError.message });
     return { ok: false, reason: "provider_error", detail: created.error.code };
   }
 
-  await deps.supabase
+  const { data: linked, error: linkError } = await deps.supabase
     .from("photo_bookings")
     .update({ provider_invoice_id: created.data.invoiceId, payment_url: created.data.paymentUrl })
     .eq("id", booking.id)
-    .eq("owner_id", input.ownerId);
+    .eq("owner_id", input.ownerId)
+    .select("id");
+  if (linkError || !linked?.length) {
+    // The invoice exists but the booking does not carry it, so its webhook would not match.
+    deps.log.error("payments.standalone_invoice_orphan", { bookingId: booking.id, invoiceId: created.data.invoiceId, error: linkError?.message ?? "booking not updated" });
+    return { ok: false, reason: "provider_error", detail: "persist_failed" };
+  }
   deps.log.info("payments.standalone_invoiced", { bookingId: booking.id, invoiceId: created.data.invoiceId });
   return { ok: true, bookingId: booking.id, invoiceId: created.data.invoiceId, paymentUrl: created.data.paymentUrl };
 }

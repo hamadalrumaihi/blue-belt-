@@ -18,7 +18,7 @@ function order(overrides: Partial<PhotoOrderRow> = {}): PhotoOrderRow {
     payment_url: "https://pay.test/ORDER-INV-1", paid_at: null, approved_in_pictime_at: null, metadata: {}, source: "pictime", external_ref: "PT-7",
     payment_method: "fawran", payment_state: "pending", payment_reference: null, payment_reported_state: null, items: [], placed_at: null,
     received_at: "2026-10-02T10:00:00.000Z", buyer_note: null, athlete_name_hint: null, raw: {}, payment_confirmed_at: null, payment_confirmed_by: null,
-    fulfilled_at: null, created_at: "2026-10-02T10:00:00.000Z", updated_at: "2026-10-02T10:00:00.000Z", ...overrides,
+    fulfilled_at: null, invoice_claimed_at: null, created_at: "2026-10-02T10:00:00.000Z", updated_at: "2026-10-02T10:00:00.000Z", ...overrides,
   };
 }
 
@@ -44,7 +44,10 @@ describe("processWebhook — order-linked invoice", () => {
     const o = orderRow(db);
     expect(o.payment_state).toBe("paid");
     expect(o.paid_at).toBeTruthy();
-    expect(o.payment_confirmed_by).toBe("MYFATOORAH");
+    // payment_confirmed_by is a uuid column (owner id); the provider is recorded in metadata.
+    expect(o.payment_confirmed_by ?? null).toBeNull();
+    expect(o.metadata).toMatchObject({ payment_confirmed_source: "MYFATOORAH" });
+    expect(o.payment_reported_state ?? null).toBeNull();
 
     // The event row links to the order, not a booking.
     const ev = db.tables.photo_payment_events[0];
@@ -70,6 +73,55 @@ describe("processWebhook — order-linked invoice", () => {
     expect(out.result).toBe("processed");
     expect(orderRow(db).payment_state).toBe("refunded");
     expect(db.tables.photo_notification_deliveries).toHaveLength(0);
+  });
+
+  it("never moves a paid order back to failed (late FAILED attempt)", async () => {
+    const { db, deps } = setup([order({ payment_state: "paid", paid_at: "2026-10-02T11:00:00.000Z" })]);
+    const out = await processWebhook({ body: paymentEvent({ invoiceId: ORDER_INVOICE, reference: "WH-ORD-LATE", transactionStatus: "FAILED" }), signatureValid: true }, deps);
+    expect(out.result).toBe("ignored_transition");
+    expect(orderRow(db).payment_state).toBe("paid");
+  });
+
+  it("does not overwrite an order whose state changed after it was read", async () => {
+    const { db, deps } = setup();
+    // Simulate the owner confirming between the webhook's read and its write.
+    const realFrom = db.from.bind(db);
+    let reads = 0;
+    (db as unknown as { from: (t: string) => unknown }).from = (t: string) => {
+      // 1st photo_orders query = the webhook's lookup; the 2nd = its update.
+      if (t === "photo_orders" && ++reads === 2) Object.assign(orderRow(db), { payment_state: "failed" });
+      return realFrom(t);
+    };
+    const out = await processWebhook({ body: paymentEvent({ invoiceId: ORDER_INVOICE, reference: "WH-ORD-RACE", transactionStatus: "FAILED" }), signatureValid: true }, deps);
+    expect(out).toMatchObject({ result: "ignored_transition", detail: "concurrent_update" });
+  });
+
+  it("parks a failed order update for the replay job, which then applies it", async () => {
+    const { db, deps } = setup();
+    // First write to photo_orders fails (transient).
+    const realFrom = db.from.bind(db);
+    let failNext = true;
+    (db as unknown as { from: (t: string) => unknown }).from = (t: string) => {
+      const q = realFrom(t) as unknown as { update: (p: unknown) => unknown; then: unknown };
+      if (t === "photo_orders" && failNext) {
+        const update = q.update.bind(q);
+        q.update = (p: unknown) => {
+          failNext = false;
+          const chain = update(p) as { then: (res: (v: unknown) => unknown, rej?: (e: unknown) => unknown) => Promise<unknown> };
+          chain.then = (res, rej) => Promise.resolve({ data: null, error: { code: "08006", message: "connection lost" } }).then(res, rej);
+          return chain;
+        };
+      }
+      return q;
+    };
+    const out = await processWebhook({ body: paymentEvent({ invoiceId: ORDER_INVOICE, reference: "WH-ORD-RETRY" }), signatureValid: true }, deps);
+    expect(out.result).toBe("error");
+    expect(db.tables.photo_payment_events[0].processing_result).toBe("error:order_update_failed");
+    expect(orderRow(db).payment_state).toBe("pending");
+
+    const replay = await replayUnmatchedEvents(deps);
+    expect(replay.applied).toBe(1);
+    expect(orderRow(db).payment_state).toBe("paid");
   });
 
   it("falls back to booking_not_found when no order or booking carries the invoice", async () => {

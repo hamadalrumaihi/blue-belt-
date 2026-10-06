@@ -309,15 +309,34 @@ async function findOrderByInvoice(invoiceId: string, deps: WebhookDeps): Promise
   return data ?? null;
 }
 
-type OrderApplyOutcome = { result: Extract<ProcessingResult, "processed" | "unchanged" | "error">; detail?: string };
+type OrderApplyOutcome = { result: Extract<ProcessingResult, "processed" | "unchanged" | "ignored_transition" | "error">; detail?: string };
+
+/**
+ * Order payment_state transitions a provider event may cause. Mirrors the
+ * booking rules: paid never regresses to failed (a late FAILED attempt after a
+ * successful one, or after the owner confirmed an offline payment, is ignored),
+ * and only a refund moves a paid order on. `unknown` behaves like `pending`.
+ */
+const ORDER_TRANSITIONS: Record<string, readonly string[]> = {
+  unknown: ["paid", "failed"],
+  pending: ["paid", "failed"],
+  failed: ["paid"],
+  paid: ["refunded"],
+  refunded: [],
+};
+
+/** The provider-written failure result that replayUnmatchedEvents retries. */
+export const ORDER_RETRY_RESULT = "error:order_update_failed";
 
 /**
  * Applies a provider status to a Pic-Time order's payment_state. Only paid /
- * failed / refunded flip the state (the order's payment_state enum has no
- * disputed or cancelled); a dispute or cancellation is recorded in metadata
- * only. On the first transition to paid, enqueues the owner's [Orders]
- * confirmation — an owner notice, never a message to the customer. Idempotent:
- * a repeat of the same terminal state is reported unchanged.
+ * failed / refunded can change it (the order enum has no disputed or
+ * cancelled); a dispute or cancellation is recorded in metadata only. The
+ * update is conditional on the state it was read in, so a concurrent writer
+ * (the owner confirming, another event) is never overwritten. The buyer's own
+ * reported state (payment_reported_state) is left as Pic-Time sent it; the
+ * provider's verdict goes in metadata. On the first transition to paid the
+ * owner's [Orders] confirmation is enqueued — an owner notice, never the buyer.
  */
 async function applyStatusToOrder(order: PhotoOrderRow, mapping: Extract<StatusMapping, { kind: "apply" }>, ctx: ApplyContext, deps: WebhookDeps): Promise<OrderApplyOutcome> {
   const now = deps.now();
@@ -334,30 +353,43 @@ async function applyStatusToOrder(order: PhotoOrderRow, mapping: Extract<StatusM
     return { result: "unchanged", detail: `order_${mapping.status}` };
   }
   if (order.payment_state === nextState) return { result: "unchanged", detail: `already_${nextState}` };
+  if (!(ORDER_TRANSITIONS[order.payment_state] ?? []).includes(nextState)) {
+    deps.log.warn("payments.order_illegal_transition", { orderId: order.id, from: order.payment_state, to: nextState, source: ctx.source });
+    return { result: "ignored_transition", detail: `${order.payment_state}->${nextState}` };
+  }
 
   columns.payment_state = nextState;
-  columns.payment_reported_state = nextState;
   let delivery: Database["public"]["Tables"]["photo_notification_deliveries"]["Insert"] | null = null;
   if (mapping.status === "paid") {
+    // payment_confirmed_by is a user id (uuid) for owner confirmations; a
+    // provider confirmation records its source in metadata instead.
     columns.paid_at = now.toISOString();
     columns.payment_confirmed_at = now.toISOString();
-    columns.payment_confirmed_by = MYFATOORAH_PROVIDER;
+    columns.metadata = { ...metadata, payment_last_event: lastEvent, payment_confirmed_source: MYFATOORAH_PROVIDER } as Json;
     const amount = `${Number(mapping.amount ?? order.amount_qr).toFixed(2)} ${mapping.currency ?? order.currency}`;
+    const cancelledNote = order.status === "cancelled" ? "\n⚠ This order was marked cancelled — the buyer paid its invoice anyway." : "";
     delivery = deliveryInsert({
       ownerId: order.owner_id,
       alertKey: `order-payment:${order.id}:paid`,
       kind: "PAYMENT_CONFIRMED",
-      text: `<b>Payment confirmed — ${escapeHtml(order.customer_name)}</b>\n${escapeHtml(amount)}${order.gallery_name ? ` · ${escapeHtml(order.gallery_name)}` : ""}`,
+      text: `<b>Payment confirmed — ${escapeHtml(order.customer_name)}</b>\n${escapeHtml(amount)}${order.gallery_name ? ` · ${escapeHtml(order.gallery_name)}` : ""}${cancelledNote}`,
       category: "orders",
       now,
     });
   }
 
-  const { error } = await deps.supabase.from("photo_orders").update(columns).eq("id", order.id).eq("owner_id", order.owner_id);
+  const { data: updated, error } = await deps.supabase
+    .from("photo_orders")
+    .update(columns)
+    .eq("id", order.id)
+    .eq("owner_id", order.owner_id)
+    .eq("payment_state", order.payment_state)
+    .select("id");
   if (error) {
     deps.log.error("payments.order_update_failed", { orderId: order.id, error: error.message });
     return { result: "error", detail: "order_update_failed" };
   }
+  if (!updated?.length) return { result: "ignored_transition", detail: "concurrent_update" };
   if (delivery) {
     const { error: dErr } = await deps.supabase.from("photo_notification_deliveries").insert(delivery);
     if (dErr) deps.log.warn("payments.order_confirm_enqueue_failed", { orderId: order.id, error: dErr.message });
@@ -465,7 +497,9 @@ export async function processWebhook(event: WebhookEvent, deps: WebhookDeps): Pr
 
 /**
  * Re-applies verified events that arrived before their booking existed
- * (processing_result = booking_not_found). Bounded; safe to repeat.
+ * (processing_result = booking_not_found), and events whose order update
+ * failed transiently (ORDER_RETRY_RESULT) — a redelivery of those is a
+ * duplicate, so this is their only retry path. Bounded; safe to repeat.
  */
 export async function replayUnmatchedEvents(deps: WebhookDeps, limit = 50): Promise<{ scanned: number; applied: number; abandoned: number }> {
   const floor = new Date(deps.now().getTime() - MAX_PENDING_AGE_MINUTES * 60_000).toISOString();
@@ -477,7 +511,7 @@ export async function replayUnmatchedEvents(deps: WebhookDeps, limit = 50): Prom
     .update({ processing_result: "abandoned", processed_at: deps.now().toISOString() })
     .eq("provider", MYFATOORAH_PROVIDER)
     .eq("signature_valid", true)
-    .eq("processing_result", "booking_not_found")
+    .in("processing_result", ["booking_not_found", ORDER_RETRY_RESULT])
     .lte("received_at", floor)
     .select("id");
   if (retireError) deps.log.warn("payments.abandon_failed", { error: retireError.message });
@@ -488,7 +522,7 @@ export async function replayUnmatchedEvents(deps: WebhookDeps, limit = 50): Prom
     .select("*")
     .eq("provider", MYFATOORAH_PROVIDER)
     .eq("signature_valid", true)
-    .eq("processing_result", "booking_not_found")
+    .in("processing_result", ["booking_not_found", ORDER_RETRY_RESULT])
     .gt("received_at", floor)
     .order("received_at", { ascending: true })
     .limit(limit);

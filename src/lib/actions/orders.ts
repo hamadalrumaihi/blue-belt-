@@ -64,7 +64,7 @@ export async function markOrderFulfilled(orderId: string, fulfilled = true): Pro
   return { ok: true };
 }
 
-export type InvoiceActionResult = { ok: true; paymentUrl: string; alreadyInvoiced?: boolean } | { ok: false; error: string };
+export type InvoiceActionResult = { ok: true; paymentUrl: string | null; alreadyInvoiced?: boolean } | { ok: false; error: string };
 
 /**
  * Creates a MyFatoorah payment invoice for an unpaid order (option b, manual).
@@ -89,6 +89,7 @@ export async function requestOrderInvoice(orderId: string): Promise<InvoiceActio
       result.reason === "already_paid" ? "This order is already paid." :
       result.reason === "cancelled" ? "This order is cancelled." :
       result.reason === "no_amount" ? "This order has no amount to invoice." :
+      result.reason === "in_progress" ? "An invoice for this order is already being created. Refresh in a moment." :
       "The payment provider could not create the invoice. Try again shortly.";
     return { ok: false, error: message };
   }
