@@ -68,7 +68,6 @@ export default async function HomePage() {
               </Link>
             </div>
             <ul className="mt-8 flex flex-wrap gap-x-6 gap-y-2 text-sm text-white/60">
-              <li className="inline-flex items-center gap-2"><CheckIcon size={16} className="text-bright" /> No payment taken online</li>
               <li className="inline-flex items-center gap-2"><CheckIcon size={16} className="text-bright" /> Confirmed within 24 hours</li>
               <li className="inline-flex items-center gap-2"><CheckIcon size={16} className="text-bright" /> Galleries via Pic-Time</li>
             </ul>
