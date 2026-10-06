@@ -1,7 +1,8 @@
 import { verifyCronSecret } from "@/lib/cron-auth";
 import { NextResponse } from "next/server";
 import { requestLogger } from "@/lib/log";
-import { getPaymentsConfig, isPaymentsEnabled } from "@/lib/payments/config";
+import { getPaymentsConfig, isAutoInvoiceEnabled, isPaymentsEnabled } from "@/lib/payments/config";
+import { autoInvoiceOrders } from "@/lib/payments/invoicing";
 import { createMyFatoorahClient } from "@/lib/payments/myfatoorah/client";
 import { reconcilePendingBookings, replayUnmatchedEvents } from "@/lib/payments/myfatoorah/webhook";
 import { rateLimit, rateLimitHeaders, RULES } from "@/lib/rate-limit";
@@ -38,13 +39,22 @@ export async function POST(request: Request) {
   const started = Date.now();
   const replay = await replayUnmatchedEvents(deps);
   let reconcile: { enabled: boolean; scanned: number; changed: number } = { enabled: false, scanned: 0, changed: 0 };
-  if (process.env.PAYMENTS_RECONCILE_ENABLED === "1") {
+  let autoInvoice: { enabled: boolean; scanned: number; invoiced: number; failed: number } = { enabled: false, scanned: 0, invoiced: 0, failed: 0 };
+  // The provider client is built once and shared by reconcile + auto-invoice;
+  // both are independently gated so no provider call happens before activation.
+  if (process.env.PAYMENTS_RECONCILE_ENABLED === "1" || isAutoInvoiceEnabled()) {
     const config = getPaymentsConfig();
     const provider = createMyFatoorahClient({ apiKey: config.apiKey, baseUrl: config.baseUrl });
-    const r = await reconcilePendingBookings(provider, deps, { olderThanMinutes: 10, limit: 25 });
-    reconcile = { enabled: true, scanned: r.scanned, changed: r.changed };
+    if (process.env.PAYMENTS_RECONCILE_ENABLED === "1") {
+      const r = await reconcilePendingBookings(provider, deps, { olderThanMinutes: 10, limit: 25 });
+      reconcile = { enabled: true, scanned: r.scanned, changed: r.changed };
+    }
+    if (isAutoInvoiceEnabled()) {
+      const a = await autoInvoiceOrders(provider, deps, { limit: 25 });
+      autoInvoice = { enabled: true, scanned: a.scanned, invoiced: a.invoiced, failed: a.failed };
+    }
   }
-  log.info("payments.confirmation_job", { replay, reconcile, durationMs: Date.now() - started });
-  return NextResponse.json({ ok: true, replay, reconcile, durationMs: Date.now() - started, checkedAt: new Date().toISOString() }, { headers });
+  log.info("payments.confirmation_job", { replay, reconcile, autoInvoice, durationMs: Date.now() - started });
+  return NextResponse.json({ ok: true, replay, reconcile, autoInvoice, durationMs: Date.now() - started, checkedAt: new Date().toISOString() }, { headers });
 }
 

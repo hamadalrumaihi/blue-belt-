@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { BrandHeader } from "@/components/BrandHeader";
 import { PageBody } from "@/components/AppShell";
 import { METHOD_LABEL, OFFLINE_METHODS, paymentLabel, type PaymentMethod, type PaymentState } from "@/lib/orders/contract";
+import { isPaymentsEnabled } from "@/lib/payments/config";
 import { getOrder } from "@/lib/orders/queries";
 import { formatDateTime } from "@/lib/time";
 import { isUuid } from "@/lib/validation";
@@ -47,7 +48,13 @@ export default async function OrderDetailPage({ params }: PageProps<"/orders/[id
           {offline && state !== "paid" && order.status !== "cancelled" && (
             <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">This order is paid outside Pic-Time ({METHOD_LABEL[method]}). The order notification is not proof of payment — confirm below once the money has arrived.</p>
           )}
-          <OrderActions orderId={order.id} paymentState={state} status={order.status} offline={offline} />
+          {order.payment_url && (
+            <p className="mt-3 rounded-lg bg-page px-3 py-2 text-xs text-muted">
+              Payment link: <a href={order.payment_url} target="_blank" rel="noopener noreferrer" className="break-all font-semibold text-primary underline">{order.payment_url}</a>
+              <span className="mt-1 block">Share this with the buyer yourself; it is not sent automatically.</span>
+            </p>
+          )}
+          <OrderActions orderId={order.id} paymentState={state} status={order.status} offline={offline} paymentsEnabled={isPaymentsEnabled()} hasInvoice={Boolean(order.provider_invoice_id)} />
         </section>
 
         <section className="card p-4">

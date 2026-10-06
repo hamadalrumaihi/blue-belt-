@@ -8,9 +8,10 @@ vi.mock("server-only", () => ({}));
 const db = new FakeSupabase();
 vi.mock("@/lib/supabase/service", () => ({ isServiceClientConfigured: () => true, createServiceClient: () => db.asClient() }));
 const getPaymentStatus = vi.hoisted(() => vi.fn());
+const createInvoice = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/payments/myfatoorah/client", async () => {
   const actual = await vi.importActual<typeof import("@/lib/payments/myfatoorah/client")>("@/lib/payments/myfatoorah/client");
-  return { ...actual, createMyFatoorahClient: () => ({ name: "MYFATOORAH", createInvoice: vi.fn(), getPaymentStatus }) };
+  return { ...actual, createMyFatoorahClient: () => ({ name: "MYFATOORAH", createInvoice, getPaymentStatus }) };
 });
 setLogSink(() => {});
 
@@ -35,11 +36,14 @@ describe("POST /api/cron/payments (confirmation job)", () => {
     vi.stubEnv("MYFATOORAH_API_KEY", "sk_test");
     vi.stubEnv("MYFATOORAH_WEBHOOK_SECRET", SECRET);
     vi.stubEnv("PAYMENTS_RECONCILE_ENABLED", "0");
+    vi.stubEnv("PAYMENTS_AUTO_INVOICE_ENABLED", "0");
     db.tables.photo_bookings = [];
     db.tables.photo_payment_events = [];
     db.tables.photo_payment_attempts = [];
     db.tables.photo_notification_deliveries = [];
+    db.tables.photo_orders = [];
     getPaymentStatus.mockReset();
+    createInvoice.mockReset();
   });
   afterEach(() => vi.unstubAllEnvs());
 
@@ -59,6 +63,23 @@ describe("POST /api/cron/payments (confirmation job)", () => {
     expect(body).toMatchObject({ ok: true, replay: { scanned: 1, applied: 1 }, reconcile: { enabled: false, scanned: 0 } });
     expect(db.tables.photo_bookings[0].status).toBe("paid");
     expect(getPaymentStatus).not.toHaveBeenCalled();
+  });
+
+  it("does NOT auto-invoice orders unless PAYMENTS_AUTO_INVOICE_ENABLED=1", async () => {
+    db.seed("photo_orders", [{ id: "o1", owner_id: "owner", amount_qr: 120, currency: "QAR", status: "placed", provider: null, provider_invoice_id: null, payment_url: null, payment_state: "pending", payment_method: "fawran", customer_name: "B", customer_email: "b@x.com", metadata: {}, external_ref: "o1", received_at: "2026-10-02T10:00:00.000Z" }]);
+    const body = await (await (await route()).POST(post())).json();
+    expect(body.autoInvoice).toMatchObject({ enabled: false });
+    expect(createInvoice).not.toHaveBeenCalled();
+  });
+
+  it("with PAYMENTS_AUTO_INVOICE_ENABLED=1 it invoices eligible unpaid offline orders", async () => {
+    vi.stubEnv("PAYMENTS_AUTO_INVOICE_ENABLED", "1");
+    db.seed("photo_orders", [{ id: "o1", owner_id: "owner", amount_qr: 120, currency: "QAR", status: "placed", provider: null, provider_invoice_id: null, payment_url: null, payment_state: "pending", payment_method: "fawran", customer_name: "B", customer_email: "b@x.com", metadata: {}, external_ref: "o1", received_at: "2026-10-02T10:00:00.000Z" }]);
+    createInvoice.mockResolvedValue({ ok: true, data: { invoiceId: "INV-A", paymentUrl: "https://pay.test/INV-A", customerReference: "o1", raw: {} } });
+    const body = await (await (await route()).POST(post())).json();
+    expect(body.autoInvoice).toMatchObject({ enabled: true, scanned: 1, invoiced: 1, failed: 0 });
+    expect(createInvoice).toHaveBeenCalledTimes(1);
+    expect(db.tables.photo_orders[0].provider_invoice_id).toBe("INV-A");
   });
 
   it("with PAYMENTS_RECONCILE_ENABLED=1 it asks the provider about old pending bookings", async () => {
