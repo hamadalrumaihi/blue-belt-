@@ -6,17 +6,18 @@ import { signOut } from "@/lib/actions/auth";
 import { cn } from "@/lib/utils";
 import { LogoutIcon } from "./icons";
 import { Logo } from "./Logo";
-import { isActivePath, SIDEBAR_ITEMS } from "./nav";
+import { isActivePath, navItemsFor, SIDEBAR_ITEMS } from "./nav";
 
-export function DesktopSidebar({ email }: { email: string | null }) {
+export function DesktopSidebar({ email, collaboratorOnly = false }: { email: string | null; collaboratorOnly?: boolean }) {
   const pathname = usePathname();
+  const items = navItemsFor(SIDEBAR_ITEMS, collaboratorOnly);
   return (
     <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col bg-navy text-white lg:flex">
       <div className="px-5 pb-4 pt-6">
         <Logo inverted caption size={44} />
       </div>
       <nav className="flex-1 space-y-1 px-3" aria-label="Main">
-        {SIDEBAR_ITEMS.map(({ href, label, icon: Icon }) => {
+        {items.map(({ href, label, icon: Icon }) => {
           const active = isActivePath(pathname, href);
           return (
             <Link

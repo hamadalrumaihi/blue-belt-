@@ -2,14 +2,14 @@ import type { ReactNode } from "react";
 import { DesktopSidebar } from "./DesktopSidebar";
 import { MobileBottomNav } from "./MobileBottomNav";
 
-export function AppShell({ email, children }: { email: string | null; children: ReactNode }) {
+export function AppShell({ email, collaboratorOnly = false, children }: { email: string | null; collaboratorOnly?: boolean; children: ReactNode }) {
   return (
     <div className="min-h-dvh bg-page">
-      <DesktopSidebar email={email} />
+      <DesktopSidebar email={email} collaboratorOnly={collaboratorOnly} />
       <div className="lg:pl-64">
         {children}
       </div>
-      <MobileBottomNav />
+      <MobileBottomNav collaboratorOnly={collaboratorOnly} />
     </div>
   );
 }
