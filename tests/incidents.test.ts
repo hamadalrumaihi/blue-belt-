@@ -61,10 +61,12 @@ describe("buildIncidentDrafts", () => {
     expect(d.retained).toBe(true); // at least one had retained matches
     expect(d.text).toContain("<b>Refresh blocked — 2 clients, AJP Qatar</b>");
     expect(d.text).toContain("Reason:");
-    expect(d.text).toContain("Last verified: 09:42."); // 06:42Z in Asia/Qatar (+3) = 09:42
+    expect(d.text).toContain("Last verified: 09:42 Qatar time."); // 06:42Z in Asia/Qatar (+3) = 09:42
+    expect(d.text).toContain("does not try to get past it");
     expect(d.text).toContain("Previous schedule retained.");
     expect(d.text).toContain("Action:");
     expect(d.text).toContain(`Open: ${APP}/events/${EVENT}`);
+    expect(d.text).toContain(`Mark it done: ${APP}/issues`);
     expect(d.text).toMatch(/Ref: [0-9a-f]{8}/);
   });
 

@@ -4,7 +4,9 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { createLinkCode, disableTelegram, enableTelegram, saveTelegramSubscription } from "@/lib/actions/telegram";
 import { TELEGRAM_ALERT_KINDS, TELEGRAM_KIND_LABELS, type TelegramAlertKind } from "@/lib/notifications/telegram/kinds";
+import type { DeliveryHealth } from "@/lib/notifications/telegram/health";
 import type { TelegramSettingsState } from "@/lib/notifications/telegram/settings";
+import { formatStamp } from "@/lib/time";
 import { cn } from "@/lib/utils";
 
 type Props = {
@@ -12,9 +14,19 @@ type Props = {
   configured: boolean;
   botUsername: string | null;
   state: TelegramSettingsState;
+  /** Recent delivery outcomes; null when not linked or not readable. */
+  health?: DeliveryHealth | null;
 };
 
-export function TelegramSettings({ configured, botUsername, state }: Props) {
+const HEALTH_TONE: Record<DeliveryHealth["verdict"], { label: string; tone: string }> = {
+  working: { label: "Working", tone: "border-success/30 bg-success-soft text-success" },
+  idle: { label: "No messages yet", tone: "border-line bg-page text-muted" },
+  failing: { label: "Problems", tone: "border-danger/30 bg-danger-soft text-danger" },
+  stuck: { label: "Messages waiting", tone: "border-amber-200 bg-amber-50 text-amber-800" },
+  blocked: { label: "Stopped by Telegram", tone: "border-danger/30 bg-danger-soft text-danger" },
+};
+
+export function TelegramSettings({ configured, botUsername, state, health = null }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -71,7 +83,19 @@ export function TelegramSettings({ configured, botUsername, state }: Props) {
         <p className="hint">Telegram alerts are off on this server. Set <code>TELEGRAM_ENABLED=1</code> and <code>TELEGRAM_BOT_TOKEN</code> (see <code>docs/telegram.md</code>) to turn them on.</p>
       ) : (
         <>
-          <p className="text-sm text-ink">{state.linked ? "Match alerts for your clients are sent to the linked Telegram chat whenever a refresh runs." : "Get match alerts in Telegram: link a chat once, then the bot messages you when a client is up."}</p>
+          <p className="text-sm text-ink">{state.linked ? "Match alerts for your clients are sent to the linked Telegram chat whenever a refresh runs." : "Get match alerts in Telegram: link a chat once, then the bot messages you when a client is up."} Blocked or failing checks are reported there too, with the reason and what to do next.</p>
+
+          {health && (
+            <div className={cn("rounded-xl border px-3 py-2.5", HEALTH_TONE[health.verdict].tone)} role="status">
+              <p className="text-xs font-bold uppercase tracking-wide">Delivery: {HEALTH_TONE[health.verdict].label}</p>
+              <p className="mt-1 text-sm text-ink">{health.summary}</p>
+              <dl className="mt-1.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs text-muted">
+                <dt>Last delivered</dt><dd className="text-ink">{health.lastSentAt ? formatStamp(health.lastSentAt) : "Never"}</dd>
+                {health.waiting > 0 && <><dt>Waiting</dt><dd className="text-ink">{health.waiting}</dd></>}
+                {health.lastError && <><dt>Last error</dt><dd className="break-words text-ink">{health.lastError}{health.lastErrorAt ? ` (${formatStamp(health.lastErrorAt)})` : ""}</dd></>}
+              </dl>
+            </div>
+          )}
 
           <div className="space-y-2">
             <div className="flex flex-col gap-2 sm:flex-row">
@@ -93,7 +117,7 @@ export function TelegramSettings({ configured, botUsername, state }: Props) {
                   <li>Send <code className="select-all font-semibold">/start {code.code}</code></li>
                   <li>Come back and tap “Check status”.</li>
                 </ol>
-                <p className="hint">Expires {new Date(code.expiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}. One use only.</p>
+                <p className="hint">Expires {formatStamp(code.expiresAt)}. One use only.</p>
               </div>
             ) : null}
           </div>

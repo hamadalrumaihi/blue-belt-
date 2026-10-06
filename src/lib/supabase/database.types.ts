@@ -207,6 +207,8 @@ export type PhotoIncidentRow = {
   last_seen_at: string;
   resolved_at: string | null;
   occurrences: number;
+  /** Owner marked it "Done" in the app (20261006120000). Absent until that migration is applied. */
+  acknowledged_at?: string | null;
   created_at: string;
   updated_at: string;
 };

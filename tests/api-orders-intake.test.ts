@@ -24,7 +24,7 @@ function credential(kind: "orders" | "capture" = "orders"): PhotoCaptureCredenti
 }
 
 /** Service client stand-in whose photo_record_order remembers (owner, source, ref). */
-function fakeService() {
+function fakeService(clients: Array<{ id: string; name: string; email: string | null; phone: string | null }> | "fail" = []) {
   const orders = new Map<string, { id: string; row: Record<string, unknown>; delivery: unknown }>();
   const rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
   const rpc = async (name: string, args: Record<string, unknown>) => {
@@ -37,7 +37,14 @@ function fakeService() {
     orders.set(key, { id, row: order, delivery: args.p_delivery });
     return { data: { ok: true, replayed: false, order_id: id }, error: null };
   };
-  return { client: { rpc, from: () => { throw new Error("no table access expected"); } }, orders, rpcCalls };
+  // Only the read-only client lookup touches a table; everything else goes through the RPC.
+  const from = (table: string) => {
+    if (table !== "photo_athletes") throw new Error(`no access to ${table} expected`);
+    const result = clients === "fail" ? { data: null, error: { message: "boom" } } : { data: clients, error: null };
+    const chain = { select: () => chain, eq: () => chain, limit: async () => result };
+    return chain;
+  };
+  return { client: { rpc, from }, orders, rpcCalls };
 }
 
 function post(body: string, auth: string | null = `Bearer ${TOKEN}`) {
@@ -113,5 +120,36 @@ describe("POST /api/orders/intake", () => {
     spoof.owner_id = "someone-else";
     await post(JSON.stringify(spoof));
     expect(fake.rpcCalls.at(-1)?.args.p_owner_id).toBe(OWNER);
+  });
+
+  it("for a new (non-client) buyer, puts an invoice draft for the owner in the [Orders] message — never to the buyer", async () => {
+    vi.stubEnv("NEXT_PUBLIC_SITE_URL", "https://app.test");
+    const res = await post(fixture("pictime-fawran-pending"));
+    expect(res.status).toBe(201);
+    const text = String(((fake.rpcCalls[0].args.p_delivery as Record<string, unknown>).payload as Record<string, unknown>).text);
+    expect(text).toContain("Buyer: new customer — invoice draft below.");
+    expect(text).toContain("Invoice draft (not sent to the buyer)");
+    expect(text).toContain("Total due:");
+    expect(text).toMatch(/Review, copy and send it yourself: https:\/\/app\.test\/orders\?ref=/);
+    const order = fake.rpcCalls[0].args.p_order as Record<string, unknown>;
+    expect(order.metadata).toMatchObject({ client_check: "done", client_match: null });
+  });
+
+  it("names an existing client instead of drafting an invoice, and survives a failed client lookup", async () => {
+    const body = JSON.parse(fixture("pictime-fawran-pending")) as Record<string, unknown>;
+    // Same number written differently (+974 5555 0101 vs 0097455550101).
+    fake = fakeService([{ id: "ath-1", name: "Known Client", email: null, phone: "0097455550101" }]);
+    serviceMock.mockReturnValue(fake.client as never);
+    await post(JSON.stringify(body));
+    const text = String(((fake.rpcCalls[0].args.p_delivery as Record<string, unknown>).payload as Record<string, unknown>).text);
+    expect(text).toContain("existing client (Known Client, matched by phone)");
+    expect(text).not.toContain("Invoice draft");
+
+    fake = fakeService("fail");
+    serviceMock.mockReturnValue(fake.client as never);
+    const res = await post(JSON.stringify({ ...body, externalRef: "PT-OTHER-1" }));
+    expect(res.status).toBe(201);
+    const text2 = String(((fake.rpcCalls[0].args.p_delivery as Record<string, unknown>).payload as Record<string, unknown>).text);
+    expect(text2).toContain("could not check your client list");
   });
 });

@@ -3,7 +3,8 @@
 import Link from "next/link";
 import type { AthleteEta } from "@/lib/eta";
 import { formatCountdown } from "@/lib/eta";
-import { formatTime } from "@/lib/time";
+import { sourceHealth } from "@/lib/source-health";
+import { formatStamp, formatTime } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { PlatformBadge } from "./PlatformBadge";
 import { RefreshButton } from "./RefreshButton";
@@ -19,6 +20,8 @@ type Props = {
   /** Message explaining why there is no match (schedule not published etc). */
   note?: string | null;
   sticky?: boolean;
+  /** Client clock; enables the "schedule not confirmed" warning. */
+  now?: Date | null;
 };
 
 const BG: Record<string, string> = {
@@ -30,7 +33,7 @@ const BG: Record<string, string> = {
 };
 
 /** The single most important element on the dashboard: who is next, where, how soon. */
-export function NextClientCard({ entry, timezone, onRefresh, refreshing, note, sticky = true }: Props) {
+export function NextClientCard({ entry, timezone, onRefresh, refreshing, note, sticky = true, now = null }: Props) {
   if (!entry || !entry.match) {
     return (
       <section aria-label="Next client" className={cn(sticky && "sticky top-14 z-10")}>
@@ -59,6 +62,8 @@ export function NextClientCard({ entry, timezone, onRefresh, refreshing, note, s
   const { athlete, match, eta } = entry;
   const gradient = BG[eta.bucket] ?? "from-primary to-primary-700";
   const time = match.estimated_at ?? match.scheduled_at;
+  const health = now ? sourceHealth(athlete, now, true) : null;
+  const unconfirmed = health && (health.failedLast || health.attention === "stale");
 
   return (
     <section aria-label="Next client" className={cn(sticky && "sticky top-14 z-10")}>
@@ -99,6 +104,12 @@ export function NextClientCard({ entry, timezone, onRefresh, refreshing, note, s
             <p className="font-bold tabular-nums">{formatTime(match.scheduled_at, timezone)} · {formatTime(match.estimated_at, timezone)}</p>
           </div>
         </div>
+
+        {unconfirmed && now && (
+          <p className="mt-4 rounded-xl bg-navy/40 px-3 py-2 text-xs font-semibold text-white ring-1 ring-white/30">
+            {health.label}: {health.failedLast ? "the last check failed. " : ""}Schedule last confirmed {health.lastSuccessAt ? formatStamp(health.lastSuccessAt, timezone, now) : "never"}. Check the source before relying on it.
+          </p>
+        )}
 
         <div className="mt-4 flex items-center gap-2">
           <SourceLinkButton url={match.source_url ?? athlete.source_url} platform={athlete.platform} variant="inverted" className="flex-1" />

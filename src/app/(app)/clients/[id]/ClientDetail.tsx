@@ -12,12 +12,13 @@ import { SourceLinkButton } from "@/components/SourceLinkButton";
 import { StatusBadge } from "@/components/StatusBadge";
 import { EditIcon, MailIcon, PhoneIcon } from "@/components/icons";
 import { ManualCorrection } from "@/components/ManualCorrection";
+import { PauseWatchButton } from "@/components/PauseWatchButton";
 import { SourceHealthBadge } from "@/components/SourceHealthBadge";
 import { isWatchFailure, watchStateCopy } from "@/components/watchStateCopy";
 import { useLiveAthletes } from "@/hooks/useLiveAthletes";
 import { deleteAthlete, deleteMatchDataForAthlete } from "@/lib/actions/danger";
 import { computeEta, STATUS_LABEL, matchStatusOf } from "@/lib/eta";
-import { formatDateTime, formatTime } from "@/lib/time";
+import { formatDateTime, formatStamp, formatTime, zoneLabel } from "@/lib/time";
 import type { AthleteWithMatches, HistoryEntry } from "@/lib/types";
 import { cn, initials } from "@/lib/utils";
 
@@ -65,17 +66,17 @@ export function ClientDetail({ athlete: initialAthlete, history: initialHistory 
                 <div><dt className="eyebrow">Estimated</dt><dd className="text-lg font-black tabular-nums">{formatTime(current.estimated_at, tz)}</dd></div>
                 <div><dt className="eyebrow">Match #</dt><dd className="text-lg font-black tabular-nums">{snapshotNumber(current) ?? current.match_order ?? "—"}</dd></div>
               </dl>
-              <p className="mt-2 text-xs text-muted">Status: {STATUS_LABEL[matchStatusOf(current)]} · Checked {formatTime(state?.checkedAt ?? current.last_checked_at, tz)}</p>
+              <p className="mt-2 text-xs text-muted">Status: {STATUS_LABEL[matchStatusOf(current)]} · Times in {zoneLabel(tz)}{athlete.last_success_at && now ? ` · Confirmed ${formatStamp(athlete.last_success_at, tz, now)}` : ""}</p>
             </>
           ) : (
             <p className={cn("mt-2 rounded-xl px-3 py-2 text-sm font-semibold", failed ? "bg-danger-soft text-danger" : "bg-page text-muted")}>{copy}</p>
           )}
-          {current && failed && <p className="mt-2 text-xs font-semibold text-danger">{copy} Showing the last known schedule.</p>}
           {current?.identity_confidence === "ambiguous" && (
             <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">Needs review: this match looked like several stored matches, so it was kept as a separate row instead of merged.</p>
           )}
           <div className="mt-3">
-            <SourceHealthBadge athlete={{ ...athlete, last_watch_status: status, last_watch_code: code }} now={now} hasMatches={athlete.matches.length > 0} showDetail />
+            {/* With no match the box above already states the failure; the badge detail would repeat it. */}
+            <SourceHealthBadge athlete={{ ...athlete, last_watch_status: status, last_watch_code: code }} now={now} hasMatches={athlete.matches.length > 0} showDetail={Boolean(current) || !failed} />
           </div>
           {current && <ManualCorrection match={current} timezone={tz} />}
           <div className="mt-4 flex flex-wrap gap-2">
@@ -115,13 +116,13 @@ export function ClientDetail({ athlete: initialAthlete, history: initialHistory 
             <Row label="Source URL" value={athlete.source_url ? <a href={athlete.source_url} target="_blank" rel="noopener noreferrer" className="break-all text-primary hover:underline">{athlete.source_url}</a> : null} />
             <Row label="Notes" value={athlete.notes} />
             <Row label="Internal notes" value={athlete.internal_notes} />
-            <Row label="Tracking" value={athlete.active ? "Active" : "Paused"} />
+            <Row label="Tracking" value={athlete.active ? "Active — checked automatically" : "Paused — not checked automatically"} />
           </dl>
           <details className="mt-4 rounded-xl border border-line px-3 py-2 text-xs text-muted">
             <summary className="cursor-pointer font-semibold text-ink">Source diagnostics</summary>
             <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
-              <dt>Last attempt</dt><dd className="text-ink">{formatDateTime(athlete.last_attempt_at, tz)}</dd>
-              <dt>Last success</dt><dd className="text-ink">{formatDateTime(athlete.last_success_at, tz)}</dd>
+              <dt>Last attempt</dt><dd className="text-ink">{formatDateTime(athlete.last_attempt_at, tz)} {athlete.last_attempt_at ? zoneLabel(tz) : ""}</dd>
+              <dt>Last success</dt><dd className="text-ink">{formatDateTime(athlete.last_success_at, tz)} {athlete.last_success_at ? zoneLabel(tz) : ""}</dd>
               <dt>Consecutive failures</dt><dd className="text-ink">{athlete.consecutive_failures ?? 0}</dd>
               <dt>Last status</dt><dd className="text-ink">{status ?? "—"}{code ? ` · ${code}` : ""}</dd>
               <dt>Strategy</dt><dd className="text-ink">{athlete.last_watch_strategy ?? "—"}</dd>
@@ -130,8 +131,9 @@ export function ClientDetail({ athlete: initialAthlete, history: initialHistory 
               <dt>Final URL</dt><dd className="break-all text-ink">{athlete.last_final_url ?? "—"}</dd>
             </dl>
           </details>
-          <div className="mt-4">
+          <div className="mt-4 grid gap-2 sm:grid-cols-2 sm:items-start">
             <Link href={`/clients/${athlete.id}/edit`} className="btn-secondary w-full"><EditIcon size={16} /> Edit Client</Link>
+            <PauseWatchButton athleteId={athlete.id} active={athlete.active} />
           </div>
         </section>
       </div>

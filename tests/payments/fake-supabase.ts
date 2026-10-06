@@ -6,6 +6,7 @@
  *   from(t).select(cols).eq(..).eq(..).maybeSingle()
  *   from(t).update(patch).eq(..)[.eq(..)][.select(cols)]
  *   from(t).select().in(..).is(..).lt(..).not(..).order(..).limit(n)
+ *   from(t).upsert(rows, { ignoreDuplicates: true })   (insert-or-skip on the unique keys)
  *   rpc("photo_apply_payment_transition", args)   (emulated in-process, sequentially)
  * Enforces the partial unique indexes from the migration so idempotency can
  * be tested the way Postgres would behave (error code 23505).
@@ -15,13 +16,14 @@ import type { Database } from "@/lib/supabase/database.types";
 
 type Row = Record<string, unknown>;
 type Filter = (row: Row) => boolean;
-type Op = "select" | "insert" | "update";
+type Op = "select" | "insert" | "update" | "upsert";
 
 const UNIQUE: Record<string, string[][]> = {
   photo_payment_events: [["provider", "provider_event_id"]],
   photo_payment_attempts: [["provider", "provider_payment_id"]],
   photo_bookings: [["provider", "provider_invoice_id"]],
   photo_notification_deliveries: [["owner_id", "channel", "alert_key"]],
+  photo_incidents: [["owner_id", "incident_key"]],
 };
 
 export type FakeCall = { table: string; op: Op; payload?: Row; filters: number };
@@ -82,6 +84,7 @@ export class FakeSupabase {
 class FakeQuery {
   private op: Op = "select";
   private payload: Row | null = null;
+  private upsertRows: Row[] = [];
   private filters: Filter[] = [];
   private returning = false;
   private mode: "many" | "single" | "maybeSingle" = "many";
@@ -96,6 +99,13 @@ class FakeQuery {
   insert(row: Row) {
     this.op = "insert";
     this.payload = row;
+    return this;
+  }
+  /** Only `ignoreDuplicates: true` is modelled: rows that clash on a unique key are skipped. */
+  upsert(rows: Row | Row[], opts?: { onConflict?: string; ignoreDuplicates?: boolean }) {
+    if (!opts?.ignoreDuplicates) throw new Error("FakeSupabase.upsert only models ignoreDuplicates: true");
+    this.op = "upsert";
+    this.upsertRows = Array.isArray(rows) ? rows : [rows];
     return this;
   }
   update(patch: Row) {
@@ -174,6 +184,14 @@ class FakeQuery {
   private exec() {
     this.db.calls.push({ table: this.table, op: this.op, payload: this.payload ?? undefined, filters: this.filters.length });
     const rows = this.db.tables[this.table];
+    if (this.op === "upsert") {
+      for (const input of this.upsertRows) {
+        const row = { id: this.db.nextId(), ...input } as Row;
+        const clash = (UNIQUE[this.table] ?? []).some((cols) => rows.some((r) => cols.every((c) => r[c] === row[c])));
+        if (!clash) rows.push(row);
+      }
+      return { data: null, error: null };
+    }
     if (this.op === "insert") {
       const row = { id: this.db.nextId(), attempts: 1, ...this.payload } as Row;
       for (const cols of UNIQUE[this.table] ?? []) {

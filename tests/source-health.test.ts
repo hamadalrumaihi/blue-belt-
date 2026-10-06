@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AGING_MS, STALE_MS, SUCCESS_STATUSES, describeFailure, isWatchFailure, sourceHealth } from "@/lib/source-health";
+import { AGING_MS, STALE_MS, SUCCESS_STATUSES, describeFailure, isWatchFailure, needsAttention, sourceHealth } from "@/lib/source-health";
 
 const NOW = new Date("2026-03-14T07:00:00.000Z");
 const ago = (ms: number) => new Date(NOW.getTime() - ms).toISOString();
@@ -17,12 +17,12 @@ describe("sourceHealth", () => {
   });
 
   it("fresh / aging / stale by the age of the last success", () => {
-    expect(sourceHealth({ last_success_at: ago(30_000), last_watch_status: "OK" }, NOW, true)).toMatchObject({ freshness: "fresh", label: "Live", detail: "Updated 30s ago." });
+    expect(sourceHealth({ last_success_at: ago(30_000), last_watch_status: "OK" }, NOW, true)).toMatchObject({ freshness: "fresh", label: "Live", detail: "Confirmed from the source 30s ago." });
     expect(sourceHealth({ last_success_at: ago(AGING_MS), last_watch_status: "OK" }, NOW, true).freshness).toBe("fresh");
-    expect(sourceHealth({ last_success_at: ago(AGING_MS + 1), last_watch_status: "OK" }, NOW, true)).toMatchObject({ freshness: "aging", label: "Aging", detail: "Updated 3 min ago." });
-    expect(sourceHealth({ last_success_at: ago(STALE_MS + 1), last_watch_status: "NO_MATCHES" }, NOW, false)).toMatchObject({ freshness: "stale", label: "Stale", detail: "Updated 10 min ago." });
-    expect(sourceHealth({ last_success_at: ago(3 * 3600_000), last_watch_status: "OK" }, NOW, true).detail).toBe("Updated 3h ago.");
-    expect(sourceHealth({ last_success_at: ago(49 * 3600_000), last_watch_status: "OK" }, NOW, true).detail).toBe("Updated 2d ago.");
+    expect(sourceHealth({ last_success_at: ago(AGING_MS + 1), last_watch_status: "OK" }, NOW, true)).toMatchObject({ freshness: "aging", label: "Aging", detail: "Confirmed from the source 3 min ago." });
+    expect(sourceHealth({ last_success_at: ago(STALE_MS + 1), last_watch_status: "NO_MATCHES" }, NOW, false)).toMatchObject({ freshness: "stale", label: "Stale", detail: "Confirmed from the source 10 min ago." });
+    expect(sourceHealth({ last_success_at: ago(3 * 3600_000), last_watch_status: "OK" }, NOW, true).detail).toBe("Confirmed from the source 3h ago.");
+    expect(sourceHealth({ last_success_at: ago(49 * 3600_000), last_watch_status: "OK" }, NOW, true).detail).toBe("Confirmed from the source 2d ago.");
   });
 
   it("derives last success from last_checked_at when the last status was a success", () => {
@@ -35,8 +35,9 @@ describe("sourceHealth", () => {
   it("showingLastKnown when the last attempt failed but older rows exist", () => {
     const input = { last_success_at: ago(2 * 60_000), last_attempt_at: ago(5_000), last_watch_status: "REQUIRES_BROWSER_WATCHER", last_watch_code: "BROWSER_WORKER_NOT_CONFIGURED", consecutive_failures: 2 };
     const withRows = sourceHealth(input, NOW, true);
-    expect(withRows).toMatchObject({ freshness: "fresh", showingLastKnown: true, label: "Live", consecutiveFailures: 2 });
-    expect(withRows.detail).toBe("The page needs a browser and the browser worker is not configured. Showing last good data from 2 min ago.");
+    // A failed check never keeps a "Live" badge: the kept rows are marked stale.
+    expect(withRows).toMatchObject({ freshness: "stale", attention: "failing", failedLast: true, showingLastKnown: true, label: "Stale", consecutiveFailures: 2 });
+    expect(withRows.detail).toBe("The page needs a browser and the browser worker is not configured. Showing the last confirmed schedule from 2 min ago.");
     expect(sourceHealth(input, NOW, false).showingLastKnown).toBe(false);
   });
 
@@ -56,7 +57,10 @@ describe("isWatchFailure / describeFailure", () => {
   });
 
   it("maps codes to copy, using the message where it adds detail", () => {
-    expect(describeFailure("BROWSER_CHALLENGE")).toMatch(/CHALLENGE_NOT_CLEARED/);
+    expect(describeFailure("BROWSER_CHALLENGE")).toMatch(/anti-bot check.*automatic check stopped.*Import page/);
+    expect(describeFailure("BROWSER_CHALLENGE", "interactive turnstile")).toMatch(/human check \(CAPTCHA\)/);
+    // Internal worker codes never reach the photographer.
+    expect(describeFailure("BROWSER_CHALLENGE")).not.toMatch(/CHALLENGE_NOT_CLEARED/);
     expect(describeFailure("BROWSER_JS_SHELL")).toMatch(/needs a browser/);
     expect(describeFailure("BROWSER_WORKER_UNREACHABLE")).toMatch(/unreachable/);
     expect(describeFailure("BROWSER_WORKER_TIMEOUT")).toMatch(/timed out/);
@@ -79,5 +83,24 @@ describe("isWatchFailure / describeFailure", () => {
     expect(describeFailure("REFRESH_ERROR")).toBe("Refresh failed.");
     expect(describeFailure(null, "custom")).toBe("custom");
     expect(describeFailure(undefined)).toBe("Live schedule unavailable. Open source page.");
+  });
+});
+
+describe("attention states", () => {
+
+  it("separates a blocked source, a failing check, a missing athlete, stale data and unchecked watches", () => {
+    const blocked = sourceHealth({ last_success_at: ago(60_000), last_watch_status: "REQUIRES_BROWSER_WATCHER", last_watch_code: "BROWSER_CHALLENGE" }, NOW, true);
+    expect(blocked).toMatchObject({ attention: "blocked", label: "Blocked", freshness: "stale" });
+    expect(sourceHealth({ last_watch_status: "FETCH_ERROR", last_watch_code: "SOURCE_TIMEOUT" }, NOW, false)).toMatchObject({ attention: "failing", label: "Unavailable" });
+    const missing = sourceHealth({ last_success_at: ago(30_000), last_watch_status: "ATHLETE_NOT_FOUND" }, NOW, false);
+    expect(missing).toMatchObject({ attention: "not_found", label: "Not found", failedLast: false });
+    expect(sourceHealth({ last_success_at: ago(STALE_MS + 1), last_watch_status: "OK" }, NOW, true)).toMatchObject({ attention: "stale", label: "Stale" });
+    expect(sourceHealth({}, NOW, false).attention).toBe("unchecked");
+    expect(sourceHealth({ last_success_at: ago(30_000), last_watch_status: "OK" }, NOW, true).attention).toBe("ok");
+  });
+
+  it("needsAttention collects everything except ok and unchecked", () => {
+    expect((["ok", "unchecked"] as const).map((attention) => needsAttention({ attention }))).toEqual([false, false]);
+    expect((["stale", "failing", "blocked", "not_found"] as const).every((attention) => needsAttention({ attention }))).toBe(true);
   });
 });

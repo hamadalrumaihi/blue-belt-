@@ -13,6 +13,7 @@ import { EditIcon, EyeIcon, MapPinIcon, PlusIcon, UsersIcon } from "@/components
 import { rankAthletes } from "@/lib/eta";
 import { getEvent, listAthletes, listHistory } from "@/lib/queries";
 import { formatEventDate } from "@/lib/time";
+import { PauseWatchButton } from "@/components/PauseWatchButton";
 import { EventClientsList } from "./EventClientsList";
 import { EventDangerZone } from "./EventDangerZone";
 import { EventTeam } from "./EventTeam";
@@ -46,6 +47,7 @@ export default async function EventDetailPage({ params }: PageProps<"/events/[id
               <div className="flex flex-wrap items-center gap-2">
                 <PlatformBadge platform={event.platform} />
                 <LiveIndicator status={eventStatus(event)} />
+                {!event.active && <span className="rounded-full border border-line bg-page px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted">Paused — not checked</span>}
               </div>
               <h2 className="mt-2 text-xl font-extrabold leading-snug text-ink">{event.name}</h2>
               <p className="mt-1 flex items-center gap-1 text-sm text-muted"><MapPinIcon size={14} /> {[event.venue, event.country].filter(Boolean).join(", ") || "Venue TBC"}</p>
@@ -60,6 +62,7 @@ export default async function EventDetailPage({ params }: PageProps<"/events/[id
                 <Link href={`/clients/new?event=${event.id}`} className="btn-secondary"><PlusIcon size={18} /> Add client</Link>
                 {event.source_url && <SourceLinkButton url={event.source_url} platform={event.platform} label="Event page" />}
               </div>
+              <PauseWatchButton eventId={event.id} active={event.active} className="mt-4 max-w-sm border-t border-line pt-3" />
             </section>
 
             <section>

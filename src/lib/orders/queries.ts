@@ -1,5 +1,6 @@
 import "server-only";
 import type { PhotoOrderRow } from "@/lib/supabase/database.types";
+import type { ClientCandidate } from "./invoice-draft";
 import { createClient } from "@/lib/supabase/server";
 
 /**
@@ -35,4 +36,20 @@ export async function orderCounts(): Promise<{ total: number; needsConfirmation:
     supabase.from("photo_orders").select("id", { count: "exact", head: true }).in("payment_state", ["pending", "unknown", "failed"]).neq("status", "cancelled"),
   ]);
   return { total: total ?? 0, needsConfirmation: needs ?? 0 };
+}
+
+/** The owner's own clients' contact details, to tell a new buyer from an existing client. */
+export async function listClientContacts(): Promise<ClientCandidate[]> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
+  const { data } = await supabase.from("photo_athletes").select("id,name,email,phone").eq("owner_id", user.id).limit(5000);
+  return data ?? [];
+}
+
+/** Resolves a Pic-Time order reference (from a Telegram link) to the order id. */
+export async function findOrderIdByRef(ref: string): Promise<string | null> {
+  const supabase = await createClient();
+  const { data } = await supabase.from("photo_orders").select("id").eq("external_ref", ref.slice(0, 120)).order("created_at", { ascending: false }).limit(1);
+  return data?.[0]?.id ?? null;
 }

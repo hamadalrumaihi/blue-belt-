@@ -95,3 +95,6 @@ export const SwordsIcon = (p: IconProps) => (
 export const ReceiptIcon = (p: IconProps) => (
   <svg {...base(p)}><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z" /><path d="M9 8h6M9 12h6" /></svg>
 );
+export const CopyIcon = (p: IconProps) => (
+  <svg {...base(p)}><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" /></svg>
+);

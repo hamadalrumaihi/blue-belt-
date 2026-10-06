@@ -3,7 +3,7 @@ import Link from "next/link";
 import { BrandHeader } from "@/components/BrandHeader";
 import { PageBody } from "@/components/AppShell";
 import { Logo } from "@/components/Logo";
-import { ChevronRightIcon, EyeIcon, HistoryIcon, LogoutIcon, ReceiptIcon, SettingsIcon, ShieldIcon } from "@/components/icons";
+import { AlertIcon, ChevronRightIcon, EyeIcon, HistoryIcon, LogoutIcon, ReceiptIcon, SettingsIcon, ShieldIcon } from "@/components/icons";
 import { signOut } from "@/lib/actions/auth";
 import { resolveViewerMode } from "@/lib/collaborator";
 import { getUser } from "@/lib/supabase/server";
@@ -17,6 +17,7 @@ export default async function MorePage() {
   // collaborator-only account; Settings stays so they can manage their own
   // Telegram link. Keeps this list in step with the sidebar/bottom nav.
   const allItems = [
+    { href: "/issues", label: "Issues (watcher problems)", icon: AlertIcon, ownerOnly: true },
     { href: "/orders", label: "Orders (Pic-Time)", icon: ReceiptIcon, ownerOnly: true },
     { href: "/history", label: "Activity / change history", icon: HistoryIcon, ownerOnly: true },
     { href: "/import", label: "Import a page (CAPTCHA workaround)", icon: EyeIcon, ownerOnly: true },

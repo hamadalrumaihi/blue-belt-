@@ -16,12 +16,27 @@ export type HealthInput = {
 
 export type Freshness = "never" | "fresh" | "aging" | "stale";
 
+/**
+ * What the photographer should do about a watch, independent of colour:
+ *  - ok:        last read verified the source; nothing to do.
+ *  - stale:     last good read is old (auto-refresh off, or no checks lately).
+ *  - failing:   the latest check failed; older data (if any) is kept.
+ *  - blocked:   the source showed an anti-bot / human check; the watcher
+ *               stopped and never tries to get past it. Import by hand.
+ *  - not_found: the page was read, but the athlete is not on it.
+ *  - unchecked: never checked yet.
+ */
+export type WatchAttention = "ok" | "stale" | "failing" | "blocked" | "not_found" | "unchecked";
+
 export type SourceHealthView = {
   freshness: Freshness;
+  attention: WatchAttention;
   /** ISO of the last successful read, or null. */
   lastSuccessAt: string | null;
   lastAttemptAt: string | null;
   consecutiveFailures: number;
+  /** True when the latest attempt failed. */
+  failedLast: boolean;
   /** True when the last attempt failed but older data is still shown. */
   showingLastKnown: boolean;
   /** Short status for a badge. */
@@ -40,6 +55,11 @@ export function isWatchFailure(status: string | null | undefined): boolean {
   return Boolean(status) && !SUCCESS_STATUSES.has(status as string);
 }
 
+/** True for the states the "Needs attention" filter collects. */
+export function needsAttention(view: Pick<SourceHealthView, "attention">): boolean {
+  return view.attention !== "ok" && view.attention !== "unchecked";
+}
+
 export function sourceHealth(a: HealthInput, now: Date, hasMatches: boolean): SourceHealthView {
   const lastSuccessAt = a.last_success_at ?? (a.last_watch_status && SUCCESS_STATUSES.has(a.last_watch_status) ? a.last_checked_at ?? null : null);
   const lastAttemptAt = a.last_attempt_at ?? a.last_checked_at ?? null;
@@ -49,20 +69,37 @@ export function sourceHealth(a: HealthInput, now: Date, hasMatches: boolean): So
 
   let freshness: Freshness;
   if (ageMs === null || Number.isNaN(ageMs)) freshness = "never";
-  else if (ageMs > STALE_MS) freshness = "stale";
+  // A failed check means the shown data is no longer confirmed, however recent.
+  else if (ageMs > STALE_MS || failedLast) freshness = "stale";
   else if (ageMs > AGING_MS) freshness = "aging";
   else freshness = "fresh";
 
+  const blocked = failedLast && a.last_watch_code === "BROWSER_CHALLENGE";
+  const notFound = !failedLast && a.last_watch_status === "ATHLETE_NOT_FOUND";
+  const attention: WatchAttention =
+    blocked ? "blocked"
+    : failedLast ? "failing"
+    : notFound ? "not_found"
+    : freshness === "never" ? "unchecked"
+    : freshness === "stale" ? "stale"
+    : "ok";
+
   const showingLastKnown = failedLast && hasMatches;
   const label =
-    freshness === "never" ? (failedLast ? "Unavailable" : "Not checked") : freshness === "stale" ? "Stale" : freshness === "aging" ? "Aging" : "Live";
+    attention === "blocked" ? "Blocked"
+    : attention === "not_found" ? "Not found"
+    : freshness === "never" ? (failedLast ? "Unavailable" : "Not checked")
+    : freshness === "stale" ? "Stale"
+    : freshness === "aging" ? "Aging"
+    : "Live";
 
   let detail: string;
   if (freshness === "never") detail = failedLast ? describeFailure(a.last_watch_code, a.last_watch_message) : "Not checked yet. Tap refresh.";
-  else if (failedLast) detail = `${describeFailure(a.last_watch_code, a.last_watch_message)} Showing last good data from ${relative(ageMs!)}.`;
-  else detail = `Updated ${relative(ageMs!)}.`;
+  else if (failedLast) detail = `${describeFailure(a.last_watch_code, a.last_watch_message)} ${hasMatches ? "Showing the last confirmed schedule" : "Last confirmed read"} from ${relative(ageMs!)}.`;
+  else if (notFound) detail = `${describeFailure("ATHLETE_NOT_FOUND", a.last_watch_message)} Page read ${relative(ageMs!)}.`;
+  else detail = `Confirmed from the source ${relative(ageMs!)}.`;
 
-  return { freshness, lastSuccessAt, lastAttemptAt, consecutiveFailures, showingLastKnown, label, detail };
+  return { freshness, attention, lastSuccessAt, lastAttemptAt, consecutiveFailures, failedLast, showingLastKnown, label, detail };
 }
 
 function relative(ms: number): string {
@@ -81,8 +118,8 @@ export function describeFailure(code: string | null | undefined, message?: strin
   switch (code) {
     case "BROWSER_CHALLENGE":
       return /interactive|turnstile|captcha/i.test(message ?? "")
-        ? "The source asks for a human check (CAPTCHA) the browser worker cannot pass (CHALLENGE_NOT_CLEARED). Open the page yourself and use Import page."
-        : "The source is behind a bot challenge the browser worker could not clear (CHALLENGE_NOT_CLEARED). Open the page yourself and use Import page.";
+        ? "Blocked: the source asked for a human check (CAPTCHA), so the automatic check stopped. Open the source page in your browser, then use Import page."
+        : "Blocked: the source showed an anti-bot check (e.g. Cloudflare), so the automatic check stopped. Open the source page in your browser, then use Import page.";
     case "BROWSER_JS_SHELL":
       return "The page needs a browser to render its schedule.";
     case "BROWSER_WORKER_NOT_CONFIGURED":

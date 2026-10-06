@@ -8,6 +8,7 @@ import { CalendarIcon } from "@/components/icons";
 import { redirect } from "next/navigation";
 import { resolveViewerMode } from "@/lib/collaborator";
 import { listAthletes, listEvents, listHistory, pickCurrentEvent } from "@/lib/queries";
+import { OpenIssuesLink } from "@/components/OpenIssuesLink";
 import { DashboardLive } from "./DashboardLive";
 import { SeedFirstEventButton } from "./SeedFirstEventButton";
 
@@ -57,6 +58,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/dashbo
         actions={<EventSwitcher events={events} currentId={current.id} />}
       />
       <PageBody>
+        <OpenIssuesLink />
         <DashboardLive event={current} athletes={athletes} history={history} />
       </PageBody>
     </>

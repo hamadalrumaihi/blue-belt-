@@ -162,3 +162,41 @@ export function isValidTimeZone(tz: string): boolean {
     return false;
   }
 }
+
+/** Name of the zone times are shown in: "Qatar time" for the default zone, otherwise e.g. "GMT+4". */
+export function zoneLabel(timeZone: string = DEFAULT_TIMEZONE, at: Date = new Date()): string {
+  if (timeZone === DEFAULT_TIMEZONE) return "Qatar time";
+  if (!isValidTimeZone(timeZone)) return timeZone;
+  const part = new Intl.DateTimeFormat("en-GB", { timeZone, timeZoneName: "shortOffset" }).formatToParts(at).find((p) => p.type === "timeZoneName");
+  return part?.value ?? timeZone;
+}
+
+/**
+ * A timestamp that says which clock it is on: "14:05 Qatar time", with the
+ * date added ("5 Oct, 14:05 Qatar time") when it is not today in that zone.
+ */
+export function formatStamp(iso: string | null | undefined, timeZone: string = DEFAULT_TIMEZONE, now: Date = new Date()): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  const tz = isValidTimeZone(timeZone) ? timeZone : DEFAULT_TIMEZONE;
+  const same = (a: Date, b: Date) => {
+    const x = dateInZone(a, tz);
+    const y = dateInZone(b, tz);
+    return x.year === y.year && x.month === y.month && x.day === y.day;
+  };
+  const time = formatTime(iso, tz);
+  const day = same(d, now) ? "" : `${new Intl.DateTimeFormat("en-GB", { timeZone: tz, day: "numeric", month: "short" }).format(d)}, `;
+  return `${day}${time} ${zoneLabel(tz, d)}`;
+}
+
+/** "in 42s" / "in 3 min" / "now" for a countdown to `iso`. */
+export function formatIn(iso: string | null | undefined, now: Date = new Date()): string | null {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return null;
+  const s = Math.round((t - now.getTime()) / 1000);
+  if (s <= 1) return "now";
+  if (s < 60) return `in ${s}s`;
+  return `in ${Math.ceil(s / 60)} min`;
+}
