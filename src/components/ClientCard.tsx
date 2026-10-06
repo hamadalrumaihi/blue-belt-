@@ -18,10 +18,12 @@ type Props = {
   note?: string | null;
   className?: string;
   now?: Date | null;
+  /** Tracked by hand: no health badge, no failure styling. */
+  manual?: boolean;
 };
 
 /** Compact upcoming-client card for the dashboard list. */
-export function ClientCard({ entry, timezone, note, className, now = null }: Props) {
+export function ClientCard({ entry, timezone, note, className, now = null, manual = false }: Props) {
   const { athlete, match, eta } = entry;
   const time = match ? (match.estimated_at ?? match.scheduled_at) : null;
   return (
@@ -46,10 +48,10 @@ export function ClientCard({ entry, timezone, note, className, now = null }: Pro
             <span>{match.mat ?? "Mat —"}</span>
             <span className="tabular-nums">{formatTime(time, timezone)}</span>
             <EtaBadge eta={eta} />
-            <SourceHealthBadge athlete={athlete} now={now} hasMatches={athlete.matches.length > 0} />
+            {manual ? <span className="rounded-full bg-lightblue px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">By hand</span> : <SourceHealthBadge athlete={athlete} now={now} hasMatches={athlete.matches.length > 0} />}
           </span>
         ) : (
-          <span className={cn("mt-1.5 block text-xs font-semibold", isWatchFailure(athlete.last_watch_status) ? "text-danger" : "text-muted")}>{note ?? "Schedule not published yet."}</span>
+          <span className={cn("mt-1.5 block text-xs font-semibold", !manual && isWatchFailure(athlete.last_watch_status) ? "text-danger" : "text-muted")}>{note ?? "Schedule not published yet."}</span>
         )}
       </span>
       <span className="flex shrink-0 flex-col items-end gap-1.5">

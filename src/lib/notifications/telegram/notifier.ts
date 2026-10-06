@@ -70,7 +70,7 @@ export function planDeliveries(ctx: Pick<RefreshNotificationContext, "athletes" 
     const athlete = byId.get(r.athleteId);
     if (!athlete || !athlete.active) continue;
     const event = athlete.event_id ? events.get(athlete.event_id) ?? null : null;
-    withMatches.push({ ...athlete, matches: r.matches, event: event ? { id: event.id, name: event.name, timezone: event.timezone, platform: event.platform } : null });
+    withMatches.push({ ...athlete, matches: r.matches, event: event ? { id: event.id, name: event.name, timezone: event.timezone, platform: event.platform, tracking_mode: event.tracking_mode } : null });
     for (const c of r.changes) {
       const id = -(changes.size + 1);
       changes.set(id, c);

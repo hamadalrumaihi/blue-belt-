@@ -31,6 +31,7 @@ export function EventCard({ event, clients = 0, matches = 0, nextClient, classNa
           <div className="flex items-center gap-2">
             <PlatformBadge platform={event.platform} />
             <LiveIndicator status={status} />
+            {event.tracking_mode === "manual" && <span className="rounded-md bg-lightblue px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-primary">By hand</span>}
           </div>
           <h3 className="mt-2 line-clamp-2 text-base font-extrabold leading-snug text-ink">{event.name}</h3>
           <p className="mt-1 flex items-center gap-1 truncate text-xs text-muted">

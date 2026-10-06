@@ -16,7 +16,7 @@ import { watchStateCopy } from "@/components/watchStateCopy";
 import { useLiveAthletes } from "@/hooks/useLiveAthletes";
 import { buildAlerts } from "@/lib/alerts";
 import { formatEventDate } from "@/lib/time";
-import type { AthleteWithMatches, EventRow, HistoryEntry } from "@/lib/types";
+import { isManualEvent, type AthleteWithMatches, type EventRow, type HistoryEntry } from "@/lib/types";
 
 type Props = { event: EventRow; athletes: AthleteWithMatches[]; history: HistoryEntry[] };
 
@@ -26,6 +26,7 @@ export function DashboardLive({ event, athletes: initialAthletes, history: initi
     initialHistory,
   });
   const tz = event.timezone || settings.timezone;
+  const manual = isManualEvent(event);
 
   const active = useMemo(() => ranked.filter((r) => r.athlete.active), [ranked]);
   const next =active.find((r) => r.match && r.eta.bucket !== "COMPLETE" && r.eta.bucket !== "UNKNOWN") ?? active.find((r) => r.match) ?? active[0] ?? null;
@@ -51,6 +52,7 @@ export function DashboardLive({ event, athletes: initialAthletes, history: initi
           <div className="flex shrink-0 flex-col items-end gap-2">
             <LiveIndicator status={status} />
             <PlatformBadge platform={event.platform} />
+            {manual && <span className="rounded-full bg-lightblue px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">Tracked by hand</span>}
           </div>
         </div>
         {event.source_url && (
@@ -63,14 +65,14 @@ export function DashboardLive({ event, athletes: initialAthletes, history: initi
       <NextClientCard
         entry={next}
         timezone={tz}
-        onRefresh={next ? () => refresh([next.athlete.id]) : undefined}
+        onRefresh={next && !manual ? () => refresh([next.athlete.id]) : undefined}
         refreshing={next ? states[next.athlete.id]?.loading : false}
-        now={now}
-        note={next ? watchStateCopy(states[next.athlete.id]?.status ?? next.athlete.last_watch_status, states[next.athlete.id]?.message ?? next.athlete.last_watch_message, states[next.athlete.id]?.code ?? next.athlete.last_watch_code) : undefined}
+        now={manual ? null : now}
+        note={next ? (manual ? "No match entered yet. Add it from the client's page." : watchStateCopy(states[next.athlete.id]?.status ?? next.athlete.last_watch_status, states[next.athlete.id]?.message ?? next.athlete.last_watch_message, states[next.athlete.id]?.code ?? next.athlete.last_watch_code)) : undefined}
       />
 
       {active.length > 0 && (
-        <LiveToolbar lastCheckedAt={lastCheckedAt} refreshing={refreshingAll} onRefreshAll={() => refresh()} error={globalError} trackedCount={tracked} connectivity={connectivity} />
+        <LiveToolbar lastCheckedAt={lastCheckedAt} refreshing={refreshingAll} onRefreshAll={() => refresh()} error={globalError} trackedCount={tracked} connectivity={connectivity} manual={manual} />
       )}
 
       <section aria-label="Upcoming clients">
@@ -89,7 +91,7 @@ export function DashboardLive({ event, athletes: initialAthletes, history: initi
           <EmptyState
             icon={<UsersIcon />}
             title="No clients added yet."
-            description="Add each pre-booked athlete with their AJP or Smoothcomp link."
+            description={manual ? "Add each athlete by name; this event is tracked by hand, so no link is needed." : "Add each pre-booked athlete with their AJP or Smoothcomp link."}
             action={<Link href={`/clients/new?event=${event.id}`} className="btn-primary"><PlusIcon size={18} /> Add First Client</Link>}
           />
         ) : upcoming.length === 0 ? (
@@ -98,7 +100,7 @@ export function DashboardLive({ event, athletes: initialAthletes, history: initi
           <ul className="space-y-2">
             {upcoming.map((entry) => (
               <li key={entry.athlete.id}>
-                <ClientCard entry={entry} timezone={tz} note={watchStateCopy(states[entry.athlete.id]?.status ?? entry.athlete.last_watch_status, states[entry.athlete.id]?.message ?? entry.athlete.last_watch_message, states[entry.athlete.id]?.code ?? entry.athlete.last_watch_code)} now={now} />
+                <ClientCard entry={entry} timezone={tz} note={manual ? "No match entered yet." : watchStateCopy(states[entry.athlete.id]?.status ?? entry.athlete.last_watch_status, states[entry.athlete.id]?.message ?? entry.athlete.last_watch_message, states[entry.athlete.id]?.code ?? entry.athlete.last_watch_code)} now={manual ? null : now} manual={manual} />
               </li>
             ))}
           </ul>

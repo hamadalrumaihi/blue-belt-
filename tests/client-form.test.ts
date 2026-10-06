@@ -73,3 +73,33 @@ describe("nameCollisions (duplicate = same person, shared URL allowed)", () => {
     expect(normaliseName("  Hamad   AL-Rumaihi ")).toBe("hamad al-rumaihi");
   });
 });
+
+describe("parseClientForm for manually tracked / local events", () => {
+  it("does not require a URL when the event is tracked by hand", () => {
+    const { fieldErrors, values } = parseClientForm(fd({ name: "Khalid", event_id: EVENT, platform: "LOCAL" }), { requireSourceUrl: false });
+    expect(fieldErrors).toEqual({});
+    expect(values.source_url).toBeNull();
+    expect(values.platform).toBe("LOCAL");
+  });
+
+  it("still requires a URL by default (watched events)", () => {
+    expect(parseClientForm(fd({ name: "Khalid", event_id: EVENT, platform: "AJP" })).fieldErrors.source_url).toBeTruthy();
+  });
+
+  it("accepts any https link for a LOCAL platform without the AJP / Smoothcomp host check", () => {
+    const { fieldErrors } = parseClientForm(fd({ name: "K", event_id: EVENT, platform: "LOCAL", source_url: "https://example.org/brackets.pdf" }), { requireSourceUrl: false });
+    expect(fieldErrors).toEqual({});
+  });
+
+  it("parses birth date / year and weight in kg, and validates them", () => {
+    const ok = parseClientForm(fd({ name: "K", event_id: EVENT, platform: "LOCAL", birth_date: "2019-03-01", weight_kg: "36.25" }), { requireSourceUrl: false });
+    expect(ok.fieldErrors).toEqual({});
+    expect(ok.values).toMatchObject({ birth_date: "2019-03-01", birth_year: null, weight_kg: 36.25 });
+    const yearOnly = parseClientForm(fd({ name: "K", event_id: EVENT, platform: "LOCAL", birth_year: "2019" }), { requireSourceUrl: false });
+    expect(yearOnly.values).toMatchObject({ birth_date: null, birth_year: 2019, weight_kg: null });
+    const bad = parseClientForm(fd({ name: "K", event_id: EVENT, platform: "LOCAL", birth_date: "2019-13-01", birth_year: "19", weight_kg: "-3" }), { requireSourceUrl: false });
+    expect(bad.fieldErrors.birth_date).toBeTruthy();
+    expect(bad.fieldErrors.birth_year).toBeTruthy();
+    expect(bad.fieldErrors.weight_kg).toBeTruthy();
+  });
+});

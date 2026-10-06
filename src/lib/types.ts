@@ -5,13 +5,26 @@ import type {
   PhotoMatchRow,
 } from "./supabase/database.types";
 
-export type Platform = "AJP" | "SMOOTHCOMP" | "OTHER";
+export type Platform = "AJP" | "SMOOTHCOMP" | "LOCAL" | "OTHER";
 
 export const PLATFORMS: { value: Platform; label: string }[] = [
   { value: "AJP", label: "AJP" },
   { value: "SMOOTHCOMP", label: "Smoothcomp" },
+  { value: "LOCAL", label: "Local competition" },
   { value: "OTHER", label: "Other" },
 ];
+
+/** How an event's brackets are followed. */
+export type TrackingMode = "watcher" | "manual";
+
+export function isTrackingMode(value: string): value is TrackingMode {
+  return value === "watcher" || value === "manual";
+}
+
+/** True when the event is tracked by hand: no automatic checks, matches entered by the owner. */
+export function isManualEvent(event: { tracking_mode?: string | null } | null | undefined): boolean {
+  return event?.tracking_mode === "manual";
+}
 
 /** Persisted match status (photo_matches.status). */
 export type MatchStatus = "scheduled" | "on_mat" | "complete" | "delayed" | "unknown";
@@ -32,7 +45,7 @@ export type HistoryRow = PhotoMatchHistoryRow;
 /** Athlete with all their tracked matches (already loaded). */
 export type AthleteWithMatches = AthleteRow & {
   matches: MatchRow[];
-  event?: Pick<EventRow, "id" | "name" | "timezone" | "platform"> | null;
+  event?: Pick<EventRow, "id" | "name" | "timezone" | "platform" | "tracking_mode"> & Partial<Pick<EventRow, "event_date">> | null;
 };
 
 /** History row joined with athlete context for the activity feed. */
@@ -56,7 +69,7 @@ export type ChangeType =
   | "OVERRIDE_SUPERSEDED";
 
 export function isPlatform(value: string): value is Platform {
-  return value === "AJP" || value === "SMOOTHCOMP" || value === "OTHER";
+  return value === "AJP" || value === "SMOOTHCOMP" || value === "LOCAL" || value === "OTHER";
 }
 
 export function isMatchStatus(value: string): value is MatchStatus {

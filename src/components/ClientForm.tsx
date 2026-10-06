@@ -3,12 +3,14 @@
 import Link from "next/link";
 import { useActionState, useState } from "react";
 import type { ActionState } from "@/lib/actions/types";
+import { rulesOf } from "@/lib/local-divisions";
 import type { AthleteRow, EventRow, Platform } from "@/lib/types";
-import { PLATFORMS } from "@/lib/types";
+import { isManualEvent, PLATFORMS } from "@/lib/types";
 import { guessPlatform } from "@/lib/watchers/url-policy";
 import type { WatchResult } from "@/lib/watchers/types";
 import { DivisionFields } from "./DivisionFields";
 import { FormError, FormField } from "./FormField";
+import { LocalDivisionFields } from "./LocalDivisionFields";
 import { watchStateCopy } from "./watchStateCopy";
 
 type Props = {
@@ -29,6 +31,9 @@ export function ClientForm({ action, events, initial, defaultEventId, defaultPla
   const [name, setName] = useState(initial?.name ?? "");
   const [eventId, setEventId] = useState(initial?.event_id ?? defaultEventId ?? events[0]?.id ?? "");
   const [test, setTest] = useState<{ loading: boolean; result: WatchResult | null; error: string | null }>({ loading: false, result: null, error: null });
+  const selectedEvent = events.find((e) => e.id === eventId) ?? null;
+  const manual = isManualEvent(selectedEvent);
+  const localRules = rulesOf(selectedEvent);
 
   function onUrlChange(value: string) {
     setUrl(value);
@@ -86,18 +91,21 @@ export function ClientForm({ action, events, initial, defaultEventId, defaultPla
       <section className="card space-y-5 p-5">
         <h2 className="text-sm font-extrabold uppercase tracking-wider text-muted">Tournament</h2>
         <FormField label="Event" htmlFor="event_id" required error={fe.event_id}>
-          <select id="event_id" name="event_id" className="input" value={eventId} onChange={(e) => setEventId(e.target.value)}>
+          <select id="event_id" name="event_id" className="input" value={eventId} onChange={(e) => { setEventId(e.target.value); const ev = events.find((x) => x.id === e.target.value); if (ev?.platform === "LOCAL" && !url) setPlatform("LOCAL"); }}>
             {!events.length && <option value="">Create an event first</option>}
             {events.map((e) => (
-              <option key={e.id} value={e.id}>{e.name}{e.active ? "" : " (archived)"}</option>
+              <option key={e.id} value={e.id}>{e.name}{e.active ? "" : " (archived)"}{e.tracking_mode === "manual" ? " · tracked by hand" : ""}</option>
             ))}
           </select>
         </FormField>
-        <FormField label="Player / schedule URL" htmlFor="source_url" required error={fe.source_url} hint="The athlete's AJP or Smoothcomp profile / schedule page">
+        {manual && (
+          <p className="rounded-xl bg-lightblue px-3 py-2 text-xs font-semibold text-primary">This event is tracked by hand: no page is checked automatically. A link is optional; you enter matches yourself.</p>
+        )}
+        <FormField label="Player / schedule URL" htmlFor="source_url" required={!manual} error={fe.source_url} hint={manual ? "Optional — a bracket page, if one exists, for your own reference" : "The athlete's AJP or Smoothcomp profile / schedule page"}>
           <input id="source_url" name="source_url" type="url" inputMode="url" className="input" value={url} onChange={(e) => onUrlChange(e.target.value)} placeholder="https://ajptour.com/en/…" autoComplete="off" />
         </FormField>
         <FormField label="Platform" htmlFor="platform" required error={fe.platform}>
-          <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Platform">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" role="radiogroup" aria-label="Platform">
             {PLATFORMS.map((p) => (
               <label key={p.value} className={`btn cursor-pointer border ${platform === p.value ? "border-primary bg-lightblue text-primary" : "border-line bg-white text-ink"}`}>
                 <input type="radio" name="platform" value={p.value} checked={platform === p.value} onChange={() => setPlatform(p.value)} className="sr-only" />
@@ -110,7 +118,7 @@ export function ClientForm({ action, events, initial, defaultEventId, defaultPla
         <div className="rounded-xl border border-dashed border-line p-3">
           <div className="flex items-center justify-between gap-3">
             <p className="text-xs text-muted">Check that the watcher can read this link before the event.</p>
-            <button type="button" className="btn-secondary min-h-9 px-3 text-xs" onClick={testLink} disabled={!url || test.loading || platform === "OTHER"}>
+            <button type="button" className="btn-secondary min-h-9 px-3 text-xs" onClick={testLink} disabled={!url || test.loading || platform === "OTHER" || platform === "LOCAL"}>
               {test.loading ? "Testing…" : "Test link"}
             </button>
           </div>
@@ -124,8 +132,18 @@ export function ClientForm({ action, events, initial, defaultEventId, defaultPla
       </section>
 
       <section className="card space-y-5 p-5">
-        <h2 className="text-sm font-extrabold uppercase tracking-wider text-muted">Division <span className="font-normal normal-case tracking-normal">(optional · AJP Qatar National 2026 rules)</span></h2>
-        <DivisionFields initial={initial} />
+        {localRules ? (
+          <>
+            <h2 className="text-sm font-extrabold uppercase tracking-wider text-muted">Division <span className="font-normal normal-case tracking-normal">(this competition’s own age groups and weights)</span></h2>
+            <LocalDivisionFields key={selectedEvent?.id} rules={localRules} eventDate={selectedEvent?.event_date ?? null} eventName={selectedEvent?.name} initial={initial} />
+          </>
+        ) : (
+          <>
+            <h2 className="text-sm font-extrabold uppercase tracking-wider text-muted">Division <span className="font-normal normal-case tracking-normal">(optional · AJP Qatar National 2026 rules)</span></h2>
+            <DivisionFields initial={initial} />
+          </>
+        )}
+        {(fe.birth_date || fe.birth_year || fe.weight_kg) && <p className="text-xs font-semibold text-danger" role="alert">{fe.birth_date ?? fe.birth_year ?? fe.weight_kg}</p>}
       </section>
 
       <section className="card space-y-5 p-5">
