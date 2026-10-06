@@ -6,7 +6,7 @@
  *   from(t).select(cols).eq(..).eq(..).maybeSingle()
  *   from(t).update(patch).eq(..)[.eq(..)][.select(cols)]
  *   from(t).select().in(..).is(..).lt(..).not(..).order(..).limit(n)
- *   from(t).upsert(rows, { ignoreDuplicates: true })   (insert-or-skip on the unique keys)
+ *   from(t).upsert(rows, { ignoreDuplicates: true })[.select(cols)]   (insert-or-skip on the unique keys; select returns the inserted rows)
  *   rpc("photo_apply_payment_transition", args)   (emulated in-process, sequentially)
  * Enforces the partial unique indexes from the migration so idempotency can
  * be tested the way Postgres would behave (error code 23505).
@@ -24,13 +24,14 @@ const UNIQUE: Record<string, string[][]> = {
   photo_bookings: [["provider", "provider_invoice_id"]],
   photo_notification_deliveries: [["owner_id", "channel", "alert_key"]],
   photo_incidents: [["owner_id", "incident_key"]],
+  photo_payment_records: [["provider", "provider_payment_id"]],
 };
 
 export type FakeCall = { table: string; op: Op; payload?: Row; filters: number };
 export type FakeRpcCall = { name: string; args: Record<string, unknown> };
 
 export class FakeSupabase {
-  tables: Record<string, Row[]> = { photo_payment_events: [], photo_bookings: [], photo_payment_attempts: [], photo_athletes: [], photo_notification_deliveries: [] };
+  tables: Record<string, Row[]> = { photo_payment_events: [], photo_bookings: [], photo_payment_attempts: [], photo_athletes: [], photo_notification_deliveries: [], photo_payment_records: [], photo_client_notification_prefs: [], photo_studio: [] };
   calls: FakeCall[] = [];
   rpcCalls: FakeRpcCall[] = [];
   private seq = 1;
@@ -185,12 +186,16 @@ class FakeQuery {
     this.db.calls.push({ table: this.table, op: this.op, payload: this.payload ?? undefined, filters: this.filters.length });
     const rows = this.db.tables[this.table];
     if (this.op === "upsert") {
+      const inserted: Row[] = [];
       for (const input of this.upsertRows) {
         const row = { id: this.db.nextId(), ...input } as Row;
         const clash = (UNIQUE[this.table] ?? []).some((cols) => rows.some((r) => cols.every((c) => r[c] === row[c])));
-        if (!clash) rows.push(row);
+        if (!clash) {
+          rows.push(row);
+          inserted.push(row);
+        }
       }
-      return { data: null, error: null };
+      return this.returning ? this.shape(inserted) : { data: null, error: null };
     }
     if (this.op === "insert") {
       const row = { id: this.db.nextId(), attempts: 1, ...this.payload } as Row;
