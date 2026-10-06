@@ -10,6 +10,8 @@
   --color-bright: #2f80ed;
   --color-lightblue: #eaf3ff;
   --color-page: #f6f8fc;
+  --color-surface: #ffffff;
+  --color-surface-2: #f6f8fc;
   --color-ink: #14213d;
   --color-muted: #68758a;
   --color-line: #e3e9f2;
@@ -29,6 +31,44 @@
   --shadow-hero: 0 20px 50px -20px rgba(23, 105, 224, 0.55);
 }
 
+/*
+ * Dark theme. <html data-theme="dark"> is set before paint by the inline
+ * script in src/app/layout.tsx (src/lib/theme.ts) and by <ThemeToggle/>.
+ * Tailwind v4 reads `--color-*` at use time, so redefining the same variables
+ * here switches every bg-page / text-ink / border-line / *-soft utility.
+ * Hue stays, lightness is lifted so text keeps >= 4.5:1 on dark surfaces.
+ * Solid fills (bg-primary, bg-success, ...) carry white text, so they keep a
+ * deeper shade below; see the "solid fills" block.
+ */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-navy: #10243f;
+  --color-navy-800: #172f54;
+  --color-navy-700: #214070;
+  --color-primary: #5e9bf5;
+  --color-primary-600: #1d4ed8;
+  --color-primary-700: #1e40af;
+  --color-bright: #6fa8ff;
+  --color-lightblue: #16294a;
+  --color-page: #0b1322;
+  --color-surface: #121d33;
+  --color-surface-2: #182540;
+  --color-ink: #e8eefb;
+  --color-muted: #a0adc2;
+  --color-line: #2a3b5b;
+  --color-success: #34c76a;
+  --color-success-soft: #11301f;
+  --color-warning: #f5a623;
+  --color-warning-soft: #3a2a0b;
+  --color-orange: #fb923c;
+  --color-orange-soft: #3b1e0b;
+  --color-danger: #f87171;
+  --color-danger-soft: #3a1414;
+
+  --shadow-card: 0 0 0 1px rgba(255, 255, 255, 0.04), 0 8px 24px -12px rgba(0, 0, 0, 0.6);
+  --shadow-hero: 0 20px 50px -20px rgba(37, 99, 235, 0.5);
+}
+
 html {
   -webkit-text-size-adjust: 100%;
   -webkit-tap-highlight-color: transparent;
@@ -44,7 +84,7 @@ body {
 
 @layer components {
   .card {
-    @apply rounded-card border border-line bg-white shadow-card;
+    @apply rounded-card border border-line bg-surface shadow-card;
   }
   .btn,
   .btn-primary,
@@ -58,7 +98,7 @@ body {
     @apply bg-primary text-white hover:bg-primary-600 active:bg-primary-700;
   }
   .btn-secondary {
-    @apply border border-line bg-white text-ink hover:bg-lightblue;
+    @apply border border-line bg-surface text-ink hover:bg-lightblue;
   }
   .btn-ghost {
     @apply text-ink hover:bg-lightblue;
@@ -67,10 +107,10 @@ body {
     @apply bg-danger text-white hover:bg-red-700;
   }
   .btn-danger-outline {
-    @apply border border-danger/40 bg-white text-danger hover:bg-danger-soft;
+    @apply border border-danger/40 bg-surface text-danger hover:bg-danger-soft;
   }
   .input {
-    @apply block w-full min-h-11 rounded-xl border border-line bg-white px-3.5 text-base text-ink placeholder:text-muted/70 focus:border-primary focus:outline-none focus:ring-4 focus:ring-primary/15;
+    @apply block w-full min-h-11 rounded-xl border border-line bg-surface px-3.5 text-base text-ink placeholder:text-muted/70 focus:border-primary focus:outline-none focus:ring-4 focus:ring-primary/15;
   }
   .label {
     @apply mb-1.5 block text-sm font-semibold text-ink;
@@ -81,6 +121,102 @@ body {
   .eyebrow {
     @apply text-[11px] font-bold uppercase tracking-[0.14em] text-muted;
   }
+}
+
+/*
+ * Dark-only overrides for utilities that hard-code a light surface or a
+ * palette colour. Unlayered on purpose so they win over the utility layer.
+ * Never touch text-white, bg-white/10..25 or border-white/*: those sit on
+ * navy and primary surfaces and must stay white-based in both themes.
+ */
+
+/* Light surfaces (headers, bottom nav, sheets, inputs, chips). The brand mark
+   keeps its white badge (Logo, auth layout, loading screen: rounded-[22%]). */
+:root[data-theme="dark"] .bg-white:not(.rounded-\[22\%\]) {
+  background-color: var(--color-surface);
+}
+:root[data-theme="dark"] .bg-white\/95 {
+  background-color: color-mix(in oklab, var(--color-surface) 95%, transparent);
+}
+:root[data-theme="dark"] .bg-white\/90 {
+  background-color: color-mix(in oklab, var(--color-surface) 90%, transparent);
+}
+:root[data-theme="dark"] .bg-white\/70 {
+  background-color: color-mix(in oklab, var(--color-surface) 70%, transparent);
+}
+
+/* Navy headings on cards and pages: navy on a dark surface has no contrast,
+   so navy *text* reads as ink while bg-navy stays the brand navy. Inside a
+   navy block the only navy text sits on a white badge, which is now the dark
+   surface, so ink is right there too. */
+:root[data-theme="dark"] .text-navy {
+  color: var(--color-ink);
+}
+
+/* The colour wordmark is navy script (Logo.tsx, non-inverted). On a dark
+   header it would vanish, so render its alpha mask in white; the mark badge
+   and the white variants are untouched. Matches the optimised /_next/image
+   URL too, which keeps the file name in its query string. */
+:root[data-theme="dark"] img[src*="wordmark.png"] {
+  filter: brightness(0) invert(1);
+}
+
+/* Selected filter chips are "bg-ink text-white"; ink is light in dark mode. */
+:root[data-theme="dark"] .bg-ink {
+  background-color: #2b4470;
+}
+
+/* Solid fills keep a deeper shade so their white text stays >= 4.5:1, while
+   text-primary / text-success / ... use the lifted token above. Tints such as
+   bg-primary/15 are left alone (they use the lifted colour on purpose). */
+:root[data-theme="dark"] .bg-primary,
+:root[data-theme="dark"] .btn-primary {
+  background-color: #2563eb;
+}
+:root[data-theme="dark"] .btn-primary:hover {
+  background-color: var(--color-primary-600);
+}
+:root[data-theme="dark"] .btn-primary:active {
+  background-color: var(--color-primary-700);
+}
+:root[data-theme="dark"] .bg-success {
+  background-color: #15803d;
+}
+:root[data-theme="dark"] .bg-warning {
+  background-color: #b45309;
+}
+:root[data-theme="dark"] .bg-orange {
+  background-color: #c2410c;
+}
+:root[data-theme="dark"] .bg-danger,
+:root[data-theme="dark"] .btn-danger {
+  background-color: #dc2626;
+}
+:root[data-theme="dark"] .btn-danger:hover {
+  background-color: #b91c1c;
+}
+
+/* Hard-coded amber notices (bg-amber-50 text-amber-800 and friends). */
+:root[data-theme="dark"] .bg-amber-50,
+:root[data-theme="dark"] .bg-amber-100 {
+  background-color: var(--color-warning-soft);
+}
+:root[data-theme="dark"] .text-amber-800,
+:root[data-theme="dark"] .text-amber-700 {
+  color: #fbbf24;
+}
+:root[data-theme="dark"] .border-amber-200,
+:root[data-theme="dark"] .border-amber-400 {
+  border-color: rgba(251, 191, 36, 0.4);
+}
+
+/* Card shadow: a hairline plus a soft drop instead of a tinted glow. */
+:root[data-theme="dark"] .shadow-card,
+:root[data-theme="dark"] .card {
+  --tw-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04), 0 8px 24px -12px rgba(0, 0, 0, 0.6);
+}
+:root[data-theme="dark"] .shadow-hero {
+  --tw-shadow: 0 20px 50px -20px rgba(37, 99, 235, 0.5);
 }
 
 @keyframes bbm-pulse {
@@ -103,7 +239,7 @@ body {
 
 /* Every interactive element gets a visible keyboard focus ring (components may override). */
 @layer base {
-  :where(a, button, summary, [role="switch"], [role="tab"], [tabindex]):focus-visible {
+  :where(a, button, summary, [role="switch"], [role="tab"], [role="radio"], [tabindex]):focus-visible {
     outline: 2px solid var(--color-primary);
     outline-offset: 2px;
   }

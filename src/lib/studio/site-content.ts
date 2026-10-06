@@ -1,6 +1,35 @@
+import { isAllowedGalleryUrl } from "@/lib/galleries/state";
 import type { Json } from "@/lib/supabase/database.types";
 import { isValidHttpUrl } from "@/lib/utils";
 import { isPlainObject } from "@/lib/validation";
+
+/**
+ * Where "View and buy photos" sends visitors: the studio's Pic-Time client
+ * gallery. Verified as a direct link (HTTP 200). The `?headless=true` variant
+ * of the same page is for embedding only and is never linked.
+ */
+export const DEFAULT_PICTIME_GALLERY_URL = "https://galleries.bluebelt.media/client";
+
+/**
+ * Normalises an owner-supplied public gallery link: https on pic-time.com or
+ * galleries.bluebelt.media only, with any `headless` query parameter removed.
+ * Null when the value is empty or not acceptable.
+ */
+export function normalizePictimeGalleryUrl(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed.length > 2048 || !isAllowedGalleryUrl(trimmed)) return null;
+  const u = new URL(trimmed);
+  u.searchParams.delete("headless");
+  u.hash = "";
+  return u.toString();
+}
+
+/** `photo_studio.settings.pictimeGalleryUrl` when valid, else the default client gallery. */
+export function readPictimeGalleryUrl(settings: Json | null | undefined): string {
+  if (!isPlainObject(settings)) return DEFAULT_PICTIME_GALLERY_URL;
+  return normalizePictimeGalleryUrl(settings.pictimeGalleryUrl) ?? DEFAULT_PICTIME_GALLERY_URL;
+}
 
 /**
  * Optional website content kept in photo_studio.settings (edited by hand or

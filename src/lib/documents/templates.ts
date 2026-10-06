@@ -11,7 +11,7 @@ import type { DocumentKind } from "@/lib/supabase/database.types";
  * data: no I/O, safe to import from tests and the templates editor.
  */
 
-export const DRAFT_NOTICE = "DRAFT TEMPLATE — review with a lawyer before use. Blue Belt Media makes no claim this text is enforceable until reviewed.";
+export const DRAFT_NOTICE = "DRAFT TEMPLATE: review with a lawyer before use. Blue Belt Media makes no claim this text is enforceable until reviewed.";
 
 const SIGNATURE_BLOCK = `SIGNATURE
 

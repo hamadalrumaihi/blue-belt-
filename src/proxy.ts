@@ -5,7 +5,7 @@ import { NextResponse, type NextRequest } from "next/server";
  * Paths that never require the studio session: the public website, the
  * signing page, the client portal (which does its own sign-in) and auth.
  */
-const PUBLIC_PATHS = ["/login", "/forgot-password", "/reset-password", "/auth", "/services", "/book", "/contact", "/portfolio", "/testimonials", "/sign", "/client", "/privacy", "/terms"];
+const PUBLIC_PATHS = ["/login", "/forgot-password", "/reset-password", "/auth", "/services", "/book", "/contact", "/portfolio", "/testimonials", "/sign", "/client", "/privacy", "/terms", "/pay", "/sitemap.xml", "/robots.txt"];
 
 function isPublic(pathname: string) {
   if (pathname === "/") return true;

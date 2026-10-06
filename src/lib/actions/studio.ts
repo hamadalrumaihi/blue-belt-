@@ -6,6 +6,7 @@ import { normalizeInstagram } from "@/lib/people/match";
 import { requireStudioUser } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
 import { parseGalleryHosts } from "@/lib/galleries/form";
+import { normalizePictimeGalleryUrl } from "@/lib/studio/site-content";
 import type { Json } from "@/lib/supabase/database.types";
 import { isValidEmail, trimOrNull } from "@/lib/utils";
 
@@ -16,8 +17,9 @@ const LIMITS = { business_name: 80, tagline: 140, about: 2000, city: 80, phone: 
 /**
  * Settings → Public site. Upserts the owner's photo_studio row (owner_id =
  * the signed-in user; RLS rejects anyone else). Inside `settings` jsonb only
- * `galleryHosts` is replaced; every other key (testimonials, portfolio…) is
- * kept so hand-edited website content survives a save.
+ * `galleryHosts` and `pictimeGalleryUrl` are replaced; every other key
+ * (testimonials, portfolio, ...) is kept so hand-edited website content
+ * survives a save.
  */
 export async function saveStudio(_prev: StudioState, formData: FormData): Promise<StudioState> {
   const supabase = await createClient();
@@ -37,6 +39,9 @@ export async function saveStudio(_prev: StudioState, formData: FormData): Promis
   const public_booking = formData.get("public_booking") === "on" || formData.get("public_booking") === "1";
   const galleryHosts = parseGalleryHosts(trimOrNull(formData.get("gallery_hosts")));
   if (galleryHosts.error) fieldErrors.gallery_hosts = galleryHosts.error;
+  const pictimeRaw = trimOrNull(formData.get("pictime_gallery_url"));
+  const pictimeGalleryUrl = pictimeRaw ? normalizePictimeGalleryUrl(pictimeRaw) : null;
+  if (pictimeRaw && !pictimeGalleryUrl) fieldErrors.pictime_gallery_url = "Use the https link to your client gallery on pic-time.com or galleries.bluebelt.media.";
 
   if (!business_name) fieldErrors.business_name = "Business name is required.";
   else if (business_name.length > LIMITS.business_name) fieldErrors.business_name = `Keep it under ${LIMITS.business_name} characters.`;
@@ -52,7 +57,10 @@ export async function saveStudio(_prev: StudioState, formData: FormData): Promis
 
   const { data: current } = await supabase.from("photo_studio").select("settings").eq("owner_id", user.id).maybeSingle();
   const previous = current?.settings && typeof current.settings === "object" && !Array.isArray(current.settings) ? (current.settings as Record<string, Json | undefined>) : {};
-  const settings = { ...previous, galleryHosts: galleryHosts.hosts } as Json;
+  const merged: Record<string, Json | undefined> = { ...previous, galleryHosts: galleryHosts.hosts };
+  if (pictimeGalleryUrl) merged.pictimeGalleryUrl = pictimeGalleryUrl;
+  else delete merged.pictimeGalleryUrl; // empty field = back to the default client gallery
+  const settings = merged as Json;
   const { error } = await supabase
     .from("photo_studio")
     .upsert({ owner_id: user.id, business_name: business_name!, tagline, about, city, email, phone, whatsapp, instagram, public_booking, settings }, { onConflict: "owner_id" });

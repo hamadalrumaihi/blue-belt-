@@ -3,8 +3,9 @@ import Link from "next/link";
 import { BrandHeader } from "@/components/BrandHeader";
 import { PageBody } from "@/components/AppShell";
 import { Logo } from "@/components/Logo";
-import { ChevronRightIcon, LogoutIcon, ShieldIcon } from "@/components/icons";
+import { ChevronRightIcon, LogoutIcon, ShieldIcon, SunIcon } from "@/components/icons";
 import { groupNavItems, MORE_ITEMS, NAV_GROUP_LABEL, navItemsFor } from "@/components/nav";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { signOut } from "@/lib/actions/auth";
 import { resolveViewerMode } from "@/lib/collaborator";
 import { resolveViewer } from "@/lib/roles";
@@ -40,6 +41,12 @@ export default async function MorePage() {
                   </Link>
                 </li>
               ))}
+              {group === "account" && (
+                <li className="flex min-h-14 items-center gap-3 px-4 py-2 text-sm font-semibold text-ink">
+                  <SunIcon size={20} className="text-primary" /> <span id="more-appearance" className="flex-1">Appearance</span>
+                  <ThemeToggle aria-labelledby="more-appearance" />
+                </li>
+              )}
               {group === "account" && !collaboratorOnly && (
                 <li>
                   <Link href="/settings/danger" className="flex min-h-14 items-center gap-3 px-4 text-sm font-semibold text-ink hover:bg-page">

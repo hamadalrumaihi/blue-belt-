@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { Logo } from "@/components/Logo";
 import { StatusBadge } from "@/components/StatusBadge";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { ShieldIcon } from "@/components/icons";
 import { useSettings } from "@/hooks/useSettings";
 import { comingSoonChannels } from "@/lib/notifications/channels";
@@ -44,6 +45,11 @@ export function SettingsForm() {
     <div className="space-y-4">
       <section className="card space-y-4 p-5">
         <h2 className="text-sm font-extrabold uppercase tracking-wider text-muted">General</h2>
+        <div>
+          <p id="appearance-label" className="label">Appearance</p>
+          <ThemeToggle showLabels aria-labelledby="appearance-label" />
+          <p className="hint">System follows the light or dark setting of this device. Saved on this device only.</p>
+        </div>
         <div>
           <label htmlFor="timezone" className="label">Default timezone</label>
           <div className="flex gap-2">

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { LogoutIcon } from "@/components/icons";
 import { Logo } from "@/components/Logo";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { signOutClient } from "@/lib/actions/client-auth";
 
 /** Portal top bar: logo, "My bookings", sign out. Same at every width; the portal is a short list of cards. */
@@ -10,6 +11,7 @@ export function ClientHeader({ studioView = false }: { studioView?: boolean }) {
       <div className="mx-auto flex min-h-16 max-w-3xl items-center gap-3 px-4">
         <Logo href="/client" size={36} />
         <nav aria-label="Portal" className="ml-auto flex items-center gap-1">
+          <ThemeToggle variant="cycle" />
           <Link href="/client" className="btn-ghost min-h-11 px-3 text-sm">My bookings</Link>
           {studioView ? (
             <Link href="/studio" className="btn-secondary min-h-11 px-3 text-sm">Back to studio</Link>

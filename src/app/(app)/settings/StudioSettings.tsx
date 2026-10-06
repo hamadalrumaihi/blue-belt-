@@ -7,6 +7,7 @@ import { ExternalIcon } from "@/components/icons";
 import { saveStudio, type StudioState } from "@/lib/actions/studio";
 import { galleryHostsOf } from "@/lib/galleries/form";
 import { STUDIO_GALLERY_HOSTS } from "@/lib/galleries/state";
+import { DEFAULT_PICTIME_GALLERY_URL, normalizePictimeGalleryUrl } from "@/lib/studio/site-content";
 import type { PhotoStudioRow } from "@/lib/supabase/database.types";
 import { cn } from "@/lib/utils";
 
@@ -18,6 +19,8 @@ export function StudioSettings({ studio, defaults, publicSiteReady }: Props) {
   const v = studio ?? defaults;
   const open = studio?.public_booking ?? false;
   const hosts = galleryHostsOf(studio?.settings).join(", ");
+  const settingsObj = studio?.settings && typeof studio.settings === "object" && !Array.isArray(studio.settings) ? (studio.settings as Record<string, unknown>) : {};
+  const galleryUrl = normalizePictimeGalleryUrl(settingsObj.pictimeGalleryUrl) ?? "";
   return (
     <section className="card space-y-4 p-5" aria-labelledby="studio-heading">
       <div className="flex items-start justify-between gap-3">
@@ -57,6 +60,9 @@ export function StudioSettings({ studio, defaults, publicSiteReady }: Props) {
             <input id="instagram" name="instagram" className="input" defaultValue={v.instagram ?? ""} placeholder="@handle" autoComplete="off" />
           </FormField>
         </div>
+        <FormField label="Public gallery link" htmlFor="pictime_gallery_url" error={fe.pictime_gallery_url} hint={`Where "View and buy photos" on the website sends visitors. Leave empty for ${DEFAULT_PICTIME_GALLERY_URL}.`}>
+          <input id="pictime_gallery_url" name="pictime_gallery_url" type="url" inputMode="url" className="input" defaultValue={galleryUrl} placeholder={DEFAULT_PICTIME_GALLERY_URL} maxLength={2048} autoComplete="off" spellCheck={false} />
+        </FormField>
         <FormField label="Extra gallery domains" htmlFor="gallery_hosts" error={fe.gallery_hosts} hint={`pic-time.com and ${STUDIO_GALLERY_HOSTS.join(", ")} are always allowed for gallery links. Add any other hostname clients open galleries on, comma-separated.`}>
           <input id="gallery_hosts" name="gallery_hosts" className="input" defaultValue={hosts} placeholder="photos.example.com" autoComplete="off" spellCheck={false} inputMode="url" />
         </FormField>
@@ -64,7 +70,7 @@ export function StudioSettings({ studio, defaults, publicSiteReady }: Props) {
           <input type="checkbox" name="public_booking" className="mt-1 h-5 w-5 accent-primary" defaultChecked={open} />
           <span className="text-sm text-ink">
             <span className="block font-semibold">Open public booking</span>
-            <span className="block text-xs text-muted">Visitors can send booking requests. Nothing is ever charged online; you confirm and send payment links yourself.</span>
+            <span className="block text-xs text-muted">Visitors can send booking requests. No payment is taken at booking; you confirm the price and the client pays online through MyFatoorah after the shoot.</span>
           </span>
         </label>
         <div className="flex flex-wrap items-center gap-3">

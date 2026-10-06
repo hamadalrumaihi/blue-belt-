@@ -4,8 +4,21 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient, isServiceClientConfigured } from "@/lib/supabase/service";
 import type { Database, PhotoServiceRow, PhotoStudioRow } from "@/lib/supabase/database.types";
+import { DEFAULT_PICTIME_GALLERY_URL, readPictimeGalleryUrl } from "@/lib/studio/site-content";
 
 type Client = SupabaseClient<Database>;
+
+export { DEFAULT_PICTIME_GALLERY_URL };
+
+/**
+ * The public "View and buy photos" destination: the studio's Pic-Time client
+ * gallery from Settings → Public site when it is a valid https link on
+ * pic-time.com or galleries.bluebelt.media, else the default. A `headless`
+ * query parameter (Pic-Time's embed mode) is always stripped.
+ */
+export function pictimeGalleryUrl(studio: PhotoStudioRow | null): string {
+  return readPictimeGalleryUrl(studio?.settings);
+}
 
 export const DEFAULT_STUDIO: Omit<PhotoStudioRow, "owner_id" | "created_at" | "updated_at"> = {
   business_name: "Blue Belt Media",
