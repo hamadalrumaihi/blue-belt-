@@ -49,8 +49,8 @@ export function GalleryForm({ action, bookings, initial, defaultBookingId, submi
         </select>
       </FormField>
 
-      <FormField label="Pic-Time gallery link" htmlFor="gallery-url" error={fe.pictime_url} hint="The https link clients open (pic-time.com, or a gallery domain allowed in Settings). Leave empty until the gallery exists.">
-        <input id="gallery-url" name="pictime_url" type="url" inputMode="url" className="input" defaultValue={initial?.pictime_url ?? ""} placeholder="https://studio.pic-time.com/…" autoComplete="off" spellCheck={false} aria-invalid={Boolean(fe.pictime_url)} aria-describedby={fe.pictime_url ? "gallery-url-error" : undefined} disabled={pending} />
+      <FormField label="Pic-Time gallery link" htmlFor="gallery-url" error={fe.pictime_url} hint="The https link clients open: pic-time.com or galleries.bluebelt.media (or a gallery domain allowed in Settings). Leave empty until the gallery exists.">
+        <input id="gallery-url" name="pictime_url" type="url" inputMode="url" className="input" defaultValue={initial?.pictime_url ?? ""} placeholder="https://galleries.bluebelt.media/client/…" autoComplete="off" spellCheck={false} aria-invalid={Boolean(fe.pictime_url)} aria-describedby={fe.pictime_url ? "gallery-url-error" : undefined} disabled={pending} />
       </FormField>
 
       <FormField label="Pic-Time project id" htmlFor="gallery-project" error={fe.pictime_project_id} hint="Optional. Lets Zapier events match this gallery even if the name changes.">

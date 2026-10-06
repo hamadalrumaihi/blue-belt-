@@ -4,6 +4,7 @@ import { CalendarIcon, CameraIcon, CheckIcon, ChevronRightIcon, ImageIcon, SendI
 import { PUBLIC_BOOKING_TYPES } from "@/lib/bookings/public-form";
 import { formatQr } from "@/lib/bookings/state";
 import { DEFAULT_STUDIO, loadPublicStudio } from "@/lib/studio/queries";
+import { PictimeTestimonials } from "@/components/public/PictimeTestimonials";
 import { readTestimonials } from "@/lib/studio/site-content";
 import type { BookingType, PhotoServiceRow } from "@/lib/supabase/database.types";
 
@@ -152,8 +153,9 @@ export default async function HomePage() {
           <p className="eyebrow">Athletes & clubs</p>
           <h2 id="stories-heading" className="mt-2 text-3xl font-extrabold tracking-tight text-navy sm:text-4xl">In their words</h2>
         </div>
-        {testimonials.length ? (
-          <ul className="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-10">
+          <PictimeTestimonials fallback={testimonials.length ? (
+          <ul className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {testimonials.map((t) => (
               <li key={`${t.name}-${t.quote.slice(0, 16)}`} className="card flex flex-col p-6">
                 <blockquote className="flex-1 text-base leading-relaxed text-ink">“{t.quote}”</blockquote>
@@ -162,7 +164,7 @@ export default async function HomePage() {
             ))}
           </ul>
         ) : (
-          <div className="mt-10 rounded-card border border-dashed border-line p-8 text-center">
+          <div className="rounded-card border border-dashed border-line p-8 text-center">
             <p className="text-base font-semibold text-ink">Stories from the mats are on their way.</p>
             <p className="mx-auto mt-2 max-w-md text-sm text-muted">We only publish words athletes and coaches actually said. Until then, the work speaks on Instagram and in the galleries we deliver.</p>
             {studio?.instagram && (
@@ -171,7 +173,8 @@ export default async function HomePage() {
               </a>
             )}
           </div>
-        )}
+        )} />
+        </div>
       </section>
 
       {/* CTA */}

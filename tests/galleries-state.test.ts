@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canTransitionGallery, GALLERY_STATUSES, GALLERY_TRANSITIONS, isAllowedGalleryUrl, isGalleryStatus } from "@/lib/galleries/state";
+import { canTransitionGallery, GALLERY_STATUSES, GALLERY_TRANSITIONS, isAllowedGalleryUrl, isGalleryStatus, isValidGalleryHost, STUDIO_GALLERY_HOSTS } from "@/lib/galleries/state";
 
 describe("gallery transitions", () => {
   it("walks pending → created → ready → delivered and allows one step back", () => {
@@ -52,5 +52,42 @@ describe("isAllowedGalleryUrl", () => {
     expect(isAllowedGalleryUrl("https://bluebeltmedia.qa.evil.example/x", ["bluebeltmedia.qa"])).toBe(false);
     expect(isAllowedGalleryUrl("http://gallery.bluebeltmedia.qa/x", ["gallery.bluebeltmedia.qa"])).toBe(false);
     expect(isAllowedGalleryUrl("https://gallery.bluebeltmedia.qa/x")).toBe(false);
+  });
+});
+
+describe("the studio's own Pic-Time custom domain", () => {
+  it("accepts https://galleries.bluebelt.media/client/dalob and nested paths without any Settings entry", () => {
+    expect(STUDIO_GALLERY_HOSTS).toContain("galleries.bluebelt.media");
+    expect(isAllowedGalleryUrl("https://galleries.bluebelt.media/client/dalob")).toBe(true);
+    expect(isAllowedGalleryUrl("https://galleries.bluebelt.media/client/dalob/2026/finals?x=1#top")).toBe(true);
+    expect(isAllowedGalleryUrl("https://GALLERIES.BlueBelt.media/client/dalob")).toBe(true);
+    expect(isAllowedGalleryUrl("  https://galleries.bluebelt.media/client/dalob  ")).toBe(true);
+  });
+
+  it("still accepts normal Pic-Time links", () => {
+    expect(isAllowedGalleryUrl("https://pic-time.com/gallery/1")).toBe(true);
+    expect(isAllowedGalleryUrl("https://bluebeltmedia.pic-time.com/-dohaopen/gallery")).toBe(true);
+  });
+
+  it("rejects http, credentials, look-alike and unrelated domains", () => {
+    expect(isAllowedGalleryUrl("http://galleries.bluebelt.media/client/dalob")).toBe(false);
+    expect(isAllowedGalleryUrl("https://user:pw@galleries.bluebelt.media/client/dalob")).toBe(false);
+    expect(isAllowedGalleryUrl("https://galleries.bluebelt.media.evil.example/client/dalob")).toBe(false);
+    expect(isAllowedGalleryUrl("https://evil.example/galleries.bluebelt.media/client/dalob")).toBe(false);
+    expect(isAllowedGalleryUrl("https://galleries-bluebelt.media/client/dalob")).toBe(false);
+    expect(isAllowedGalleryUrl("https://bluebelt.media/client/dalob")).toBe(false);
+    expect(isAllowedGalleryUrl("https://photos.example.com/x")).toBe(false);
+  });
+});
+
+describe("isValidGalleryHost", () => {
+  it("accepts bare hostnames only", () => {
+    expect(isValidGalleryHost("photos.example.com")).toBe(true);
+    expect(isValidGalleryHost("Galleries.BlueBelt.media")).toBe(true);
+    expect(isValidGalleryHost("https://photos.example.com")).toBe(false);
+    expect(isValidGalleryHost("photos.example.com/path")).toBe(false);
+    expect(isValidGalleryHost("*.example.com")).toBe(false);
+    expect(isValidGalleryHost("localhost")).toBe(false);
+    expect(isValidGalleryHost("")).toBe(false);
   });
 });
