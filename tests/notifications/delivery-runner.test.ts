@@ -80,6 +80,47 @@ describe("runDeliveryBatch", () => {
     expect((await runDeliveryBatch({ supabase: fake.client, now: NOW, log: createLogger(), sendMessage: async () => {}, perChatSpacingMs: 0 })).claimed).toBe(0);
   });
 
+  it("never treats a failed 'sent' write as a send error: it retries the write and moves on", async () => {
+    const clock = { now: () => NOW };
+    const fake = fakeSupabase({ deliveries: [delivery({ alert_key: "flaky" }), delivery({ alert_key: "broken" })], links: [link(OWNER_A, 100)] }, clock);
+    // Wrap the fake so the first "sent" write for "flaky" errors, and every one for "broken" does.
+    let flakyFailures = 1;
+    const client = {
+      rpc: (fake.client as unknown as { rpc: unknown }).rpc,
+      from(table: string) {
+        const q = (fake.client as unknown as { from: (t: string) => Record<string, (...a: unknown[]) => unknown> }).from(table);
+        const update = q.update;
+        q.update = (p: unknown) => {
+          const patch = p as Row;
+          const chain = update(p) as Record<string, (...a: unknown[]) => unknown>;
+          const eq = chain.eq;
+          let id: unknown;
+          chain.eq = (c: unknown, v: unknown) => { if (c === "id") id = v; eq(c, v); return chain; };
+          const then = chain.then;
+          chain.then = (res: unknown, rej: unknown) => {
+            const row = fake.tables.photo_notification_deliveries.find((r) => r.id === id);
+            if (patch.status === "sent" && row && (row.alert_key === "broken" || (row.alert_key === "flaky" && flakyFailures-- > 0))) {
+              return Promise.resolve({ data: null, error: { message: "db hiccup" } }).then(res as (v: unknown) => unknown, rej as (e: unknown) => unknown);
+            }
+            return (then as (a: unknown, b: unknown) => unknown)(res, rej);
+          };
+          return chain;
+        };
+        return q;
+      },
+    } as unknown as SupabaseClient<Database>;
+    const send = vi.fn(async () => {});
+    const slept: number[] = [];
+    const summary = await runDeliveryBatch({ supabase: client, now: NOW, log: createLogger(), sendMessage: send, perChatSpacingMs: 0, sleep: async (ms) => void slept.push(ms) });
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(summary).toMatchObject({ claimed: 2, sent: 2, failed: 0, retried: 0 });
+    const rows = fake.tables.photo_notification_deliveries;
+    expect(rows.find((r) => r.alert_key === "flaky")).toMatchObject({ status: "sent" });
+    // The unrecordable one is left leased (not rescheduled as a failure).
+    expect(rows.find((r) => r.alert_key === "broken")).toMatchObject({ status: "sending" });
+    expect(slept).toEqual([250, 250, 500]);
+  });
+
   it("drains one owner only when asked, and skips rows whose owner has no enabled link", async () => {
     const clock = { now: () => NOW };
     const fake = fakeSupabase({ deliveries: [delivery({ owner_id: OWNER_A }), delivery({ owner_id: OWNER_B })], links: [link(OWNER_A, 100), link(OWNER_B, 200, false)] }, clock);

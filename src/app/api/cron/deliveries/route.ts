@@ -1,4 +1,4 @@
-import { timingSafeEqual } from "node:crypto";
+import { verifyCronSecret } from "@/lib/cron-auth";
 import { NextResponse } from "next/server";
 import { requestLogger } from "@/lib/log";
 import { runDeliveryBatch, type DeliveryBatchSummary } from "@/lib/notifications/delivery-runner";
@@ -29,7 +29,7 @@ const MAX_BATCHES = 8;
 export async function POST(request: Request) {
   const { log, requestId } = requestLogger(request, "api/cron/deliveries");
   const headers = { "cache-control": "no-store", "x-request-id": requestId };
-  if (!authorized(request)) return NextResponse.json({ error: "Unauthorized", code: "UNAUTHORIZED" }, { status: 401, headers });
+  if (!verifyCronSecret(request)) return NextResponse.json({ error: "Unauthorized", code: "UNAUTHORIZED" }, { status: 401, headers });
   if (!isServiceClientConfigured()) return NextResponse.json({ error: "SUPABASE_SERVICE_ROLE_KEY is not configured.", code: "NOT_CONFIGURED" }, { status: 503, headers });
   const limit = rateLimit("cron-deliveries", RULES.cron);
   if (!limit.ok) return NextResponse.json({ error: "Too many runs.", code: "RATE_LIMITED" }, { status: 429, headers: { ...headers, ...rateLimitHeaders(limit) } });
@@ -57,11 +57,3 @@ export async function POST(request: Request) {
   return NextResponse.json({ ok: true, enabled: true, ...totals, batches, reminders, durationMs: Date.now() - started, checkedAt: now.toISOString() }, { headers });
 }
 
-function authorized(request: Request): boolean {
-  const secret = process.env.CRON_SECRET;
-  if (!secret) return false;
-  const header = request.headers.get("authorization") ?? "";
-  const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
-  if (token.length !== secret.length) return false;
-  return timingSafeEqual(Buffer.from(token), Buffer.from(secret));
-}
