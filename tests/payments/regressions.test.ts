@@ -115,7 +115,10 @@ describe("payment regressions (Phase F)", () => {
     expect(row(db, OTHER_BOOKING).status).toBe("paid");
     expect(db.tables.photo_payment_attempts).toEqual([expect.objectContaining({ owner_id: OTHER_OWNER, booking_id: OTHER_BOOKING })]);
     expect(db.tables.photo_payment_events[0]).toMatchObject({ owner_id: OTHER_OWNER, booking_id: OTHER_BOOKING });
-    expect(db.tables.photo_notification_deliveries).toEqual([expect.objectContaining({ owner_id: OTHER_OWNER, alert_key: `payment:${OTHER_BOOKING}:paid` })]);
+    // Every queued message (owner Telegram + client e-mails) belongs to B; the [Orders] confirmation is among them.
+    expect(db.tables.photo_notification_deliveries.length).toBeGreaterThan(0);
+    expect(db.tables.photo_notification_deliveries.every((d) => d.owner_id === OTHER_OWNER)).toBe(true);
+    expect(db.tables.photo_notification_deliveries).toEqual(expect.arrayContaining([expect.objectContaining({ owner_id: OTHER_OWNER, alert_key: `payment:${OTHER_BOOKING}:paid` })]));
   });
 
   it("atomic paid transition: booking, attempt, event outcome and the [Orders] confirmation outbox come from ONE rpc call", async () => {
@@ -129,8 +132,10 @@ describe("payment regressions (Phase F)", () => {
     expect(delivery).toMatchObject({ owner_id: OWNER, kind: "PAYMENT_CONFIRMED", category: "orders", alert_key: `payment:${BOOKING_ID}:paid` });
     expect(String((delivery.payload as Record<string, unknown>).text)).toContain("Payment confirmed — Test Customer");
     expect(String((delivery.payload as Record<string, unknown>).text)).toContain("Approve the order in Pic-Time by hand");
-    // No direct, non-atomic booking writes besides the athlete-link flag stub.
-    expect(db.calls.filter((c) => c.table === "photo_bookings" && c.op === "update")).toHaveLength(0);
+    // No direct, non-atomic PAYMENT-STATE writes besides the athlete-link flag stub: any
+    // booking update outside the RPC may touch the studio lifecycle only, never status / paid_at.
+    const PAYMENT_COLUMNS = ["status", "paid_at", "refunded_at", "disputed_at", "payment_status_updated_at"];
+    expect(db.calls.filter((c) => c.table === "photo_bookings" && c.op === "update" && PAYMENT_COLUMNS.some((k) => k in (c.payload ?? {})))).toHaveLength(0);
     expect(db.tables.photo_athletes).toHaveLength(0);
   });
 

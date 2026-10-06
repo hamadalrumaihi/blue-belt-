@@ -7,6 +7,7 @@ import type { AppAlert } from "@/lib/notifications/types";
 import type { Database, PhotoTelegramLinkRow } from "@/lib/supabase/database.types";
 import { DEFAULT_TIMEZONE, formatTime } from "@/lib/time";
 import type { AthleteWithMatches, HistoryEntry } from "@/lib/types";
+import { createServiceClient, isServiceClientConfigured } from "@/lib/supabase/service";
 import { deliveryInsert, runDeliveryBatch, type SendMessage } from "../delivery-runner";
 import { deliveryKeyFor, formatTelegramMessage, kindAllowed, resolveSubscription, TELEGRAM_CHANNEL, type HistoryChange, type SubscriptionLike } from "./core";
 import { isTelegramAlertKind } from "./kinds";
@@ -47,11 +48,17 @@ export async function runTelegramNotifier(ctx: RefreshNotificationContext, deps:
     if (a) owners.add(a.owner_id);
   }
 
+  // The claim RPC is granted to the service role only, so the post-refresh
+  // kick needs the service client even when the refresh ran under a user
+  // session (/api/watch). Without it, rows wait for the cron runner.
+  let kickClient: Client | null = null;
   for (const ownerId of owners) {
     try {
       const enqueued = await enqueueOwner(supabase, ownerId, planned.get(ownerId) ?? [], now);
       if (enqueued === "no-link") continue;
-      if (!deps.noKick) await runDeliveryBatch({ supabase, now, log, sendMessage: deps.sendMessage, ownerId, limit: 10, worker: "kick", perChatSpacingMs: 0 });
+      if (deps.noKick) continue;
+      kickClient ??= deps.sendMessage ? supabase : isServiceClientConfigured() ? createServiceClient() : supabase;
+      await runDeliveryBatch({ supabase: kickClient, now, log, sendMessage: deps.sendMessage, ownerId, limit: 10, worker: "kick", perChatSpacingMs: 0 });
     } catch (err) {
       log.warn("telegram.owner_failed", { ownerId, error: err instanceof Error ? err.message : String(err) });
     }

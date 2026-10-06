@@ -10,12 +10,12 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: {
-    default: "Blue Belt Media — Tournament Watcher",
+    default: "Blue Belt Media — Combat sports photography & video, Doha",
     template: "%s · Blue Belt Media",
   },
   description:
-    "Tournament Coverage Command Center for Blue Belt Media. Know who to photograph next, where, and how soon.",
-  applicationName: "Blue Belt Media Tournament Watcher",
+    "Blue Belt Media: tournament, athlete and team photography and video coverage in Qatar. Book coverage, sign your agreement and get your Pic-Time gallery in one place.",
+  applicationName: "Blue Belt Media",
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,

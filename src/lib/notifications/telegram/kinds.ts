@@ -19,14 +19,40 @@ export const TELEGRAM_KIND_LABELS: Record<TelegramAlertKind, string> = {
   REMIND_5: "Reminder 5 min before",
 };
 
-/** Message category prefix: who should read it first. */
-export type MessageCategory = "match" | "orders" | "system";
+/**
+ * Owner (studio) notification kinds beyond match alerts. Each is one
+ * Telegram message, deduped by its alert_key, in its category.
+ */
+export const OWNER_KINDS = [
+  "BOOKING_NEW",
+  "BOOKING_PAYMENT_REQUESTED",
+  "BOOKING_PAID",
+  "BOOKING_CANCELLED",
+  "LEAD_NEW",
+  "CONTRACT_SIGNED",
+  "CONTRACT_DECLINED",
+  "ORDER_PLACED",
+  "INVOICE_CREATED",
+  "PAYMENT_CONFIRMED",
+  "GALLERY_READY",
+  "GALLERY_LINKED",
+  "DELIVERY_SENT",
+  "EMAIL_FAILED",
+  "INTEGRATION_FAILED",
+] as const;
 
-export const CATEGORY_LABEL: Record<MessageCategory, string> = { match: "Match", orders: "Orders", system: "System" };
+export type OwnerKind = (typeof OWNER_KINDS)[number];
+
+/** Message category prefix: who should read it first. */
+export type MessageCategory = "match" | "bookings" | "orders" | "delivery" | "system";
+
+export const CATEGORY_LABEL: Record<MessageCategory, string> = { match: "Match", bookings: "Bookings", orders: "Orders", delivery: "Delivery", system: "System" };
 
 export function categoryForKind(kind: string): MessageCategory {
-  if (kind.startsWith("INCIDENT_") || kind.startsWith("RECOVERY_") || kind.startsWith("SYSTEM_")) return "system";
-  if (kind.startsWith("ORDER_") || kind.startsWith("PAYMENT_")) return "orders";
+  if (kind.startsWith("INCIDENT_") || kind.startsWith("RECOVERY_") || kind.startsWith("SYSTEM_") || kind === "EMAIL_FAILED" || kind === "INTEGRATION_FAILED") return "system";
+  if (kind.startsWith("BOOKING_") || kind.startsWith("CONTRACT_") || kind === "LEAD_NEW") return "bookings";
+  if (kind.startsWith("GALLERY_") || kind.startsWith("DELIVERY_")) return "delivery";
+  if (kind.startsWith("ORDER_") || kind.startsWith("PAYMENT_") || kind.startsWith("INVOICE_")) return "orders";
   return "match";
 }
 

@@ -60,7 +60,7 @@ export async function POST(request: Request) {
   const payload = JSON.stringify({ url, html, receivedAt: new Date().toISOString(), captureId: captureId || null, capturedAt: capturedAt || null }).replace(/</g, "\\u003c").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
   const page = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Handing over…</title>
 <style>body{font-family:system-ui,sans-serif;background:#0b1f3a;color:#fff;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0;padding:24px;text-align:center}a{color:#9fd0ff}</style></head>
-<body><div><p id="m">Handing the page over to Tournament Watcher…</p><p id="f" hidden>Could not park the page in this browser (storage full or blocked). Copy the page HTML and paste it on the <a href="/import">Import page</a> instead.</p></div>
+<body><div><p id="m">Handing the page over to the Tournament Watcher…</p><p id="f" hidden>Could not park the page in this browser (storage full or blocked). Copy the page HTML and paste it on the <a href="/import">Import page</a> instead.</p></div>
 <script type="application/json" id="p">${payload}</script>
 <script nonce="${nonce}">(function(){try{var t=document.getElementById("p").textContent;JSON.parse(t);sessionStorage.setItem("bbm:pending-import",t);location.replace("/import");}catch(e){document.getElementById("m").hidden=true;document.getElementById("f").hidden=false;}})();</script>
 </body></html>`;

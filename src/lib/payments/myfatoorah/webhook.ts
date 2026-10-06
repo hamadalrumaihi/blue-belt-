@@ -18,7 +18,9 @@ import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Logger } from "@/lib/log";
 import type { Database, Json, PhotoBookingRow, PhotoOrderRow } from "@/lib/supabase/database.types";
+import { bookingEmailAlertKey, bookingEmailDraft, type BookingEmailKind } from "@/lib/bookings/emails";
 import { deliveryInsert } from "@/lib/notifications/delivery-runner";
+import { enqueueClientEmail } from "@/lib/notifications/email/outbox";
 import { fulfillmentPlan } from "@/lib/payments/fulfillment";
 import { applyTransition, isPaymentStatus, type PaymentStatus } from "@/lib/payments/types";
 import { MYFATOORAH_PROVIDER, type PaymentProvider, type PaymentStatusOutput } from "./client";
@@ -275,7 +277,77 @@ async function applyStatusToBooking(booking: PhotoBookingRow, mapping: Extract<S
   }
   const out = isRecord(data) ? data : {};
   if (out.applied !== true) return { result: "ignored_transition", status: booking.status, detail: out.reason === "booking_not_found" ? "booking_not_found" : "concurrent_update" };
+  if (mapping.status === "paid") await afterProviderPaid(booking, mapping, now, deps);
   return { result: "processed", status: mapping.status };
+}
+
+/** Lifecycle stages a verified payment confirms. Later stages (confirmed, in progress…) are left alone. */
+const PRE_CONFIRMATION_STATUSES = ["inquiry", "quoted", "awaiting_contract", "awaiting_payment"] as const;
+
+/**
+ * Studio bookkeeping after a verified "paid" transition — all best effort,
+ * so a failure here never fails the webhook (the payment state itself was
+ * committed atomically above): the lifecycle moves to Confirmed, the payment
+ * is mirrored into photo_payment_records (kind 'provider'), and the client's
+ * "payment received" + "booking confirmed" e-mails are queued. It never
+ * creates or links a tracked athlete.
+ */
+async function afterProviderPaid(booking: PhotoBookingRow, mapping: Extract<StatusMapping, { kind: "apply" }>, now: Date, deps: WebhookDeps): Promise<void> {
+  const nowIso = now.toISOString();
+  let confirmedNow = false;
+  try {
+    if ((PRE_CONFIRMATION_STATUSES as readonly string[]).includes(booking.booking_status)) {
+      const cols: Partial<PhotoBookingRow> = { booking_status: "confirmed" };
+      if (!booking.confirmed_at) cols.confirmed_at = nowIso;
+      const { data, error } = await deps.supabase.from("photo_bookings").update(cols).eq("id", booking.id).in("booking_status", [...PRE_CONFIRMATION_STATUSES]).select("id");
+      if (error) deps.log.warn("payments.lifecycle_confirm_failed", { bookingId: booking.id, error: error.message });
+      else confirmedNow = (data ?? []).length > 0;
+    }
+  } catch (err) {
+    deps.log.warn("payments.lifecycle_confirm_failed", { bookingId: booking.id, error: err instanceof Error ? err.message : "unknown" });
+  }
+
+  try {
+    // A dispute that resolves back to paid is the same payment, not a new one.
+    if (booking.status !== "disputed") {
+      const { error } = await deps.supabase.from("photo_payment_records").insert({
+        owner_id: booking.owner_id,
+        booking_id: booking.id,
+        kind: "provider",
+        method: "myfatoorah",
+        amount_qr: Number(mapping.amount ?? booking.amount_qr),
+        currency: mapping.currency ?? booking.currency,
+        paid_at: nowIso,
+        provider: MYFATOORAH_PROVIDER,
+        provider_payment_id: mapping.paymentId,
+      });
+      if (error && error.code !== PG_UNIQUE_VIOLATION) deps.log.warn("payments.record_insert_failed", { bookingId: booking.id, error: error.message });
+    }
+  } catch (err) {
+    deps.log.warn("payments.record_insert_failed", { bookingId: booking.id, error: err instanceof Error ? err.message : "unknown" });
+  }
+
+  if (!booking.customer_email) return;
+  try {
+    let businessName = "Blue Belt Media";
+    const { data: studio } = await deps.supabase.from("photo_studio").select("business_name").eq("owner_id", booking.owner_id).maybeSingle();
+    if (studio?.business_name) businessName = studio.business_name;
+    const paidBooking: PhotoBookingRow = { ...booking, status: "paid", booking_status: confirmedNow ? "confirmed" : booking.booking_status };
+    const options = { businessName, portalUrl: `${portalBase()}/client/bookings/${booking.id}`, payment: { amountQr: Number(mapping.amount ?? booking.amount_qr), methodLabel: "MyFatoorah", dueQr: 0 } };
+    const kinds: BookingEmailKind[] = confirmedNow ? ["PAYMENT_RECEIVED", "BOOKING_CONFIRMED"] : ["PAYMENT_RECEIVED"];
+    for (const kind of kinds) {
+      const draft = bookingEmailDraft(kind, paidBooking, options);
+      if (!draft) continue;
+      await enqueueClientEmail(deps.supabase, { ownerId: booking.owner_id, kind, alertKey: bookingEmailAlertKey(kind, booking.id), draft, personId: booking.client_id, bookingId: booking.id, now });
+    }
+  } catch (err) {
+    deps.log.warn("payments.client_email_failed", { bookingId: booking.id, error: err instanceof Error ? err.message : "unknown" });
+  }
+}
+
+/** Same resolution as siteUrl() in the studio module, without pulling the request-scoped Supabase client into the webhook. */
+function portalBase(): string {
+  return (process.env.NEXT_PUBLIC_SITE_URL ?? process.env.APP_URL ?? "https://tournament-watcher.vercel.app").replace(/\/$/, "");
 }
 
 function escapeHtml(v: string): string {

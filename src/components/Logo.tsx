@@ -10,7 +10,7 @@ type Props = {
   href?: string | null;
   /** Use on dark (navy) surfaces: mark sits on a white tile, wordmark turns white. */
   inverted?: boolean;
-  /** Small "Tournament Watcher" caption under the wordmark. */
+  /** Small "Studio" caption under the wordmark (the private app). */
   caption?: boolean;
   className?: string;
 };
@@ -24,7 +24,7 @@ type Props = {
  *   wordmark.png        script wordmark, colour
  *   wordmark-white.png  script wordmark, white ink
  */
-export function Logo({ variant = "full", size = 40, href = "/dashboard", inverted = false, caption = false, className }: Props) {
+export function Logo({ variant = "full", size = 40, href = "/studio", inverted = false, caption = false, className }: Props) {
   const wordmarkHeight = Math.round(size * 0.85);
   const wordmarkWidth = Math.round(wordmarkHeight * (240 / 91));
 
@@ -52,7 +52,7 @@ export function Logo({ variant = "full", size = 40, href = "/dashboard", inverte
           />
           {caption && (
             <span className={cn("mt-0.5 text-[10px] font-semibold uppercase tracking-[0.16em]", inverted ? "text-white/60" : "text-muted")}>
-              Tournament Watcher
+              Studio
             </span>
           )}
         </span>

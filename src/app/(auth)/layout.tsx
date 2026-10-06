@@ -16,10 +16,10 @@ export default function AuthLayout({ children }: { children: ReactNode }) {
           <h1 className="mt-5">
             <Image src="/brand/wordmark-white.png" alt="Blue Belt Media" width={240} height={91} priority style={{ width: 220, height: "auto" }} />
           </h1>
-          <p className="mt-2 text-sm font-semibold uppercase tracking-[0.18em] text-white/60">Tournament Coverage Command Center</p>
+          <p className="mt-2 text-sm font-semibold uppercase tracking-[0.18em] text-white/60">Studio sign-in</p>
         </div>
         <div className="w-full max-w-sm">{children}</div>
-        <p className="mt-10 text-center text-xs text-white/40">Private tool for Blue Belt Media photographers.</p>
+        <p className="mt-10 text-center text-xs text-white/40">Private studio for Blue Belt Media photographers. Clients: <a href="/client/login" className="underline hover:text-white/70">open the client portal</a>.</p>
       </main>
     </div>
   );

@@ -66,7 +66,7 @@ export function createTelegramBot(token: string, store: LinkStore, now: () => Da
     if (chatId === undefined) return;
     const code = (ctx.match ?? "").trim().toUpperCase();
     if (!code) {
-      await ctx.reply("Open Settings in Tournament Watcher, tap “Generate link code”, then send: /start CODE");
+      await ctx.reply("Open Settings in Blue Belt Media Studio, tap “Generate link code”, then send: /start CODE");
       return;
     }
     if (!LINK_CODE_RE.test(code)) {

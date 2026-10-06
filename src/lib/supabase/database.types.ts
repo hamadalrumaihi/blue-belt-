@@ -1,6 +1,6 @@
 /**
  * Hand-maintained Supabase types for every table and RPC the app touches.
- * Mirrors supabase/migrations (baseline + v1 + v2). When the schema changes,
+ * Mirrors supabase/migrations (baseline through studio_platform). When the schema changes,
  * update the matching Row type here and the migration together; `npm run
  * typecheck` catches drift between the two in application code.
  */
@@ -359,6 +359,33 @@ export type PhotoBookingRow = {
   watcher_athlete_id: string | null;
   notes: string | null;
   metadata: Json;
+  /** Studio lifecycle (see src/lib/bookings/state.ts). `status` above stays the provider payment status. */
+  booking_type: BookingType;
+  booking_status: BookingStatus;
+  client_id: string | null;
+  organization_id: string | null;
+  service_id: string | null;
+  lead_id: string | null;
+  session_at: string | null;
+  session_end_at: string | null;
+  location: string | null;
+  payment_mode: PaymentMode;
+  payment_method: PaymentMethod | null;
+  amount_paid_qr: number;
+  manual_paid_at: string | null;
+  details: Json;
+  contract_document_id: string | null;
+  gallery_id: string | null;
+  assigned_photographer_id: string | null;
+  assigned_videographer_id: string | null;
+  quoted_at: string | null;
+  confirmed_at: string | null;
+  coverage_done_at: string | null;
+  delivered_at: string | null;
+  completed_at: string | null;
+  cancelled_at: string | null;
+  cancel_reason: string | null;
+  public_ref: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -429,9 +456,270 @@ export type PhotoOrderRow = {
   fulfilled_at: string | null;
   /** Set while one caller is creating this order's MyFatoorah invoice (see invoicing.ts). */
   invoice_claimed_at: string | null;
+  /** Studio links (optional): the CRM person and the gallery this order belongs to. */
+  client_id: string | null;
+  gallery_id: string | null;
   created_at: string;
   updated_at: string;
 };
+
+// ---------------------------------------------------------------------------
+// Studio platform (roles, CRM, documents, galleries, payment records)
+// ---------------------------------------------------------------------------
+
+export type ProfileRole = "owner" | "staff" | "client";
+
+export type PhotoProfileRow = {
+  user_id: string;
+  role: ProfileRole;
+  display_name: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PhotoStudioRow = {
+  owner_id: string;
+  business_name: string;
+  tagline: string | null;
+  about: string | null;
+  city: string | null;
+  email: string | null;
+  phone: string | null;
+  whatsapp: string | null;
+  instagram: string | null;
+  public_booking: boolean;
+  settings: Json;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PersonKind = "person" | "parent" | "coach" | "club_contact";
+
+export type PhotoPersonRow = {
+  id: string;
+  owner_id: string;
+  user_id: string | null;
+  full_name: string;
+  email: string | null;
+  /** Generated: lower-cased trimmed e-mail (unique per owner). */
+  email_key: string | null;
+  phone: string | null;
+  phone_key: string | null;
+  instagram: string | null;
+  whatsapp: string | null;
+  kind: PersonKind;
+  source: string;
+  tags: string[];
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type OrganizationKind = "club" | "academy" | "team" | "federation" | "other";
+
+export type PhotoOrganizationRow = {
+  id: string;
+  owner_id: string;
+  name: string;
+  kind: OrganizationKind;
+  primary_contact_id: string | null;
+  email: string | null;
+  phone: string | null;
+  instagram: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type BookingType = "tournament_athlete" | "club" | "training_session" | "private_session" | "custom";
+export type BookingStatus = "inquiry" | "quoted" | "awaiting_contract" | "awaiting_payment" | "confirmed" | "in_progress" | "delivered" | "completed" | "cancelled";
+export type PaymentMode = "instant" | "link_later" | "manual" | "quote";
+export type PaymentMethod = "myfatoorah" | "cash" | "bank_transfer" | "fawran" | "other";
+
+export type PhotoServiceRow = {
+  id: string;
+  owner_id: string;
+  code: string;
+  name: string;
+  booking_type: BookingType;
+  description: string | null;
+  /** null = quote on request. */
+  price_qr: number | null;
+  deposit_qr: number | null;
+  currency: string;
+  duration_minutes: number | null;
+  includes_photo: boolean;
+  includes_video: boolean;
+  active: boolean;
+  public: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type LeadStatus = "new" | "contacted" | "quoted" | "converted" | "lost";
+
+export type PhotoLeadRow = {
+  id: string;
+  owner_id: string;
+  person_id: string | null;
+  organization_id: string | null;
+  event_id: string | null;
+  booking_type: BookingType | null;
+  status: LeadStatus;
+  source: string;
+  message: string | null;
+  details: Json;
+  booking_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DocumentKind = "services_agreement" | "event_agreement" | "session_agreement" | "print_release" | "model_release" | "club_agreement" | "custom";
+export type DocumentStatus = "draft" | "sent" | "viewed" | "signed" | "declined" | "expired";
+
+export type PhotoDocumentTemplateRow = {
+  id: string;
+  owner_id: string;
+  kind: DocumentKind;
+  name: string;
+  body: string;
+  version: number;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PhotoDocumentRow = {
+  id: string;
+  owner_id: string;
+  template_id: string | null;
+  template_version: number | null;
+  kind: string;
+  title: string;
+  booking_id: string | null;
+  client_id: string | null;
+  organization_id: string | null;
+  body: string;
+  body_hash: string | null;
+  status: DocumentStatus;
+  access_token_hash: string | null;
+  sent_at: string | null;
+  viewed_at: string | null;
+  signed_at: string | null;
+  declined_at: string | null;
+  expires_at: string | null;
+  signer_name: string | null;
+  signer_email: string | null;
+  signer_phone: string | null;
+  signature_evidence: Json | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type GalleryStatus = "pending" | "created" | "ready" | "delivered";
+
+export type PhotoGalleryRow = {
+  id: string;
+  owner_id: string;
+  booking_id: string | null;
+  client_id: string | null;
+  event_id: string | null;
+  name: string;
+  pictime_url: string | null;
+  pictime_project_id: string | null;
+  status: GalleryStatus;
+  created_in_pictime_at: string | null;
+  ready_at: string | null;
+  delivered_at: string | null;
+  notified_at: string | null;
+  visitor_count: number;
+  last_visitor_at: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PhotoPaymentRecordRow = {
+  id: string;
+  owner_id: string;
+  booking_id: string | null;
+  order_id: string | null;
+  kind: "provider" | "manual";
+  method: PaymentMethod;
+  amount_qr: number;
+  currency: string;
+  paid_at: string;
+  note: string | null;
+  recorded_by: string | null;
+  provider: string | null;
+  provider_payment_id: string | null;
+  created_at: string;
+};
+
+export type PhotoClientNotificationPrefRow = {
+  owner_id: string;
+  kind: string;
+  enabled: boolean;
+  updated_at: string;
+};
+
+export type AuditActorKind = "owner" | "staff" | "client" | "system" | "public";
+
+export type PhotoAuditLogRow = {
+  id: number;
+  owner_id: string;
+  actor_id: string | null;
+  actor_kind: AuditActorKind;
+  entity: string;
+  entity_id: string | null;
+  action: string;
+  data: Json;
+  created_at: string;
+};
+
+/** Client-portal views (SECURITY DEFINER): only client-safe columns. */
+export type ClientPersonView = Pick<PhotoPersonRow, "id" | "owner_id" | "full_name" | "email" | "phone" | "instagram" | "whatsapp" | "created_at">;
+export type ClientBookingView = Pick<
+  PhotoBookingRow,
+  | "id"
+  | "owner_id"
+  | "client_id"
+  | "public_ref"
+  | "booking_type"
+  | "booking_status"
+  | "athlete_name"
+  | "customer_name"
+  | "customer_email"
+  | "customer_phone"
+  | "academy"
+  | "division"
+  | "package_name"
+  | "amount_qr"
+  | "currency"
+  | "status"
+  | "payment_url"
+  | "paid_at"
+  | "event_id"
+  | "session_at"
+  | "session_end_at"
+  | "location"
+  | "payment_mode"
+  | "payment_method"
+  | "amount_paid_qr"
+  | "manual_paid_at"
+  | "details"
+  | "contract_document_id"
+  | "gallery_id"
+  | "confirmed_at"
+  | "delivered_at"
+  | "completed_at"
+  | "cancelled_at"
+  | "created_at"
+  | "updated_at"
+>;
+export type ClientGalleryView = Pick<PhotoGalleryRow, "id" | "owner_id" | "booking_id" | "client_id" | "name" | "pictime_url" | "status" | "ready_at" | "delivered_at" | "created_at">;
+export type ClientPaymentView = Pick<PhotoPaymentRecordRow, "id" | "owner_id" | "booking_id" | "kind" | "method" | "amount_qr" | "currency" | "paid_at" | "created_at">;
 
 // ---------------------------------------------------------------------------
 // RPC payloads
@@ -647,6 +935,32 @@ export type Database = {
           | "watcher_athlete_id"
           | "notes"
           | "metadata"
+          | "booking_type"
+          | "booking_status"
+          | "client_id"
+          | "organization_id"
+          | "service_id"
+          | "lead_id"
+          | "session_at"
+          | "session_end_at"
+          | "location"
+          | "payment_mode"
+          | "payment_method"
+          | "amount_paid_qr"
+          | "manual_paid_at"
+          | "details"
+          | "contract_document_id"
+          | "gallery_id"
+          | "assigned_photographer_id"
+          | "assigned_videographer_id"
+          | "quoted_at"
+          | "confirmed_at"
+          | "coverage_done_at"
+          | "delivered_at"
+          | "completed_at"
+          | "cancelled_at"
+          | "cancel_reason"
+          | "public_ref"
         >;
         Update: Partial<PhotoBookingRow>;
         Relationships: [];
@@ -702,12 +1016,114 @@ export type Database = {
           | "payment_confirmed_by"
           | "fulfilled_at"
           | "invoice_claimed_at"
+          | "client_id"
+          | "gallery_id"
         >;
         Update: Partial<PhotoOrderRow>;
         Relationships: [];
       };
+      photo_profiles: {
+        Row: PhotoProfileRow;
+        Insert: Optional<PhotoProfileRow, "role" | "display_name" | "created_at" | "updated_at">;
+        Update: Partial<PhotoProfileRow>;
+        Relationships: [];
+      };
+      photo_studio: {
+        Row: PhotoStudioRow;
+        Insert: Optional<PhotoStudioRow, "owner_id" | "business_name" | "tagline" | "about" | "city" | "email" | "phone" | "whatsapp" | "instagram" | "public_booking" | "settings" | "created_at" | "updated_at">;
+        Update: Partial<PhotoStudioRow>;
+        Relationships: [];
+      };
+      photo_people: {
+        Row: PhotoPersonRow;
+        Insert: Optional<PhotoPersonRow, GeneratedCols | "user_id" | "email" | "email_key" | "phone" | "phone_key" | "instagram" | "whatsapp" | "kind" | "source" | "tags" | "notes">;
+        Update: Partial<Omit<PhotoPersonRow, "email_key">>;
+        Relationships: [];
+      };
+      photo_organizations: {
+        Row: PhotoOrganizationRow;
+        Insert: Optional<PhotoOrganizationRow, GeneratedCols | "kind" | "primary_contact_id" | "email" | "phone" | "instagram" | "notes">;
+        Update: Partial<PhotoOrganizationRow>;
+        Relationships: [];
+      };
+      photo_services: {
+        Row: PhotoServiceRow;
+        Insert: Optional<PhotoServiceRow, GeneratedCols | "description" | "price_qr" | "deposit_qr" | "currency" | "duration_minutes" | "includes_photo" | "includes_video" | "active" | "public" | "sort_order">;
+        Update: Partial<PhotoServiceRow>;
+        Relationships: [];
+      };
+      photo_leads: {
+        Row: PhotoLeadRow;
+        Insert: Optional<PhotoLeadRow, GeneratedCols | "person_id" | "organization_id" | "event_id" | "booking_type" | "status" | "source" | "message" | "details" | "booking_id">;
+        Update: Partial<PhotoLeadRow>;
+        Relationships: [];
+      };
+      photo_document_templates: {
+        Row: PhotoDocumentTemplateRow;
+        Insert: Optional<PhotoDocumentTemplateRow, GeneratedCols | "version" | "active">;
+        Update: Partial<PhotoDocumentTemplateRow>;
+        Relationships: [];
+      };
+      photo_documents: {
+        Row: PhotoDocumentRow;
+        Insert: Optional<
+          PhotoDocumentRow,
+          | GeneratedCols
+          | "template_id"
+          | "template_version"
+          | "booking_id"
+          | "client_id"
+          | "organization_id"
+          | "body_hash"
+          | "status"
+          | "access_token_hash"
+          | "sent_at"
+          | "viewed_at"
+          | "signed_at"
+          | "declined_at"
+          | "expires_at"
+          | "signer_name"
+          | "signer_email"
+          | "signer_phone"
+          | "signature_evidence"
+        >;
+        Update: Partial<PhotoDocumentRow>;
+        Relationships: [];
+      };
+      photo_galleries: {
+        Row: PhotoGalleryRow;
+        Insert: Optional<
+          PhotoGalleryRow,
+          GeneratedCols | "booking_id" | "client_id" | "event_id" | "pictime_url" | "pictime_project_id" | "status" | "created_in_pictime_at" | "ready_at" | "delivered_at" | "notified_at" | "visitor_count" | "last_visitor_at" | "notes"
+        >;
+        Update: Partial<PhotoGalleryRow>;
+        Relationships: [];
+      };
+      photo_payment_records: {
+        Row: PhotoPaymentRecordRow;
+        Insert: Optional<PhotoPaymentRecordRow, "id" | "owner_id" | "created_at" | "booking_id" | "order_id" | "currency" | "paid_at" | "note" | "recorded_by" | "provider" | "provider_payment_id">;
+        Update: Partial<PhotoPaymentRecordRow>;
+        Relationships: [];
+      };
+      photo_client_notification_prefs: {
+        Row: PhotoClientNotificationPrefRow;
+        Insert: Optional<PhotoClientNotificationPrefRow, "owner_id" | "enabled" | "updated_at">;
+        Update: Partial<PhotoClientNotificationPrefRow>;
+        Relationships: [];
+      };
+      photo_audit_log: {
+        Row: PhotoAuditLogRow;
+        Insert: Optional<PhotoAuditLogRow, "id" | "created_at" | "actor_id" | "actor_kind" | "entity_id" | "data">;
+        Update: Partial<PhotoAuditLogRow>;
+        Relationships: [];
+      };
     };
-    Views: Record<string, never>;
+    Views: {
+      photo_client_people_v: { Row: ClientPersonView; Relationships: [] };
+      photo_client_bookings_v: { Row: ClientBookingView; Relationships: [] };
+      photo_client_galleries_v: { Row: ClientGalleryView; Relationships: [] };
+      photo_client_payments_v: { Row: ClientPaymentView; Relationships: [] };
+    };
     Functions: {
       photo_apply_refresh: {
         Args: ApplyRefreshArgs;
@@ -748,6 +1164,18 @@ export type Database = {
       photo_apply_coverage_command: {
         Args: { p_command_id: string; p_athlete_id: string; p_kind: string; p_done: boolean; p_expected_done_at: string | null; p_force?: boolean };
         Returns: Json;
+      };
+      photo_my_role: {
+        Args: Record<string, never>;
+        Returns: string;
+      };
+      photo_is_my_person: {
+        Args: { p_person_id: string };
+        Returns: boolean;
+      };
+      photo_is_studio_user: {
+        Args: Record<string, never>;
+        Returns: boolean;
       };
     };
     Enums: Record<string, never>;

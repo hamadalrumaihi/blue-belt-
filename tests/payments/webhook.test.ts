@@ -45,6 +45,7 @@ describe("processWebhook", () => {
     await processWebhook({ body: paymentEvent(), signatureValid: true }, deps);
     const paidAt = bookingRow(db).paid_at;
     const attempts = db.tables.photo_payment_attempts.length;
+    const bookingUpdatesBefore = db.calls.filter((c) => c.table === "photo_bookings" && c.op === "update").length;
 
     const again = await processWebhook({ body: paymentEvent(), signatureValid: true }, deps);
     expect(again).toMatchObject({ result: "duplicate", eventId: "WH-626519", bookingId: BOOKING_ID });
@@ -54,7 +55,7 @@ describe("processWebhook", () => {
     expect(bookingRow(db).paid_at).toBe(paidAt);
     // The duplicate path never touched bookings (the first delivery's transition went through the atomic RPC).
     expect(db.rpcCalls.filter((c) => c.name === "photo_apply_payment_transition")).toHaveLength(1);
-    expect(db.calls.filter((c) => c.table === "photo_bookings" && c.op === "update")).toHaveLength(0);
+    expect(db.calls.filter((c) => c.table === "photo_bookings" && c.op === "update")).toHaveLength(bookingUpdatesBefore);
   });
 
   it("derives a deterministic event id when Event.Reference is absent", () => {

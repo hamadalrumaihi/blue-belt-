@@ -1,14 +1,13 @@
-# Blue Belt Media — Tournament Watcher
+# Blue Belt Media — studio platform
 
-**Tournament Coverage Command Center** for a BJJ / sports photographer.
+One app, two experiences, for a combat-sports photography business in Qatar:
 
-The app answers one question at all times, standing next to the mats:
+- **Public website** (`/`, `/services`, `/book`, `/contact`, `/portfolio`) where athletes, parents and clubs book coverage, plus the **client portal** (`/client`) where a client sees their bookings, agreement, payment state and Pic-Time gallery link.
+- **Private studio** (`/studio` and friends) where the owner runs the business: leads, clients, bookings, contracts, payments, galleries, Pic-Time orders, notifications — and the **Tournament Watcher** module, which answers one question standing next to the mats:
 
 > **Who do I need to photograph next, where, and how soon?**
 
-It tracks pre-booked photography clients during live tournaments, watches their AJP / Smoothcomp schedule pages, detects mat and time changes, and ranks everyone by urgency.
-
-It is **not** a gallery, storage, sales or payment tool. Pic-Time remains the long-term home for galleries, customers, photos and sales. Tournament Watcher holds temporary operational data only, and nothing is deleted automatically.
+Pic-Time remains the gallery, storage and photo-sales platform. MyFatoorah handles Blue Belt payments (feature-flagged until the account is activated). Telegram carries owner/operations notices; e-mail (Resend, optional) carries client notices. See `docs/studio-platform.md` for the entity model, lifecycles and activation checklist; the sections below describe the Tournament Watcher module.
 
 ---
 

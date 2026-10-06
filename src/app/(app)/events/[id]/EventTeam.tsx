@@ -70,7 +70,7 @@ export function EventTeam({ eventId, members }: Props) {
       </div>
       {note && <p className="mt-2 text-xs font-semibold text-success">{note}</p>}
       {error && <p className="mt-2 text-xs font-semibold text-danger" role="alert">{error}</p>}
-      <p className="mt-2 text-[11px] text-muted">The person must have a Tournament Watcher account already. Assign them to clients from each client&rsquo;s page.</p>
+      <p className="mt-2 text-[11px] text-muted">The person must have a Blue Belt Media studio account already (ask the owner to create one). Assign them to clients from each client&rsquo;s page.</p>
     </section>
   );
 }

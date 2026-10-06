@@ -18,7 +18,7 @@ function order(overrides: Partial<PhotoOrderRow> = {}): PhotoOrderRow {
     payment_url: "https://pay.test/ORDER-INV-1", paid_at: null, approved_in_pictime_at: null, metadata: {}, source: "pictime", external_ref: "PT-7",
     payment_method: "fawran", payment_state: "pending", payment_reference: null, payment_reported_state: null, items: [], placed_at: null,
     received_at: "2026-10-02T10:00:00.000Z", buyer_note: null, athlete_name_hint: null, raw: {}, payment_confirmed_at: null, payment_confirmed_by: null,
-    fulfilled_at: null, invoice_claimed_at: null, created_at: "2026-10-02T10:00:00.000Z", updated_at: "2026-10-02T10:00:00.000Z", ...overrides,
+    fulfilled_at: null, invoice_claimed_at: null, client_id: null, gallery_id: null, created_at: "2026-10-02T10:00:00.000Z", updated_at: "2026-10-02T10:00:00.000Z", ...overrides,
   };
 }
 

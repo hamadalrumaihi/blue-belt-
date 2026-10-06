@@ -12,7 +12,7 @@ import { OpenIssuesLink } from "@/components/OpenIssuesLink";
 import { DashboardLive } from "./DashboardLive";
 import { SeedFirstEventButton } from "./SeedFirstEventButton";
 
-export const metadata: Metadata = { title: "Dashboard" };
+export const metadata: Metadata = { title: "Tournament day" };
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage({ searchParams }: PageProps<"/dashboard">) {
@@ -27,7 +27,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/dashbo
   if (!current) {
     return (
       <>
-        <BrandHeader title="Dashboard" subtitle="Who do I photograph next, where, and how soon?" />
+        <BrandHeader title="Tournament day" subtitle="Who do I photograph next, where, and how soon?" />
         <PageBody>
           <EmptyState
             icon={<CalendarIcon />}
@@ -53,7 +53,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/dashbo
   return (
     <>
       <BrandHeader
-        title="Dashboard"
+        title="Tournament day"
         subtitle="Who do I photograph next, where, and how soon?"
         actions={<EventSwitcher events={events} currentId={current.id} />}
       />

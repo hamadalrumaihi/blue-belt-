@@ -98,3 +98,45 @@ export const ReceiptIcon = (p: IconProps) => (
 export const CopyIcon = (p: IconProps) => (
   <svg {...base(p)}><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" /></svg>
 );
+export const FileTextIcon = (p: IconProps) => (
+  <svg {...base(p)}><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z" /><path d="M14 3v5h5M9 13h6M9 17h6" /></svg>
+);
+export const ImageIcon = (p: IconProps) => (
+  <svg {...base(p)}><rect x="3" y="4" width="18" height="16" rx="3" /><circle cx="9" cy="10" r="1.75" /><path d="m21 16-5-5-8 8" /></svg>
+);
+export const InboxIcon = (p: IconProps) => (
+  <svg {...base(p)}><path d="M4 5h16v14H4z" /><path d="M4 13h5l1.5 2h3L15 13h5" /></svg>
+);
+export const BellIcon = (p: IconProps) => (
+  <svg {...base(p)}><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15L6 16Z" /><path d="M10 20a2 2 0 0 0 4 0" /></svg>
+);
+export const BookmarkIcon = (p: IconProps) => (
+  <svg {...base(p)}><path d="M6 4h12v17l-6-4-6 4V4Z" /></svg>
+);
+export const CreditCardIcon = (p: IconProps) => (
+  <svg {...base(p)}><rect x="3" y="6" width="18" height="13" rx="2.5" /><path d="M3 10.5h18M7 15h4" /></svg>
+);
+export const BuildingIcon = (p: IconProps) => (
+  <svg {...base(p)}><path d="M4 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16" /><path d="M16 9h2a2 2 0 0 1 2 2v10M8 7h4M8 11h4M8 15h4M3 21h18" /></svg>
+);
+export const CameraIcon = (p: IconProps) => (
+  <svg {...base(p)}><path d="M4 8h3l2-3h6l2 3h3v11H4z" /><circle cx="12" cy="13" r="3.5" /></svg>
+);
+export const VideoIcon = (p: IconProps) => (
+  <svg {...base(p)}><rect x="3" y="7" width="13" height="10" rx="2" /><path d="m16 11 5-3v8l-5-3" /></svg>
+);
+export const DownloadIcon = (p: IconProps) => (
+  <svg {...base(p)}><path d="M12 4v11m0 0 4-4m-4 4-4-4" /><path d="M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2" /></svg>
+);
+export const SendIcon = (p: IconProps) => (
+  <svg {...base(p)}><path d="m3 11 18-8-8 18-2-8-8-2Z" /></svg>
+);
+export const LinkIcon = (p: IconProps) => (
+  <svg {...base(p)}><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" /><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" /></svg>
+);
+export const InstagramIcon = (p: IconProps) => (
+  <svg {...base(p)}><rect x="3" y="3" width="18" height="18" rx="5" /><circle cx="12" cy="12" r="4" /><circle cx="17.5" cy="6.5" r="0.75" fill="currentColor" /></svg>
+);
+export const WhatsAppIcon = (p: IconProps) => (
+  <svg {...base(p)}><path d="M20 11.5a8 8 0 0 1-11.6 7.1L4 20l1.5-4.2A8 8 0 1 1 20 11.5Z" /><path d="M9.5 9c.2 1.8 2.7 4.3 4.5 4.5l1-1 2 1c-.5 1.5-1.5 2-2.5 2C11 15.5 8.5 13 8.5 9.5c0-1 .5-2 2-2.5l1 2-1.5 1Z" /></svg>
+);
