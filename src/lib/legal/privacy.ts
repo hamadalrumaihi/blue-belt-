@@ -116,7 +116,7 @@ export function buildPrivacy(id: BusinessIdentity = businessIdentity()): LegalDo
     {
       id: "contact",
       title: "Contact",
-      paragraphs: [`${businessLegalLine(id)}. E-mail ${id.email}.${id.phone ? ` Phone and WhatsApp ${id.phone}.` : ""}`],
+      paragraphs: [`${businessLegalLine(id)}. E-mail ${id.email}.`],
     },
   ];
 

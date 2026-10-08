@@ -4,7 +4,6 @@ import { CopyButton } from "@/components/CopyButton";
 import { CheckIcon } from "@/components/icons";
 import { isPublicRef } from "@/lib/bookings/public-form";
 import { loadPublicStudio } from "@/lib/studio/queries";
-import { businessIdentity, whatsappUrl } from "@/lib/studio/business";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Request received | Blue Belt Media", robots: { index: false, follow: false } };
@@ -19,8 +18,6 @@ export default async function BookingDonePage({ searchParams }: PageProps<"/book
   const raw = Array.isArray(params.ref) ? params.ref[0] : params.ref;
   const ref = isPublicRef(raw) ? raw : null;
   const name = pub?.studio.business_name ?? "Blue Belt Media";
-  const identity = businessIdentity();
-  const wa = whatsappUrl(pub?.studio.whatsapp || identity.phone);
 
   if (!ref) {
     return (
@@ -32,7 +29,7 @@ export default async function BookingDonePage({ searchParams }: PageProps<"/book
             <p className="mt-3 text-base text-muted">This page shows a booking after it has been sent. If you just sent a request and did not get a reference, it was not saved. Please send it again.</p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
               <Link href="/book" className="btn-primary min-h-12">Start a booking</Link>
-              {wa && <a href={wa} target="_blank" rel="noopener noreferrer" className="btn-secondary min-h-12">Message us on WhatsApp</a>}
+              <Link href="/contact" className="btn-secondary min-h-12">Contact us</Link>
             </div>
           </div>
         </div>
@@ -72,7 +69,7 @@ export default async function BookingDonePage({ searchParams }: PageProps<"/book
           </ol>
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
             <Link href="/client" className="btn-primary min-h-12">Open the client portal</Link>
-            {wa && <a href={wa} target="_blank" rel="noopener noreferrer" className="btn-secondary min-h-12">Message us on WhatsApp</a>}
+            <Link href="/contact" className="btn-secondary min-h-12">Contact us</Link>
             <Link href="/" className="btn-ghost min-h-12">Back to home</Link>
           </div>
           <p className="mt-4 text-xs text-muted">The portal signs you in with the e-mail you used for this booking.</p>

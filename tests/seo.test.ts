@@ -162,7 +162,8 @@ describe("buildHomeJsonLd", () => {
     const rows = [service({ price_qr: 450 }), service({ id: "b", price_qr: 350 }), service({ id: "c", booking_type: "private_session", price_qr: 0 })];
     const ld = buildHomeJsonLd({ base: BASE, studio: studio({ phone: "+974 5555 5555", email: "hello@bluebelt.media", instagram: "@bluebeltmedia", city: "Doha" }), services: rows });
     const [business, tournament, club, training, priv] = ld["@graph"];
-    expect(business).toMatchObject({ telephone: "+974 5555 5555", email: "hello@bluebelt.media", sameAs: ["https://instagram.com/bluebeltmedia"] });
+    expect(business).toMatchObject({ email: "hello@bluebelt.media", sameAs: ["https://instagram.com/bluebeltmedia"] });
+    expect(business).not.toHaveProperty("telephone");
     expect(tournament.offers).toEqual({ "@type": "Offer", priceCurrency: "QAR", price: 350, availability: "https://schema.org/InStock" });
     expect(club).not.toHaveProperty("offers");
     expect(training).not.toHaveProperty("offers");

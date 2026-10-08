@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { PhotoStudioRow } from "@/lib/supabase/database.types";
-import { businessIdentity, businessLegalLine, formatPhone, whatsappUrl } from "@/lib/studio/business";
-import { ExternalIcon, InstagramIcon, MailIcon, PhoneIcon, WhatsAppIcon } from "../icons";
+import { businessIdentity, businessLegalLine } from "@/lib/studio/business";
+import { ExternalIcon, InstagramIcon, MailIcon } from "../icons";
 import { Logo } from "../Logo";
 
 type Props = {
@@ -14,8 +14,6 @@ export function PublicFooter({ studio, galleryUrl }: Props) {
   const name = studio?.business_name ?? "Blue Belt Media";
   const identity = businessIdentity();
   const ig = studio?.instagram?.replace(/^@/, "") ?? null;
-  const wa = whatsappUrl(studio?.whatsapp || identity.phone);
-  const phone = studio?.phone?.trim() || formatPhone(identity.phone);
   const email = studio?.email || identity.email;
   return (
     <footer className="border-t border-line bg-navy text-white">
@@ -53,8 +51,6 @@ export function PublicFooter({ studio, galleryUrl }: Props) {
           <p className="eyebrow mb-2 !text-white/50">Talk to us</p>
           <ul className="space-y-1 text-sm">
             {ig && <li><a href={`https://instagram.com/${ig}`} rel="noopener noreferrer" target="_blank" data-umami-event="contact-click" className="inline-flex min-h-9 items-center gap-2 text-white/80 hover:text-white"><InstagramIcon size={18} /> @{ig}</a></li>}
-            {wa && <li><a href={wa} rel="noopener noreferrer" target="_blank" data-umami-event="contact-click" className="inline-flex min-h-9 items-center gap-2 text-white/80 hover:text-white"><WhatsAppIcon size={18} /> WhatsApp</a></li>}
-            {phone && <li><a href={`tel:${phone.replace(/\s/g, "")}`} data-umami-event="contact-click" className="inline-flex min-h-9 items-center gap-2 text-white/80 hover:text-white"><PhoneIcon size={18} /> {phone}</a></li>}
             <li><a href={`mailto:${email}`} data-umami-event="contact-click" className="inline-flex min-h-9 items-center gap-2 text-white/80 hover:text-white"><MailIcon size={18} /> {email}</a></li>
           </ul>
         </div>

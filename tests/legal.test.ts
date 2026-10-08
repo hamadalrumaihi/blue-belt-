@@ -19,8 +19,8 @@ function sectionText(doc: LegalDocument, id: string): string {
 
 describe("legal versions", () => {
   it("are dated and match the labels", () => {
-    expect(TERMS_VERSION).toBe("2026-10-08");
-    expect(PRIVACY_VERSION).toBe("2026-10-08");
+    expect(TERMS_VERSION).toBe("2026-10-08.2");
+    expect(PRIVACY_VERSION).toBe("2026-10-08.2");
     expect(TERMS_UPDATED_LABEL).toBe("8 October 2026");
     expect(PRIVACY_UPDATED_LABEL).toBe("8 October 2026");
     expect(buildTerms().version).toBe(TERMS_VERSION);
@@ -86,6 +86,19 @@ describe("terms", () => {
     expect(sectionText(doc, "consumer-rights")).toMatch(/cannot take away/);
     expect(sectionText(doc, "consumer-rights")).toMatch(/Nothing here asks you to waive a mandatory right/);
     expect(text).not.toMatch(/you waive|waive (all|any|your) (rights|claims)/i);
+  });
+
+  it("omits public phone numbers even when configured and removes the collaborators and referral text", () => {
+    const configured = { ...DEFAULT_BUSINESS_IDENTITY, phone: "+974 30200312" };
+    expect(allText(buildTerms(configured))).not.toContain("30200312");
+    expect(allText(buildPrivacy(configured))).not.toContain("30200312");
+    expect(doc.sections.map((section) => section.id)).not.toContain("third-party-collaborators");
+    expect(text).not.toMatch(/courts|take the matter to|consumer protection authority/i);
+    expect(sectionText(doc, "complaints")).toContain("any refund due in writing");
+    expect(sectionText(doc, "refunds")).toContain("corrected or re-performed");
+    expect(sectionText(doc, "music-third-party-content")).toContain("without music by default");
+    expect(sectionText(doc, "music-third-party-content")).toContain("Islamic preferences");
+    expect(sectionText(doc, "music-third-party-content")).toContain("necessary usage rights");
   });
 
   it("ask for a lawyer's review and make no guarantees", () => {
