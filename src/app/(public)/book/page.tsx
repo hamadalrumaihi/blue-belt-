@@ -9,7 +9,7 @@ import { BookingWizard } from "./BookingWizard";
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = pageMetadata({
   title: "Book a jiu-jitsu photographer in Doha",
-  description: "Request tournament, club, training session or private athlete coverage in Qatar. About two minutes. No payment is needed to book.",
+  description: "Request tournament, club, training session or private athlete coverage in Qatar. About two minutes. We confirm within 24 hours; secure online payment.",
   path: "/book",
 });
 
@@ -38,7 +38,7 @@ export default async function BookPage({ searchParams }: PageProps<"/book">) {
         <p className="eyebrow">Book {pub.studio.business_name}</p>
         <h1 className="mt-2 text-xl font-bold text-ink">Booking request</h1>
         <div className="card mt-6 p-5 sm:p-8">
-          <BookingWizard events={events} services={services} initialType={first(params.type)} initialEventId={first(params.event)} initialServiceId={first(params.service)} />
+          <BookingWizard events={events} services={services} initialType={first(params.type)} initialKind={first(params.kind)} initialEventId={first(params.event)} initialServiceId={first(params.service)} />
         </div>
         <p className="mt-6 text-center text-xs text-muted">Prefer to talk first? <Link href="/contact" data-umami-event="contact-click" className="font-semibold text-primary">Send a message</Link> instead. Prices are on the <Link href="/services" className="font-semibold text-primary">services page</Link>.</p>
       </div>

@@ -72,7 +72,8 @@ describe("siteMetadata", () => {
   });
 
   it("never contains an em dash", () => {
-    expect(JSON.stringify(siteMetadata(BASE))).not.toContain("—");
+    expect(JSON.stringify(siteMetadata(BASE))).not.toContain("\u2014");
+    expect(JSON.stringify(siteMetadata(BASE))).not.toMatch(/pic-?time|fatoorah|docusign/i);
   });
 });
 
@@ -142,8 +143,9 @@ describe("buildHomeJsonLd", () => {
     expect(business).toMatchObject({ "@type": ["ProfessionalService", "LocalBusiness"], name: "Blue Belt Media", url: `${BASE}/` });
     expect(business.areaServed).toEqual([{ "@type": "City", name: "Doha" }, { "@type": "Country", name: "Qatar" }]);
     expect(business.address).toEqual({ "@type": "PostalAddress", addressLocality: "Doha, Qatar", addressCountry: "QA" });
-    expect(business).not.toHaveProperty("telephone");
-    expect(business).not.toHaveProperty("email");
+    // The registered identity fills in when the studio row has no contact details; never a street address.
+    expect(business).toMatchObject({ legalName: "Blue belt media photography", identifier: { "@type": "PropertyValue", value: "235175" }, telephone: "+974 30200312", email: "bluebeltmediaqatar@gmail.com" });
+    expect(business.address).not.toHaveProperty("streetAddress");
     expect(business).not.toHaveProperty("sameAs");
     expect(services).toHaveLength(5);
     expect(services.map((s) => s["@type"])).toEqual(["Service", "Service", "Service", "Service", "Service"]);
@@ -151,7 +153,8 @@ describe("buildHomeJsonLd", () => {
     const json = serializeJsonLd(ld);
     expect(json).not.toContain("offers");
     expect(json).not.toContain("price\"");
-    expect(json).not.toContain("—");
+    expect(json).not.toContain("\u2014");
+    expect(json).not.toMatch(/pic-?time|fatoorah|docusign/i);
   });
 
   it("adds a QAR offer only for a type with a real price, and contact details only when present", () => {
