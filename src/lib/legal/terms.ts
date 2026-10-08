@@ -48,7 +48,6 @@ export const TERMS_TOPIC_IDS = [
   "portfolio-use",
   "minors",
   "public-events",
-  "third-party-collaborators",
   "music-third-party-content",
   "client-cooperation",
   "revisions",
@@ -84,7 +83,7 @@ export function buildTerms(id: BusinessIdentity = businessIdentity()): LegalDocu
       id: "who-we-are",
       title: "Who we are",
       paragraphs: [
-        `These terms are between you and ${businessLegalLine(id)} ("we", "us", "${we}"). You can reach us at ${id.email}${id.phone ? ` or on ${id.phone}` : ""}.`,
+        `These terms are between you and ${businessLegalLine(id)} ("we", "us", "${we}"). You can reach us at ${id.email}.`,
         "They apply to every booking request, booking, gallery and purchase made through our website, by e-mail or by message. The agreement you sign for a booking adds to these terms. Where the two differ, the signed agreement applies to that booking.",
       ],
     },
@@ -310,17 +309,10 @@ export function buildTerms(id: BusinessIdentity = businessIdentity()): LegalDocu
       ],
     },
     {
-      id: "third-party-collaborators",
-      title: "Third-party collaborators",
-      paragraphs: [
-        "For large events we may work with a second photographer, a videographer or an editor. They work under our direction and under these terms. We remain responsible to you for the work.",
-      ],
-    },
-    {
       id: "music-third-party-content",
       title: "Music and third-party content",
       paragraphs: [
-        "Video is delivered with music we are licensed to use, or without music. If you ask for a specific track, you are responsible for its licence. We do not add logos, graphics or footage you do not have the right to use.",
+        "Videos are delivered without music by default, in keeping with Islamic preferences. If you request a specific track or sound effects, we will do our best to include them, subject to the agreed editing scope and the necessary usage rights. We do not add logos, graphics or footage you do not have the right to use.",
       ],
     },
     {
@@ -407,6 +399,7 @@ export function buildTerms(id: BusinessIdentity = businessIdentity()): LegalDocu
       id: "refunds",
       title: "Refunds",
       paragraphs: [
+        "If we do not provide the agreed service, or the delivered work does not meet the agreed scope or standard, we explain what can be corrected or re-performed and any refund you are entitled to. Where only part of the booking is affected, any proportionate refund is assessed against the agreed price and the affected deliverables. We do not treat a refund or credit as your only remedy where mandatory law provides otherwise.",
         "We refund where the law requires it, where these terms say so, or where we have agreed to it in writing. Refunds go back to the payment method used, through the payment provider, normally within 14 days of our confirmation. We tell you when a refund has been sent. " + QATAR_CONSUMER_LAW_SENTENCE,
       ],
     },
@@ -421,7 +414,7 @@ export function buildTerms(id: BusinessIdentity = businessIdentity()): LegalDocu
       id: "complaints",
       title: "Complaints",
       paragraphs: [
-        `Write to ${id.email} with your booking reference. We acknowledge within 2 working days and aim to resolve the complaint within 14 days. If you are not satisfied, you may take the matter to the competent consumer protection authority in Qatar or to the courts.`,
+        `Write to ${id.email} with your booking reference, a description of the issue and any relevant files or messages. We acknowledge within 2 working days and aim to resolve the complaint within 14 days. We review the agreed scope, the work delivered and the payment record, then explain the proposed resolution and any refund due in writing. If more time is needed, we explain why and give you an updated timeframe.`,
       ],
     },
     {
@@ -481,12 +474,12 @@ export function buildTerms(id: BusinessIdentity = businessIdentity()): LegalDocu
     {
       id: "governing-law",
       title: "Governing law",
-      paragraphs: ["These terms are governed by the laws of the State of Qatar. The courts of Qatar have jurisdiction over any dispute, without limiting your right to bring a complaint to a consumer protection authority."],
+      paragraphs: ["These terms are governed by the laws of the State of Qatar."],
     },
     {
       id: "contact",
       title: "Contact information",
-      paragraphs: [`${businessLegalLine(id)}. E-mail ${id.email}.${id.phone ? ` Phone and WhatsApp ${id.phone}.` : ""}`],
+      paragraphs: [`${businessLegalLine(id)}. E-mail ${id.email}.`],
     },
     {
       id: "acceptance",
