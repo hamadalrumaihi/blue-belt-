@@ -83,5 +83,5 @@ export async function listServices(): Promise<PhotoServiceRow[]> {
 
 /** Public site base URL for links in e-mails, Telegram and signing pages. */
 export function siteUrl(): string {
-  return (process.env.NEXT_PUBLIC_SITE_URL ?? process.env.APP_URL ?? "https://tournament-watcher.vercel.app").replace(/\/$/, "");
+  return (process.env.NEXT_PUBLIC_SITE_URL ?? process.env.APP_URL ?? "https://bluebeltmedia.vercel.app").replace(/\/$/, "");
 }
