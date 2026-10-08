@@ -568,7 +568,7 @@ async function afterProviderPaid(booking: PhotoBookingRow, mapping: Extract<Stat
 
 /** Same resolution as siteUrl() in the studio module, without pulling the request-scoped Supabase client into the webhook. */
 function portalBase(): string {
-  return (process.env.NEXT_PUBLIC_SITE_URL ?? process.env.APP_URL ?? "https://bluebeltmedia.vercel.app").replace(/\/$/, "");
+  return (process.env.NEXT_PUBLIC_SITE_URL ?? process.env.APP_URL ?? "https://www.bluebeltmedia.com").replace(/\/$/, "");
 }
 
 function escapeHtml(v: string): string {
