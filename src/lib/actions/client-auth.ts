@@ -2,8 +2,8 @@
 
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { magicLinkRedirect } from "@/lib/auth/magic-link";
 import { rateLimit, RULES } from "@/lib/rate-limit";
-import { siteUrl } from "@/lib/studio/queries";
 import { createClient } from "@/lib/supabase/server";
 import { isValidEmail, trimOrNull } from "@/lib/utils";
 
@@ -13,17 +13,6 @@ import { isValidEmail, trimOrNull } from "@/lib/utils";
  * used to find out who is a client. Rate limited per address.
  */
 export type ClientAuthState = { error?: string; fieldErrors?: Record<string, string>; sent?: true } | null;
-
-/**
- * The origin the e-mailed link returns to. Always the configured public
- * site (NEXT_PUBLIC_SITE_URL, then APP_URL, then the custom domain), never
- * the request's Host header: a preview or retired deployment host would
- * produce a link that opens a dead page, and Supabase only honours
- * redirects on its allow list anyway.
- */
-export function magicLinkRedirect(): string {
-  return `${siteUrl()}/auth/callback?next=/client`;
-}
 
 async function clientIp(): Promise<string> {
   const h = await headers();
