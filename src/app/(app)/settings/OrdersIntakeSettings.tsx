@@ -16,7 +16,7 @@ export function OrdersIntakeSettings({ enabled, credentials, endpoint, now }: Pr
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [issued, setIssued] = useState<{ token: string; expiresAt: string } | null>(null);
-  const [name, setName] = useState("Zapier — Pic-Time orders");
+  const [name, setName] = useState("Zapier: Pic-Time orders");
   const [days, setDays] = useState(180);
   const nowMs = new Date(now).getTime();
 

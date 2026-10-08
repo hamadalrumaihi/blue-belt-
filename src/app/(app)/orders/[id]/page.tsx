@@ -16,10 +16,10 @@ export const dynamic = "force-dynamic";
 export async function generateMetadata({ params }: PageProps<"/orders/[id]">): Promise<Metadata> {
   const { id } = await params;
   const order = isUuid(id) ? await getOrder(id) : null;
-  return { title: order ? `Order — ${order.customer_name}` : "Order" };
+  return { title: order ? `Order: ${order.customer_name}` : "Order" };
 }
 
-const STATUS_LABEL: Record<string, string> = { placed: "Open", fulfilled: "Done — photos delivered", cancelled: "Cancelled" };
+const STATUS_LABEL: Record<string, string> = { placed: "Open", fulfilled: "Done, photos delivered", cancelled: "Cancelled" };
 const REPORTED_LABEL: Record<string, string> = { paid: "Paid", pending: "Pending", failed: "Failed", refunded: "Refunded", unknown: "Unknown" };
 
 type Item = { name?: unknown; quantity?: unknown; unitAmount?: unknown; sku?: unknown };
@@ -53,11 +53,11 @@ export default async function OrderDetailPage({ params }: PageProps<"/orders/[id
             <dt>Method</dt><dd className="text-ink">{METHOD_LABEL[method] ?? method}</dd>
             {order.payment_reported_state && <><dt>Pic-Time said</dt><dd className="text-ink">{REPORTED_LABEL[order.payment_reported_state] ?? order.payment_reported_state}</dd></>}
             {order.payment_reference && <><dt>Reference</dt><dd className="break-all text-ink">{order.payment_reference}</dd></>}
-            {order.payment_confirmed_at && <><dt>Confirmed by you</dt><dd className="text-ink">{formatStamp(order.payment_confirmed_at)}{typeof metadata.payment_confirmation_note === "string" && metadata.payment_confirmation_note ? ` — ${metadata.payment_confirmation_note}` : ""}</dd></>}
+            {order.payment_confirmed_at && <><dt>Confirmed by you</dt><dd className="text-ink">{formatStamp(order.payment_confirmed_at)}{typeof metadata.payment_confirmation_note === "string" && metadata.payment_confirmation_note ? ` · ${metadata.payment_confirmation_note}` : ""}</dd></>}
             {order.paid_at && !order.payment_confirmed_at && <><dt>Paid</dt><dd className="text-ink">{formatStamp(order.paid_at)}</dd></>}
           </dl>
           {offline && state !== "paid" && order.status !== "cancelled" && (
-            <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">This order is paid outside Pic-Time ({METHOD_LABEL[method]}). The order notification is not proof of payment — confirm below once the money has arrived.</p>
+            <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">This order is paid outside Pic-Time ({METHOD_LABEL[method]}). The order notification is not proof of payment. Confirm below once the money has arrived.</p>
           )}
           {order.payment_url && (
             <p className="mt-3 rounded-lg bg-page px-3 py-2 text-xs text-muted">

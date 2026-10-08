@@ -77,7 +77,7 @@ export function ClientsList({ athletes, events, initialEventId, initialShowPause
                       <span className="min-w-0 flex-1">
                         <span className="flex items-center gap-2"><span className="truncate text-sm font-bold text-ink">{a.name}</span><PlatformBadge platform={a.platform} />{!a.active && <span className="shrink-0 rounded-full border border-line bg-page px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted">Paused</span>}</span>
                         <span className="block truncate text-xs text-muted">{[a.academy, a.division, a.belt].filter(Boolean).join(" · ") || "—"}</span>
-                        {match && <span className="block text-xs font-semibold text-ink">{match.mat ?? "Mat —"} · {formatTime(match.estimated_at ?? match.scheduled_at, tz)}{match.opponent ? ` · vs ${match.opponent}` : ""}</span>}
+                        {match && <span className="block text-xs font-semibold text-ink">{match.mat ?? "Mat –"} · {formatTime(match.estimated_at ?? match.scheduled_at, tz)}{match.opponent ? ` · vs ${match.opponent}` : ""}</span>}
                       </span>
                       {now && <StatusBadge bucket={eta.bucket} size="sm" />}
                       <ChevronRightIcon size={18} className="shrink-0 text-muted" />

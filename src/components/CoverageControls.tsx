@@ -15,7 +15,7 @@ type Props = {
   size?: "sm" | "md";
 };
 
-const STATE_LABEL: Record<CommandState | "synced", string> = { synced: "", pending: "Pending sync", saved: "Saved", failed: "Failed — will retry", conflict: "Conflict" };
+const STATE_LABEL: Record<CommandState | "synced", string> = { synced: "", pending: "Pending sync", saved: "Saved", failed: "Failed, will retry", conflict: "Conflict" };
 
 /**
  * Separate Photos done and Video done toggles, offline-first. A tap records a
@@ -58,7 +58,7 @@ export function CoverageControls({ athleteId, photosDoneAt, videosDoneAt, canPho
       )}
       {[photo, video].some((v) => v.state === "failed") && (
         <p className="mt-1 text-xs font-semibold text-danger" role="status">
-          Not saved yet — kept on this device and retried automatically.{" "}
+          Not saved yet. Kept on this device and retried automatically.{" "}
           <button type="button" className="underline" onClick={retryNow}>Retry now</button>
         </p>
       )}

@@ -89,7 +89,7 @@ export function EventForm({ action, initial, submitLabel = "Save event", cancelH
         {fe.tracking_mode && <p className="mt-1 text-xs font-semibold text-danger" role="alert">{fe.tracking_mode}</p>}
       </fieldset>
 
-      <FormField label="Official event URL" htmlFor="source_url" error={fe.source_url} hint={mode === "manual" ? "Optional. Private or missing brackets are fine — the event is tracked by hand." : "The AJP / Smoothcomp event page (optional)"}>
+      <FormField label="Official event URL" htmlFor="source_url" error={fe.source_url} hint={mode === "manual" ? "Optional. Private or missing brackets are fine. The event is tracked by hand." : "The AJP / Smoothcomp event page (optional)"}>
         <input id="source_url" name="source_url" type="url" inputMode="url" className="input" defaultValue={initial?.source_url ?? ""} placeholder="https://ajptour.com/en/event/…" />
       </FormField>
 

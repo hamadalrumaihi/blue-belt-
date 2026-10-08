@@ -119,7 +119,7 @@ export function WatcherLive({ event, athletes: initialAthletes, history: initial
           <AlertIcon size={18} className="shrink-0 text-danger" aria-hidden />
           <p className="min-w-0 flex-1 text-sm text-ink">
             <span className="font-bold">{attentionById.size} {attentionById.size === 1 ? "watch needs" : "watches need"} attention</span>
-            <span className="text-muted"> — {summarizeAttention(attentionById)}</span>
+            <span className="text-muted">: {summarizeAttention(attentionById)}</span>
           </p>
           <button type="button" className="btn-secondary min-h-9 px-3 text-xs" onClick={() => setQuick("attention")}>Show them</button>
         </div>

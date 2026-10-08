@@ -40,7 +40,7 @@ export function AthleteLink({ bookingId, eventId, eventName, athletes, linked }:
       <div className="space-y-2">
         <p className="text-sm text-ink">
           Linked to <Link href={`/clients/${linked.id}`} className="font-bold text-primary hover:underline">{linked.name}</Link>
-          <span className="text-muted"> — the watcher tracks their matches{eventName ? ` at ${eventName}` : ""}.</span>
+          <span className="text-muted">. The watcher tracks their matches{eventName ? ` at ${eventName}` : ""}.</span>
         </p>
         <button type="button" className="btn-ghost min-h-11" disabled={pending} onClick={() => run(() => unlinkBookingAthlete(bookingId))}>Unlink athlete</button>
         <p className="text-xs font-semibold text-danger" role="alert" aria-live="polite">{error}</p>

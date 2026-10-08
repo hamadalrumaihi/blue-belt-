@@ -198,13 +198,13 @@ export function ImportPage({ appOrigin, initialUrl }: Props) {
 
       {preview && (
         <section className="card border-2 border-primary p-4" aria-live="polite">
-          <p className="eyebrow">Preview — nothing saved yet</p>
+          <p className="eyebrow">Preview: nothing saved yet</p>
           <p className="mt-1 text-sm font-semibold text-ink">
             {preview.found} client{preview.found === 1 ? "" : "s"} on this page · {preview.withMatches} with matches
             {preview.notFound > 0 ? ` · ${preview.notFound} not found` : ""}
           </p>
           <p className="mt-0.5 break-all text-xs text-muted">{preview.url}</p>
-          <p className="mt-0.5 text-xs text-muted">Captured {new Date(preview.capturedAt).toLocaleTimeString()} — snapshot, not live.</p>
+          <p className="mt-0.5 text-xs text-muted">Captured {new Date(preview.capturedAt).toLocaleTimeString()}. Snapshot, not live.</p>
           <ul className="mt-3 divide-y divide-line">
             {preview.rows.map((r: ImportPreviewRow) => {
               const ok = r.status === "OK";
@@ -236,7 +236,7 @@ export function ImportPage({ appOrigin, initialUrl }: Props) {
           </p>
           <p className="mt-0.5 break-all text-xs text-muted">{result.url}</p>
           <p className="mt-0.5 text-xs text-muted">
-            Captured {result.capture ? new Date(result.capture.capturedAt).toLocaleTimeString() : "—"} · imported {new Date(result.checkedAt).toLocaleTimeString()} — snapshot, not live.
+            Captured {result.capture ? new Date(result.capture.capturedAt).toLocaleTimeString() : "—"} · imported {new Date(result.checkedAt).toLocaleTimeString()}. Snapshot, not live.
             {result.capture?.completeness === "partial" ? " The capture may be incomplete (more pages or rows existed)." : ""}
           </p>
           <ul className="mt-3 divide-y divide-line">

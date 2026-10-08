@@ -61,7 +61,7 @@ export function GalleryActions({ id, name, status, pictimeUrl, clientEmail, emai
               <span className="block font-semibold text-ink">Notify the client by e-mail</span>
               <span className="block text-xs text-muted">
                 {!clientEmail
-                  ? "No e-mail address on file — link a client or booking with an e-mail first."
+                  ? "No e-mail address on file. Link a client or booking with an e-mail first."
                   : !galleryReadyPrefOn
                     ? "“Gallery ready” e-mails are switched off under Notifications."
                     : notify

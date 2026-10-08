@@ -46,7 +46,7 @@ export function PersonForm({ action, initial, submitLabel = "Save client", cance
             <input id="tags" name="tags" className="input" defaultValue={initial?.tags?.join(", ") ?? ""} autoComplete="off" />
           </FormField>
         </div>
-        <FormField label="Notes" htmlFor="notes" error={fe.notes} hint="Internal — never shown to the client">
+        <FormField label="Notes" htmlFor="notes" error={fe.notes} hint="Internal, never shown to the client">
           <textarea id="notes" name="notes" className="input min-h-24 py-2" rows={3} maxLength={2000} defaultValue={initial?.notes ?? ""} />
         </FormField>
       </section>

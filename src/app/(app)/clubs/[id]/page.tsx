@@ -54,7 +54,7 @@ export default async function ClubPage({ params }: PageProps<"/clubs/[id]">) {
             </section>
             <section className="card p-4" aria-labelledby="contacts-h">
               <h2 id="contacts-h" className="eyebrow">Contacts</h2>
-              {contacts.length === 0 ? <p className="mt-2 text-sm text-muted">No contacts yet — set a primary contact or add a club booking.</p> : (
+              {contacts.length === 0 ? <p className="mt-2 text-sm text-muted">No contacts yet. Set a primary contact or add a club booking.</p> : (
                 <ul className="mt-2 divide-y divide-line text-sm">
                   {contacts.map((p) => (
                     <li key={p.id}><Link href={`/people/${p.id}`} className="flex items-center justify-between gap-2 py-2 hover:bg-page"><span className="truncate font-semibold text-ink">{p.full_name}</span><span className="shrink-0 text-xs text-muted">{p.id === organization.primary_contact_id ? "Primary" : PERSON_KIND_LABEL[p.kind]}</span></Link></li>

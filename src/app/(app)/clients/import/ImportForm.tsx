@@ -25,7 +25,7 @@ export function ImportForm({ events, defaultEventId }: Props) {
           {report.skipped.length > 0 && (
             <details>
               <summary className="cursor-pointer text-sm font-semibold text-warning">{report.skipped.length} skipped as duplicates</summary>
-              <ul className="mt-1 list-disc pl-5 text-xs text-muted">{report.skipped.map((s) => <li key={s.row}>Row {s.row}: {s.name} — {s.reason}</li>)}</ul>
+              <ul className="mt-1 list-disc pl-5 text-xs text-muted">{report.skipped.map((s) => <li key={s.row}>Row {s.row}: {s.name} · {s.reason}</li>)}</ul>
             </details>
           )}
           {report.errors.length > 0 && (

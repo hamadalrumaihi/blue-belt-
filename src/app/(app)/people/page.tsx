@@ -18,7 +18,7 @@ export default async function PeoplePage({ searchParams }: PageProps<"/people">)
 
   return (
     <>
-      <BrandHeader title="Clients" subtitle="Everyone who books, pays or signs — parents, athletes, coaches" actions={<Link href="/people/new" className="btn-primary min-h-10"><PlusIcon size={16} /> New</Link>} />
+      <BrandHeader title="Clients" subtitle="Everyone who books, pays or signs: parents, athletes, coaches" actions={<Link href="/people/new" className="btn-primary min-h-10"><PlusIcon size={16} /> New</Link>} />
       <PageBody className="max-w-3xl">
         <form method="get" action="/people" className="mb-3 flex gap-2" role="search">
           <label htmlFor="q" className="sr-only">Search clients</label>

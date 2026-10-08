@@ -105,7 +105,7 @@ export function InvoicePanel({ orderId, need, draft, draftText, sentAt, clientCh
           <div className="mt-3 flex flex-wrap gap-2">
             <CopyButton value={draftText} label="Copy invoice text" copiedLabel="Invoice text copied" />
             {draft.billTo.email && (
-              <a className="btn-secondary min-h-11" href={`mailto:${draft.billTo.email}?subject=${encodeURIComponent(`Invoice — Pic-Time order ${draft.reference ?? ""}`.trim())}&body=${encodeURIComponent(draftText)}`}>
+              <a className="btn-secondary min-h-11" href={`mailto:${draft.billTo.email}?subject=${encodeURIComponent(`Invoice: Pic-Time order ${draft.reference ?? ""}`.trim())}&body=${encodeURIComponent(draftText)}`}>
                 <MailIcon size={16} /> Open in email
               </a>
             )}
@@ -150,7 +150,7 @@ function statusOf(need: InvoiceNeed, sentAt: string | null): { label: string; de
       return { label: "Existing client", detail: `${need.match.name} is already a client (matched by ${need.match.by}), so no invoice draft was prepared.`, tone: "bg-lightblue text-primary" };
     case "card":
     case "paid":
-      return { label: "Not needed", detail: "Paid, or paid by card through Pic-Time — invoicing would ask the buyer to pay twice.", tone: "bg-page text-muted border border-line" };
+      return { label: "Not needed", detail: "Paid, or paid by card through Pic-Time. Invoicing would ask the buyer to pay twice.", tone: "bg-page text-muted border border-line" };
     case "closed":
       return { label: "Cancelled", detail: "This order is cancelled; no invoice is needed.", tone: "bg-page text-muted border border-line" };
     case "no_amount":

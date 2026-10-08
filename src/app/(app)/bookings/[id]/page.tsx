@@ -25,7 +25,7 @@ export const dynamic = "force-dynamic";
 export async function generateMetadata({ params }: PageProps<"/bookings/[id]">): Promise<Metadata> {
   const { id } = await params;
   const detail = isUuid(id) ? await getBooking(id) : null;
-  return { title: detail ? `${detail.booking.public_ref ?? "Booking"} — ${detail.booking.customer_name}` : "Booking" };
+  return { title: detail ? `${detail.booking.public_ref ?? "Booking"}: ${detail.booking.customer_name}` : "Booking" };
 }
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {

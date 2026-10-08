@@ -45,7 +45,7 @@ export function ClientCard({ entry, timezone, note, className, now = null, manua
         </span>
         {match ? (
           <span className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-semibold text-ink">
-            <span>{match.mat ?? "Mat —"}</span>
+            <span>{match.mat ?? "Mat –"}</span>
             <span className="tabular-nums">{formatTime(time, timezone)}</span>
             <EtaBadge eta={eta} />
             {manual ? <span className="rounded-full bg-lightblue px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">By hand</span> : <SourceHealthBadge athlete={athlete} now={now} hasMatches={athlete.matches.length > 0} />}

@@ -37,7 +37,7 @@ export function QuickClientForm({ events, defaultEventId }: Props) {
             {events.map((e) => <option key={e.id} value={e.id}>{e.name}{e.active ? "" : " (archived)"}{e.tracking_mode === "manual" ? " · tracked by hand" : ""}</option>)}
           </select>
         </FormField>
-        <FormField label="Player / schedule URL" htmlFor="source_url" required={!manual} error={fe.source_url} hint={manual ? "Optional for this event — it is tracked by hand" : "AJP or Smoothcomp link; the platform is detected from it"}>
+        <FormField label="Player / schedule URL" htmlFor="source_url" required={!manual} error={fe.source_url} hint={manual ? "Optional for this event. It is tracked by hand" : "AJP or Smoothcomp link; the platform is detected from it"}>
           <div className="flex items-center gap-2">
             <input id="source_url" name="source_url" type="url" inputMode="url" className="input" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://ajptour.com/en/…" autoComplete="off" />
             {platform && <PlatformBadge platform={platform} />}
