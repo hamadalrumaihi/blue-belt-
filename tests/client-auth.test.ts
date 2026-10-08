@@ -33,13 +33,21 @@ describe("requestClientMagicLink", () => {
     expect(known).toEqual({ sent: true });
     expect(unknown).toEqual(known);
     expect(signInWithOtp).toHaveBeenCalledTimes(2);
-    expect(signInWithOtp.mock.calls[0][0]).toEqual({ email: "client@example.com", options: { emailRedirectTo: "https://studio.example.com/auth/callback?next=/client", shouldCreateUser: true } });
+    expect(signInWithOtp.mock.calls[0][0]).toEqual({ email: "client@example.com", options: { emailRedirectTo: "https://www.bluebeltmedia.com/auth/callback?next=/client", shouldCreateUser: true } });
   });
 
-  it("uses NEXT_PUBLIC_SITE_URL for the redirect when it is set", async () => {
+  it("uses NEXT_PUBLIC_SITE_URL for the redirect when it is set, without a double slash", async () => {
     process.env.NEXT_PUBLIC_SITE_URL = "https://bluebeltmedia.qa/";
     await requestClientMagicLink(null, fd("a@b.co"));
     expect(signInWithOtp.mock.calls[0][0].options.emailRedirectTo).toBe("https://bluebeltmedia.qa/auth/callback?next=/client");
+  });
+
+  it("never builds the link from the request Host header (a preview or retired deployment host would give a dead link)", async () => {
+    await requestClientMagicLink(null, fd("a@b.co"));
+    const to = signInWithOtp.mock.calls[0][0].options.emailRedirectTo as string;
+    expect(to).not.toContain("studio.example.com");
+    expect(to).not.toContain("vercel.app");
+    expect(to.startsWith("https://www.bluebeltmedia.com/auth/callback")).toBe(true);
   });
 
   it("rejects a missing or malformed address without calling the provider", async () => {
