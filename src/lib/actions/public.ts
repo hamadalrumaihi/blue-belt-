@@ -26,7 +26,7 @@ export type PublicFormState = { error?: string; fieldErrors?: Record<string, str
 
 type Outcome = { ref: string } | { error: string } | { fieldErrors: Record<string, string> };
 
-const GENERIC_ERROR = "Something went wrong on our side. Your request was not saved. Please try again, or message us on WhatsApp.";
+const GENERIC_ERROR = "Something went wrong on our side. Your request was not saved. Please try again in a minute, or e-mail us.";
 const RATE_LIMITED = "Too many requests from your connection. Please wait a few minutes and try again.";
 
 async function clientIp(): Promise<string> {

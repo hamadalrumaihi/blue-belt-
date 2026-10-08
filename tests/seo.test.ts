@@ -144,7 +144,8 @@ describe("buildHomeJsonLd", () => {
     expect(business.areaServed).toEqual([{ "@type": "City", name: "Doha" }, { "@type": "Country", name: "Qatar" }]);
     expect(business.address).toEqual({ "@type": "PostalAddress", addressLocality: "Doha, Qatar", addressCountry: "QA" });
     // The registered identity fills in when the studio row has no contact details; never a street address.
-    expect(business).toMatchObject({ legalName: "Blue belt media photography", identifier: { "@type": "PropertyValue", value: "235175" }, telephone: "+974 30200312", email: "bluebeltmediaqatar@gmail.com" });
+    expect(business).toMatchObject({ legalName: "Blue belt media photography", identifier: { "@type": "PropertyValue", value: "235175" }, email: "bluebeltmediaqatar@gmail.com" });
+    expect(business).not.toHaveProperty("telephone");
     expect(business.address).not.toHaveProperty("streetAddress");
     expect(business).not.toHaveProperty("sameAs");
     expect(services).toHaveLength(5);

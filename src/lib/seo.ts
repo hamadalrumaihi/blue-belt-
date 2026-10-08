@@ -150,7 +150,8 @@ export function buildHomeJsonLd({ base, studio, services, identity = businessIde
     address: { "@type": "PostalAddress", addressLocality: city, addressCountry: "QA" },
     priceRange: "QAR",
   };
-  business.telephone = studio?.phone?.trim() || formatPhone(identity.phone);
+  const telephone = studio?.phone?.trim() || formatPhone(identity.phone);
+  if (telephone) business.telephone = telephone;
   business.email = studio?.email?.trim() || identity.email;
   if (sameAs.length) business.sameAs = sameAs;
 

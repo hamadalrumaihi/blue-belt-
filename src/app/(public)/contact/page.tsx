@@ -20,7 +20,7 @@ export default async function ContactPage({ searchParams }: PageProps<"/contact"
   const identity = businessIdentity();
   const ig = studio?.instagram?.replace(/^@/, "") ?? null;
   const wa = whatsappUrl(studio?.whatsapp || identity.phone);
-  const phone = studio?.phone || formatPhone(identity.phone);
+  const phone = studio?.phone?.trim() || formatPhone(identity.phone);
   const email = studio?.email || identity.email;
   const bookingOpen = Boolean(studio?.public_booking);
 
@@ -39,8 +39,8 @@ export default async function ContactPage({ searchParams }: PageProps<"/contact"
           <div>
             <p className="eyebrow">Direct</p>
             <ul className="mt-3 space-y-1 text-sm">
-              <li><a href={wa} target="_blank" rel="noopener noreferrer" data-umami-event="contact-click" className="inline-flex min-h-11 items-center gap-3 font-semibold text-ink hover:text-primary"><WhatsAppIcon size={20} className="text-primary" /> WhatsApp</a></li>
-              <li><a href={`tel:${phone.replace(/\s/g, "")}`} data-umami-event="contact-click" className="inline-flex min-h-11 items-center gap-3 font-semibold text-ink hover:text-primary"><PhoneIcon size={20} className="text-primary" /> {phone}</a></li>
+              {wa && <li><a href={wa} target="_blank" rel="noopener noreferrer" data-umami-event="contact-click" className="inline-flex min-h-11 items-center gap-3 font-semibold text-ink hover:text-primary"><WhatsAppIcon size={20} className="text-primary" /> WhatsApp</a></li>}
+              {phone && <li><a href={`tel:${phone.replace(/\s/g, "")}`} data-umami-event="contact-click" className="inline-flex min-h-11 items-center gap-3 font-semibold text-ink hover:text-primary"><PhoneIcon size={20} className="text-primary" /> {phone}</a></li>}
               <li><a href={`mailto:${email}`} data-umami-event="contact-click" className="inline-flex min-h-11 items-center gap-3 font-semibold text-ink hover:text-primary"><MailIcon size={20} className="text-primary" /> {email}</a></li>
               {ig && <li><a href={`https://instagram.com/${ig}`} target="_blank" rel="noopener noreferrer" data-umami-event="contact-click" className="inline-flex min-h-11 items-center gap-3 font-semibold text-ink hover:text-primary"><InstagramIcon size={20} className="text-primary" /> @{ig}</a></li>}
               <li className="inline-flex min-h-11 items-center gap-3 text-muted"><MapPinIcon size={20} className="text-primary" /> {studio?.city || identity.location}</li>
@@ -67,7 +67,7 @@ export default async function ContactPage({ searchParams }: PageProps<"/contact"
             <div className="card p-6 sm:p-8" role="status" aria-live="polite">
               <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-success-soft text-success"><CheckIcon size={24} /></span>
               <h2 className="mt-4 text-2xl font-extrabold text-navy">Message received</h2>
-              <p className="mt-2 text-base text-muted">Thanks. We reply within 24 hours, usually sooner. If it is urgent, WhatsApp is fastest.</p>
+              <p className="mt-2 text-base text-muted">Thanks. We reply within 24 hours, usually sooner.{wa ? " If it is urgent, WhatsApp is fastest." : ""}</p>
               <div className="mt-6 flex flex-col gap-3 sm:flex-row">
                 <Link href="/" className="btn-secondary">Back to home</Link>
                 {bookingOpen && <Link href="/book" data-umami-event="book-start" className="btn-primary">Make a booking</Link>}

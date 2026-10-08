@@ -84,7 +84,7 @@ export function buildTerms(id: BusinessIdentity = businessIdentity()): LegalDocu
       id: "who-we-are",
       title: "Who we are",
       paragraphs: [
-        `These terms are between you and ${businessLegalLine(id)} ("we", "us", "${we}"). You can reach us at ${id.email} or on ${id.phone}.`,
+        `These terms are between you and ${businessLegalLine(id)} ("we", "us", "${we}"). You can reach us at ${id.email}${id.phone ? ` or on ${id.phone}` : ""}.`,
         "They apply to every booking request, booking, gallery and purchase made through our website, by e-mail or by message. The agreement you sign for a booking adds to these terms. Where the two differ, the signed agreement applies to that booking.",
       ],
     },
@@ -486,7 +486,7 @@ export function buildTerms(id: BusinessIdentity = businessIdentity()): LegalDocu
     {
       id: "contact",
       title: "Contact information",
-      paragraphs: [`${businessLegalLine(id)}. E-mail ${id.email}. Phone and WhatsApp ${id.phone}.`],
+      paragraphs: [`${businessLegalLine(id)}. E-mail ${id.email}.${id.phone ? ` Phone and WhatsApp ${id.phone}.` : ""}`],
     },
     {
       id: "acceptance",

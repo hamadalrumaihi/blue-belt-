@@ -36,7 +36,7 @@ describe("terms", () => {
     expect(doc.intro[0]).toBe("Last updated 8 October 2026.");
     expect(text).toContain("Blue belt media photography, CR 235175, Doha, Qatar");
     expect(text).toContain("bluebeltmediaqatar@gmail.com");
-    expect(text).toContain("30200312");
+    expect(text).not.toMatch(/\d{8}/);
     expect(text).not.toMatch(/street|building|p\.o\. box|zone \d|iban|qid/i);
   });
 

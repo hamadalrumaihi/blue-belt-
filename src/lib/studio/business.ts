@@ -15,8 +15,11 @@ export type BusinessIdentity = {
   /** City and country only. */
   location: string;
   email: string;
-  /** As dialled locally; see `whatsappUrl` for the international form. */
-  phone: string;
+  /**
+   * Optional. The owner asked for no phone number on the website, so there is
+   * no default: it is shown only when BUSINESS_CONTACT_PHONE is set.
+   */
+  phone: string | null;
 };
 
 export const DEFAULT_BUSINESS_IDENTITY: BusinessIdentity = {
@@ -24,7 +27,7 @@ export const DEFAULT_BUSINESS_IDENTITY: BusinessIdentity = {
   crNumber: "235175",
   location: "Doha, Qatar",
   email: "bluebeltmediaqatar@gmail.com",
-  phone: "30200312",
+  phone: null,
 };
 
 function read(env: Record<string, string | undefined>, key: string, fallback: string): string {
@@ -38,7 +41,7 @@ export function businessIdentity(env: Record<string, string | undefined> = proce
     crNumber: read(env, "BUSINESS_CR_NUMBER", DEFAULT_BUSINESS_IDENTITY.crNumber),
     location: read(env, "BUSINESS_PUBLIC_LOCATION", DEFAULT_BUSINESS_IDENTITY.location),
     email: read(env, "BUSINESS_CONTACT_EMAIL", DEFAULT_BUSINESS_IDENTITY.email),
-    phone: read(env, "BUSINESS_CONTACT_PHONE", DEFAULT_BUSINESS_IDENTITY.phone),
+    phone: env.BUSINESS_CONTACT_PHONE?.trim() || null,
   };
 }
 
@@ -47,18 +50,22 @@ export function businessLegalLine(id: BusinessIdentity = businessIdentity()): st
   return `${id.legalName}, CR ${id.crNumber}, ${id.location}`;
 }
 
-/** Digits only, with Qatar's country code added to a local 8-digit number. */
-export function phoneDigits(phone: string): string {
-  const digits = phone.replace(/\D/g, "").replace(/^00/, "");
+/** Digits only, with Qatar's country code added to a local 8-digit number. Null when there is no number. */
+export function phoneDigits(phone: string | null | undefined): string | null {
+  const digits = (phone ?? "").replace(/\D/g, "").replace(/^00/, "");
+  if (digits.length < 8) return null;
   return digits.length === 8 ? `974${digits}` : digits;
 }
 
-/** International display form: "+974 30200312". */
-export function formatPhone(phone: string): string {
+/** International display form: "+974 5555 1234" style. Null when there is no number. */
+export function formatPhone(phone: string | null | undefined): string | null {
   const digits = phoneDigits(phone);
+  if (!digits) return null;
   return digits.startsWith("974") && digits.length === 11 ? `+974 ${digits.slice(3)}` : `+${digits}`;
 }
 
-export function whatsappUrl(phone: string): string {
-  return `https://wa.me/${phoneDigits(phone)}`;
+/** WhatsApp deep link, or null when there is no number to link to. */
+export function whatsappUrl(phone: string | null | undefined): string | null {
+  const digits = phoneDigits(phone);
+  return digits ? `https://wa.me/${digits}` : null;
 }

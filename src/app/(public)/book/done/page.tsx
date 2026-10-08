@@ -32,7 +32,7 @@ export default async function BookingDonePage({ searchParams }: PageProps<"/book
             <p className="mt-3 text-base text-muted">This page shows a booking after it has been sent. If you just sent a request and did not get a reference, it was not saved. Please send it again.</p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
               <Link href="/book" className="btn-primary min-h-12">Start a booking</Link>
-              <a href={wa} target="_blank" rel="noopener noreferrer" className="btn-secondary min-h-12">Message us on WhatsApp</a>
+              {wa && <a href={wa} target="_blank" rel="noopener noreferrer" className="btn-secondary min-h-12">Message us on WhatsApp</a>}
             </div>
           </div>
         </div>
@@ -72,7 +72,7 @@ export default async function BookingDonePage({ searchParams }: PageProps<"/book
           </ol>
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
             <Link href="/client" className="btn-primary min-h-12">Open the client portal</Link>
-            <a href={wa} target="_blank" rel="noopener noreferrer" className="btn-secondary min-h-12">Message us on WhatsApp</a>
+            {wa && <a href={wa} target="_blank" rel="noopener noreferrer" className="btn-secondary min-h-12">Message us on WhatsApp</a>}
             <Link href="/" className="btn-ghost min-h-12">Back to home</Link>
           </div>
           <p className="mt-4 text-xs text-muted">The portal signs you in with the e-mail you used for this booking.</p>
