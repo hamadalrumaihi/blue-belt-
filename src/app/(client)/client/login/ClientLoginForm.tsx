@@ -21,7 +21,7 @@ export function ClientLoginForm({ linkError }: { linkError: boolean }) {
     <form action={action} className="card p-6" noValidate>
       <h1 className="text-xl font-extrabold text-ink">Your bookings</h1>
       <p className="mt-1 text-sm text-muted">Enter the e-mail address you booked with and we will send you a sign-in link. No password needed.</p>
-      {linkError && <p className="mt-4 rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-sm font-semibold text-danger" role="alert">That sign-in link is invalid or has expired. Request a new one below.</p>}
+      {linkError && <p className="mt-4 rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-sm font-semibold text-danger" role="alert">That sign-in link is invalid, has expired or was already used. Enter your e-mail below and we will send a new one.</p>}
       <FormField label="E-mail" htmlFor="email" required className="mt-5" error={state?.fieldErrors?.email}>
         <input id="email" name="email" type="email" inputMode="email" autoComplete="email" required maxLength={160} className="input" placeholder="you@example.com" />
       </FormField>

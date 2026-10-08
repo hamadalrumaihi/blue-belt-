@@ -1,7 +1,7 @@
 "use server";
 
-import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { siteUrl } from "@/lib/studio/queries";
 import { createClient } from "@/lib/supabase/server";
 import { isValidEmail, trimOrNull } from "@/lib/utils";
 
@@ -30,13 +30,9 @@ export async function signOut(): Promise<void> {
   redirect("/login");
 }
 
+/** The public site origin for e-mailed links: configured URL first, never the request Host header. */
 async function siteOrigin(): Promise<string> {
-  const configured = process.env.NEXT_PUBLIC_SITE_URL;
-  if (configured) return configured.replace(/\/$/, "");
-  const h = await headers();
-  const proto = h.get("x-forwarded-proto") ?? "https";
-  const host = h.get("x-forwarded-host") ?? h.get("host") ?? "localhost:3000";
-  return `${proto}://${host}`;
+  return siteUrl();
 }
 
 export async function requestPasswordReset(_prev: AuthState, formData: FormData): Promise<AuthState> {

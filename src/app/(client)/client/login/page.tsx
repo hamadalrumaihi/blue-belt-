@@ -12,7 +12,7 @@ export default async function ClientLoginPage({ searchParams }: PageProps<"/clie
   const viewer = await resolveViewer();
   if (viewer) redirect("/client");
   const params = await searchParams;
-  const linkError = params.error === "link";
+  const linkError = typeof params.error === "string" && params.error.length > 0;
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center px-4 py-10">
       <div className="mb-6 flex justify-center"><Logo href="/" size={44} /></div>

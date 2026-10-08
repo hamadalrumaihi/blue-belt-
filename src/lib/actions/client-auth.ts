@@ -2,6 +2,7 @@
 
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { magicLinkRedirect } from "@/lib/auth/magic-link";
 import { rateLimit, RULES } from "@/lib/rate-limit";
 import { createClient } from "@/lib/supabase/server";
 import { isValidEmail, trimOrNull } from "@/lib/utils";
@@ -12,15 +13,6 @@ import { isValidEmail, trimOrNull } from "@/lib/utils";
  * used to find out who is a client. Rate limited per address.
  */
 export type ClientAuthState = { error?: string; fieldErrors?: Record<string, string>; sent?: true } | null;
-
-async function siteOrigin(): Promise<string> {
-  const configured = process.env.NEXT_PUBLIC_SITE_URL;
-  if (configured) return configured.replace(/\/$/, "");
-  const h = await headers();
-  const proto = h.get("x-forwarded-proto") ?? "https";
-  const host = h.get("x-forwarded-host") ?? h.get("host") ?? "localhost:3000";
-  return `${proto}://${host}`;
-}
 
 async function clientIp(): Promise<string> {
   const h = await headers();
@@ -34,9 +26,8 @@ export async function requestClientMagicLink(_prev: ClientAuthState, formData: F
   if (!limit.ok) return { error: `Too many requests. Try again in ${Math.ceil(limit.retryAfterSeconds / 60)} minutes.` };
 
   const supabase = await createClient();
-  const origin = await siteOrigin();
   // Errors are deliberately not surfaced: the answer must not depend on whether the address exists.
-  await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: `${origin}/auth/callback?next=/client`, shouldCreateUser: true } });
+  await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: magicLinkRedirect(), shouldCreateUser: true } });
   return { sent: true };
 }
 
