@@ -68,7 +68,7 @@ export function NewDocumentForm({ templates, bookings, people, initialBookingId,
 
       <div className="grid gap-4 sm:grid-cols-[1fr_8rem]">
         <FormField label="Title" htmlFor="title" hint="Optional. Defaults to the template name and the client.">
-          <input id="title" name="title" type="text" maxLength={160} className="input" placeholder="e.g. Event coverage — Ahmed, Doha Open" />
+          <input id="title" name="title" type="text" maxLength={160} className="input" placeholder="e.g. Event coverage: Ahmed, Doha Open" />
         </FormField>
         <FormField label="Valid for (days)" htmlFor="expires_days" hint="After sending.">
           <input id="expires_days" name="expires_days" type="number" inputMode="numeric" min={1} max={90} defaultValue={14} className="input" />

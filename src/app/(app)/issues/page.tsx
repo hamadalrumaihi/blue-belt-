@@ -38,7 +38,7 @@ export default async function IssuesPage() {
         </Section>
 
         {done.length > 0 && (
-          <Section title="Marked done — still failing" count={done.length} hint="You handled these, but the source has not read OK yet. If the same problem returns after a recovery, it shows up above again.">
+          <Section title="Marked done, still failing" count={done.length} hint="You handled these, but the source has not read OK yet. If the same problem returns after a recovery, it shows up above again.">
             {done.map((i) => <IssueCard key={i.id} issue={i} now={now} />)}
           </Section>
         )}

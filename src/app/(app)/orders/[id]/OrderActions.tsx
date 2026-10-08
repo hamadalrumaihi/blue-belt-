@@ -43,7 +43,7 @@ export function OrderActions({ orderId, paymentState, status, offline, paymentsE
             <button type="button" className="btn-ghost min-h-11" disabled={pending} onClick={() => setConfirming(false)}>Cancel</button>
           </div>
         ) : (
-          <button type="button" className="btn-primary min-h-11" disabled={pending} onClick={() => setConfirming(true)}>{offline ? "Payment received — confirm" : "Mark as paid"}</button>
+          <button type="button" className="btn-primary min-h-11" disabled={pending} onClick={() => setConfirming(true)}>{offline ? "Payment received, confirm" : "Mark as paid"}</button>
         )
       )}
       <div className="flex flex-wrap gap-2">

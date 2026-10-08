@@ -40,7 +40,7 @@ export function DocumentActions({ documentId, status, title }: Props) {
     <div className="mt-4 space-y-3">
       {link && (
         <div className="rounded-xl border border-success/30 bg-success-soft p-3" role="status" aria-live="polite">
-          <p className="text-sm font-bold text-success">Signing link ready{link.emailQueued ? " — e-mail queued to the client" : link.emailQueued === false ? " — no e-mail address on file, share it yourself" : ""}</p>
+          <p className="text-sm font-bold text-success">Signing link ready{link.emailQueued ? ". E-mail queued to the client" : link.emailQueued === false ? ". No e-mail address on file, share it yourself" : ""}</p>
           <p className="mt-1 break-all font-mono text-xs text-ink">{link.url}</p>
           <p className="mt-1 text-xs text-muted">Shown once. Anyone with this link can sign as the client, so share it only with them.</p>
           <div className="mt-2 flex flex-wrap gap-2">

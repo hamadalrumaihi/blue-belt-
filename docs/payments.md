@@ -313,3 +313,139 @@ automatic path should message them) is a deliberate, unbuilt step — it is an
 outward, customer-facing action that needs the owner's explicit sign-off on
 wording and channel. The owner sees the link on the order page and sends it
 themselves. A paid booking still never creates a tracked athlete.
+
+## Website checkout (embedded card view)
+
+**Live activation is pending.** Everything below works against the MyFatoorah
+test portal (`https://apitest.myfatoorah.com`, demo card view) and must be run
+there first. Nothing in this section makes the app claim that payments are
+live; while `isPaymentsEnabled()` is false the pay page shows "Online payment
+is being set up. We will send you the link when it is ready." and no provider
+call is made.
+
+### The customer flow
+
+1. **Request.** The website booking wizard creates the booking as `inquiry`
+   (or `awaiting_contract` when a contract is required; `confirmed` only for a
+   free service). Booking never requires payment: `initialBookingStatus` never
+   returns `awaiting_payment`, no payment session is created at booking time,
+   `payment_url` and `provider_invoice_id` stay null.
+2. **Owner confirms** (Bookings → booking → Next step), optionally sends an
+   agreement.
+3. **Shoot.** Afterwards the owner presses **Mark shoot complete**
+   (`markShootComplete`): `coverage_done_at` is stamped once and a confirmed
+   booking moves to `in_progress` through the normal transition rules.
+4. **Final amount.** The owner records it inline (`recordFinalAmount`,
+   `parseFinalAmount`: 0 < amount ≤ 1,000,000 QAR, note ≤ 300 chars). Refused
+   once MyFatoorah has verified a payment. `metadata.final_amount_recorded_at`
+   is set.
+5. **Payment link.** **Create payment link** (`createPaymentRequest`) is
+   enabled only when `canRequestPayment(booking)` holds: shoot complete,
+   amount > 0, lifecycle in confirmed / in_progress / delivered / completed,
+   and something still due (`effectivePayment` unpaid or partial). It mints a
+   token `bbp_` + 40 base62 characters, stores `sha256(token)` in
+   `metadata.pay_token_hash` and the time in `metadata.pay_token_created_at`
+   (links expire after 30 days), and puts `https://<site>/pay/<token>` in
+   `payment_url`. An earlier provider URL moves to
+   `metadata.provider_payment_url`. The lifecycle is **not** changed. The owner
+   always gets a Telegram `BOOKING_PAYMENT_REQUESTED`; the client gets the
+   `PAYMENT_REQUESTED` e-mail ("Pay online for your booking <ref>", button
+   "Pay online" → our pay page) **only** when "Send to client by e-mail" is
+   ticked. A new link replaces the old one.
+6. **Pay page** `/pay/<token>` (`src/app/(public)/pay/[token]/page.tsx`,
+   `src/lib/payments/pay-page.ts`, actions in `src/lib/actions/pay.ts`):
+   rate limited per IP (`RULES.signPerIp`), booking looked up by
+   `metadata->>pay_token_hash` with the service client, neutral "not valid"
+   page for an unknown or expired token. Shows the business name, reference,
+   service / athlete / event, the amount **from the booking row** and the
+   current payment state. When payable, the `PayCard` client component:
+   - calls `startCardSession` → server `POST /v2/InitiateSession` → returns
+     `{ sessionId, countryCode, scriptUrl }` (`cardViewScriptUrl(baseUrl)`:
+     apitest → `demo.myfatoorah.com/cardview/v3/session.js`, api-qa →
+     `qa.myfatoorah.com/...`, other production bases mapped, unknown → demo);
+   - loads the script, renders `<div id="card-element">`, calls
+     `myFatoorah.init({ countryCode, sessionId, cardViewId: "card-element", supportedNetworks: "v,m,ae" })`;
+   - on **Pay {amount} QAR**: `myFatoorah.submit()` → `executeCardPayment(token, sessionId)`
+     → server reloads the booking by token, refuses unless payable, `POST
+     /v2/ExecutePayment` with `InvoiceValue` = amount due (booking amount less
+     manual payments), `CustomerReference` = booking id, `CallBackUrl`
+     `/pay/<token>?result=callback`, `ErrorUrl` `/pay/<token>?result=error`;
+     stores `provider_invoice_id` (guarded by the invoice id it read: null or
+     the previous one, which is appended to `metadata.superseded_invoices`),
+     `metadata.provider_payment_url`, `metadata.pay_session { invoice_id, amount, currency, kind }`,
+     audit `payment.session_started` (actor `client`), then returns
+     `PaymentURL`; the browser does `window.location.assign` (3-D Secure).
+   - fallback **Pay on MyFatoorah's page** (`startHostedPayment`,
+     `SendPayment`) when the card view fails to load: same guards, same
+     storage, `kind: "hosted"`.
+7. **Verification.** A redirect never proves payment. On
+   `?result=callback&paymentId=…` the page calls `verifyReturnedPayment`
+   **before rendering**: `GetPaymentStatus` with `KeyType: "PaymentId"`; the
+   answer must name this booking's invoice (or one it superseded), then the
+   webhook's own `applyStatusToBooking` is applied (atomic RPC, amount and
+   currency enforced, idempotent). Paid → "Paid, thank you" from the DB state;
+   Pending / InProgress → "We are confirming your payment"; Failed → "Payment
+   did not go through" + retry; `?result=error` → "Payment not completed" +
+   retry. Query parameters are never trusted for amounts or status. The
+   signed webhook remains the primary source of truth and the cron job the
+   safety net.
+
+### Amount and currency check (webhook, reconcile, return visit)
+
+`applyStatusToBooking` refuses a verified `paid` whose amount differs from
+`expectedChargeQr(booking, invoiceId)` by more than 0.01, or whose currency
+differs from the booking's. Expected = `metadata.pay_session.amount` when that
+session's invoice id matches, otherwise `amount_qr − amount_paid_qr`. Outcome:
+`processing_result = amount_mismatch:<reason>`, the booking keeps its status,
+`metadata.payment_mismatch` records the evidence, and the owner gets one
+Telegram `INTEGRATION_FAILED` per event (`payment:<bookingId>:mismatch:<eventId>`).
+The booking page shows the mismatch in step 6. Duplicates and retries stay
+idempotent.
+
+### Environment
+
+Same variables as above: `PAYMENTS_MYFATOORAH_ENABLED=1`, `MYFATOORAH_API_KEY`,
+`MYFATOORAH_WEBHOOK_SECRET`, `MYFATOORAH_BASE_URL` (test:
+`https://apitest.myfatoorah.com`; Qatar production: `https://api-qa.myfatoorah.com`),
+plus `NEXT_PUBLIC_SITE_URL` / `APP_URL` for the pay-page links. The card view
+script host follows the base URL automatically.
+
+### Test-portal procedure (card view)
+
+In a Vercel **Preview** with the test token, test webhook secret and
+`MYFATOORAH_BASE_URL=https://apitest.myfatoorah.com`, with the V2 webhook
+registered on the preview URL (see "Activation procedure"):
+
+1. Submit a website booking → it appears as **Inquiry**, no payment link.
+2. Confirm it, press **Mark shoot complete**, record a final amount (e.g.
+   `350`), press **Create payment link** with "Send to client by e-mail"
+   ticked. Open the link from the e-mail (or copy it from the booking page).
+3. On `/pay/<token>` the demo card view loads inside the page. Use the
+   MyFatoorah test cards from https://docs.myfatoorah.com/docs/test-cards.
+
+Run every case below and check the booking page (step 6), `photo_payment_events`
+(`processing_result`), `photo_payment_attempts`, `photo_payment_records` and
+the owner's Telegram:
+
+| Case | How | Expect |
+| --- | --- | --- |
+| Success | A test card that succeeds without 3DS | redirected back with `?result=callback&paymentId=…`; page says "Paid, thank you"; booking `status=paid`, `paid_at` set, one attempt row, one `provider` payment record, PAYMENT_RECEIVED e-mail queued, owner "[Orders] Payment confirmed". The webhook arrives as `processed` or `unchanged` (whichever is second); never two records. |
+| 3-D Secure | A 3DS test card | the bank page opens; after authentication the same success path applies. |
+| Failure | A declining test card | `?result=callback` with a failed transaction → "Payment did not go through"; booking `status=failed`; no record; retry creates a new invoice (`superseded_invoices` keeps the old id); the later success is `failed → paid`. |
+| Pending | Abandon the 3DS page, then open `/pay/<token>?result=callback&paymentId=<id>` by hand | "We are confirming your payment"; booking unchanged; the cron (`PAYMENTS_RECONCILE_ENABLED=1`) or a later webhook settles it. |
+| Cancellation | Close / cancel on the 3DS page | redirect to `?result=error` → "Payment not completed"; nothing charged; booking unchanged; **Pay** works again. |
+| Repeated webhook | Portal → Webhook → resend the delivery | second delivery answers 200 `duplicate`; attempts incremented; nothing re-applied. |
+| Invalid signature | Replay the body with a wrong `MyFatoorah-Signature` | 401; event stored with `signature_valid=false` and only a hash; booking untouched. |
+| Amount mismatch | Pay, then replay the signed webhook body with `Amount.ValueInBaseCurrency` changed (demo secret) on an unpaid test booking, or change the booking's final amount before a hosted link is paid | 200 with `result: amount_mismatch`; booking stays unpaid; `metadata.payment_mismatch` set; owner Telegram `INTEGRATION_FAILED` once per event; booking page step 6 shows the warning. |
+
+Also check `/client`: the card shows "Payment requested" with **Pay online**
+(our page, never the provider URL), then "Paid on <date>".
+
+### Known limits
+
+- A customer who keeps a superseded hosted link and pays it is matched by
+  `Invoice.ExternalIdentifier` (= booking id) for **paid** events only; failed
+  events for old invoices are `booking_not_found`.
+- Links expire after 30 days; the owner creates a new one.
+- The embedded card view needs the MyFatoorah script from the portal host;
+  when it does not load within 12 s the page offers the hosted page instead.

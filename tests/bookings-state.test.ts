@@ -4,14 +4,17 @@ import {
   BOOKING_TRANSITIONS,
   bookingDetails,
   bookingTransitionColumns,
+  canRequestPayment,
   canTransitionBooking,
   effectivePayment,
   formatQr,
   initialBookingStatus,
+  isShootComplete,
   isTerminalBooking,
   makePublicRef,
+  paymentRequestBlocker,
 } from "@/lib/bookings/state";
-import { bookingEmailAlertKey, bookingEmailContent, bookingFacts } from "@/lib/bookings/emails";
+import { BOOKING_EMAIL_KINDS, bookingEmailAlertKey, bookingEmailContent, bookingFacts, NO_PAYMENT_NEEDED_NOW } from "@/lib/bookings/emails";
 import { booking } from "./payments/fixtures";
 
 describe("booking lifecycle table", () => {
@@ -44,12 +47,38 @@ describe("initialBookingStatus", () => {
   it("quotes start as inquiries whatever else is set", () => {
     expect(initialBookingStatus({ paymentMode: "quote", amountQr: 500, requiresContract: true })).toBe("inquiry");
   });
-  it("a contract requirement wins over payment", () => {
+  it("a contract requirement comes first", () => {
     expect(initialBookingStatus({ paymentMode: "manual", amountQr: 500, requiresContract: true })).toBe("awaiting_contract");
+    expect(initialBookingStatus({ paymentMode: "link_later", amountQr: 0, requiresContract: true })).toBe("awaiting_contract");
   });
-  it("priced bookings wait for payment; free ones are confirmed at once", () => {
-    expect(initialBookingStatus({ paymentMode: "instant", amountQr: 350, requiresContract: false })).toBe("awaiting_payment");
+  it("booking never requires payment: a priced service starts as an inquiry the owner confirms; only a free one is confirmed at once", () => {
+    for (const paymentMode of ["instant", "link_later", "manual"] as const) {
+      expect(initialBookingStatus({ paymentMode, amountQr: 350, requiresContract: false })).toBe("inquiry");
+      expect(initialBookingStatus({ paymentMode, amountQr: 350, requiresContract: false })).not.toBe("awaiting_payment");
+    }
     expect(initialBookingStatus({ paymentMode: "manual", amountQr: 0, requiresContract: false })).toBe("confirmed");
+  });
+});
+
+describe("canRequestPayment", () => {
+  const done = "2026-10-06T10:00:00.000Z";
+  const base = booking({ coverage_done_at: done, amount_qr: 350, booking_status: "in_progress", status: "pending", amount_paid_qr: 0, manual_paid_at: null });
+
+  it("needs the shoot complete, an amount, a confirmed-or-later stage and something still due", () => {
+    expect(isShootComplete(base)).toBe(true);
+    expect(canRequestPayment(base)).toBe(true);
+    for (const booking_status of ["confirmed", "in_progress", "delivered", "completed"] as const) expect(canRequestPayment({ ...base, booking_status })).toBe(true);
+    expect(paymentRequestBlocker({ ...base, coverage_done_at: null })).toBe("shoot_not_complete");
+    expect(isShootComplete({ coverage_done_at: null })).toBe(false);
+    expect(paymentRequestBlocker({ ...base, amount_qr: 0 })).toBe("no_amount");
+    for (const booking_status of ["inquiry", "quoted", "awaiting_contract", "awaiting_payment", "cancelled"] as const) expect(paymentRequestBlocker({ ...base, booking_status })).toBe("wrong_stage");
+  });
+
+  it("partly paid bookings can still be asked for the balance; paid or refunded ones cannot", () => {
+    expect(canRequestPayment({ ...base, amount_paid_qr: 100, manual_paid_at: done })).toBe(true);
+    expect(paymentRequestBlocker({ ...base, status: "paid" })).toBe("already_paid");
+    expect(paymentRequestBlocker({ ...base, amount_paid_qr: 350, manual_paid_at: done })).toBe("already_paid");
+    expect(paymentRequestBlocker({ ...base, status: "refunded" })).toBe("refunded");
   });
 });
 
@@ -119,8 +148,31 @@ describe("booking e-mails", () => {
     expect(facts).toContainEqual(["Amount", "350 QAR"]);
   });
 
-  it("PAYMENT_REQUESTED links to the payment URL; cancellation carries the reason and no button", () => {
-    expect(bookingEmailContent("PAYMENT_REQUESTED", b, o).cta).toEqual({ label: "Pay securely", url: "https://pay.example/1" });
+  it("PAYMENT_REQUESTED says the amount, names MyFatoorah on the website, and links 'Pay online' only to OUR pay page", () => {
+    const website = { ...b, payment_url: "https://site/pay/bbp_" + "a".repeat(40) };
+    const mail = bookingEmailContent("PAYMENT_REQUESTED", website, o);
+    expect(mail.subject).toBe("Pay online for your booking (BB-7K3PQ2)");
+    expect(mail.cta).toEqual({ label: "Pay online", url: website.payment_url });
+    expect(mail.paragraphs.join(" ")).toMatch(/350 QAR/);
+    expect(mail.paragraphs.join(" ")).toMatch(/MyFatoorah on the Blue Belt Media website/);
+    // A provider URL (MyFatoorah's own invoice page) is never the button: the portal is.
+    expect(bookingEmailContent("PAYMENT_REQUESTED", b, o).cta).toEqual({ label: "View your booking", url: o.portalUrl });
+    // A partly paid booking is asked for the balance.
+    expect(bookingEmailContent("PAYMENT_REQUESTED", { ...website, amount_paid_qr: 100, manual_paid_at: "x" }, o).paragraphs[0]).toMatch(/250 QAR/);
+  });
+
+  it("received / confirmed mails say no payment is needed now; nothing customer-facing carries an em dash", () => {
+    expect(bookingEmailContent("BOOKING_RECEIVED", b, o).paragraphs).toContain(NO_PAYMENT_NEEDED_NOW);
+    expect(bookingEmailContent("BOOKING_CONFIRMED", b, o).paragraphs).toContain(NO_PAYMENT_NEEDED_NOW);
+    expect(bookingEmailContent("BOOKING_CONFIRMED", { ...b, status: "paid" }, o).paragraphs.join(" ")).toMatch(/payment has been received/i);
+    for (const kind of BOOKING_EMAIL_KINDS) {
+      const c = bookingEmailContent(kind, { ...b, cancel_reason: "No" }, { ...o, payment: { amountQr: 100, methodLabel: "Cash", dueQr: 250 }, previous: { session_at: b.session_at, location: "Doha" } });
+      const text = [c.subject, c.greeting, ...c.paragraphs, c.cta?.label ?? "", ...(c.facts ?? []).flat()].join(" ");
+      expect(text, kind).not.toContain("\u2014");
+    }
+  });
+
+  it("cancellation carries the reason and no button", () => {
     const cancelled = bookingEmailContent("BOOKING_CANCELLED", { ...b, cancel_reason: "Athlete withdrew" }, o);
     expect(cancelled.cta).toBeNull();
     expect(cancelled.paragraphs[0]).toContain("Athlete withdrew");

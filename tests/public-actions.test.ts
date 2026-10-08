@@ -193,13 +193,16 @@ describe("submitPublicBooking", () => {
       amount_qr: 350,
       currency: "QAR",
       payment_mode: "link_later",
-      booking_status: "awaiting_payment",
+      // Booking never requires payment: the owner reviews and confirms first.
+      booking_status: "inquiry",
     });
     expect(booking.public_ref).toMatch(/^BB-[A-HJ-NP-Z2-9]{6}$/);
     expect(url.endsWith(String(booking.public_ref))).toBe(true);
     expect((booking.details as Row).consent_accepted_at).toEqual(expect.any(String));
     expect(booking).not.toHaveProperty("status");
     expect(booking).not.toHaveProperty("payment_url");
+    expect(booking).not.toHaveProperty("provider_invoice_id");
+    expect(booking.booking_status).not.toBe("awaiting_payment");
 
     const link = service.calls.find((c) => c.table === "photo_leads" && c.op === "update");
     expect(link?.payload).toEqual({ booking_id: "booking-1" });
@@ -215,6 +218,8 @@ describe("submitPublicBooking", () => {
     expect(email).toMatchObject({ owner_id: OWNER, alert_key: "email:booking:booking-1:received", kind: "BOOKING_RECEIVED" });
     expect((email!.payload as Row).to).toBe("hamad@example.com");
     expect(JSON.stringify(email)).toContain("https://studio.test/client");
+    expect((email!.payload as Row).text).toContain("No payment is needed to book. After the shoot you pay online through MyFatoorah.");
+    expect((email!.payload as Row).text).not.toMatch(/payment link follows|WhatsApp/);
 
     expect(service.inserts("photo_athletes")).toEqual([]);
   });

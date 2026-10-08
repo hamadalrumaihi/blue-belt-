@@ -149,7 +149,7 @@ export function BookingWizard({ events, services, initialType, initialEventId, i
       </h2>
       <p className="sr-only" aria-live="polite">Step {step + 1} of 4: {stepTitle}</p>
       {current?.intro && <p className="mt-2 text-base text-muted">{current.intro}</p>}
-      {step === 3 && <p className="mt-2 text-base text-muted">Check the details, agree to the terms and send. Nothing is paid now.</p>}
+      {step === 3 && <p className="mt-2 text-base text-muted">Check the details, agree to the terms and send. No payment is needed to book.</p>}
 
       <div className="mt-6 space-y-5">
         {step === 0 && (
@@ -272,7 +272,7 @@ function FieldInput({ field, values, setValue, errors, events, services }: Field
           <select id="f-event_id" className="input" value={picked} onChange={(e) => setValue("event_id", e.target.value)} aria-invalid={Boolean(err)} aria-describedby={err ? "f-event_id-error" : undefined}>
             <option value="">Choose a competition…</option>
             {events.map((e) => (
-              <option key={e.id} value={e.id}>{e.name}{e.event_date ? ` — ${formatEventDate(e.event_date, "short")}` : ""}</option>
+              <option key={e.id} value={e.id}>{e.name}{e.event_date ? `, ${formatEventDate(e.event_date, "short")}` : ""}</option>
             ))}
             <option value="other">Not listed / another event</option>
           </select>
@@ -285,13 +285,13 @@ function FieldInput({ field, values, setValue, errors, events, services }: Field
   }
 
   if (field.kind === "service") {
-    if (!services.length) return <p className="rounded-xl bg-page px-4 py-3 text-sm text-muted">This type of coverage is quoted individually — we send a price after reviewing your request.</p>;
+    if (!services.length) return <p className="rounded-xl bg-page px-4 py-3 text-sm text-muted">This type of coverage is quoted individually. We send a price after reviewing your request.</p>;
     return (
       <Wrap field={field} error={error} htmlFor={id}>
         <select id={id} className="input" value={values[field.name] ?? ""} onChange={(e) => setValue(field.name, e.target.value)} {...a11y}>
-          <option value="">Not sure yet — advise me</option>
+          <option value="">Not sure yet, advise me</option>
           {services.map((s) => (
-            <option key={s.id} value={s.id}>{s.name} — {s.price_qr === null ? "quote" : formatQr(Number(s.price_qr))}</option>
+            <option key={s.id} value={s.id}>{s.name}: {s.price_qr === null ? "quote" : formatQr(Number(s.price_qr))}</option>
           ))}
         </select>
       </Wrap>
@@ -392,7 +392,7 @@ function Review({ type, steps, values, events, services, onEdit }: { type: Booki
     }
     if (f.kind === "service") {
       const s = values.service_id ? services.find((x) => x.id === values.service_id) : null;
-      return s ? `${s.name} — ${s.price_qr === null ? "quote" : formatQr(Number(s.price_qr))}` : services.some((x) => x.booking_type === type) ? "Not sure yet — advise me" : null;
+      return s ? `${s.name}: ${s.price_qr === null ? "quote" : formatQr(Number(s.price_qr))}` : services.some((x) => x.booking_type === type) ? "Not sure yet, advise me" : null;
     }
     if (f.kind === "checkbox") {
       const on = (f.options ?? []).filter((o) => values[o.value] === "1").map((o) => o.label);
@@ -435,7 +435,7 @@ function Review({ type, steps, values, events, services, onEdit }: { type: Booki
       ))}
       <ul className="space-y-1 text-sm text-muted">
         <li className="flex items-start gap-2"><CheckIcon size={16} className="mt-0.5 shrink-0 text-success" /> You get a reference straight away; we confirm within 24 hours.</li>
-        <li className="flex items-start gap-2"><CheckIcon size={16} className="mt-0.5 shrink-0 text-success" /> No payment is taken now. A payment link follows by e-mail or WhatsApp once the price is confirmed.</li>
+        <li className="flex items-start gap-2"><CheckIcon size={16} className="mt-0.5 shrink-0 text-success" /> No payment is needed to book. After the shoot you pay online through MyFatoorah.</li>
       </ul>
     </div>
   );

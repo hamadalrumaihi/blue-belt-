@@ -61,8 +61,9 @@ function chain(table: string) {
 const getUser = vi.fn();
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn(async () => ({ auth: { getUser }, from: (table: string) => chain(table) })) }));
 
-import { assignBookingCoverage, createAthleteFromBooking, createBooking, deleteManualPayment, linkBookingToAthlete, recordManualPayment, requestBookingInvoice, transitionBooking } from "@/lib/actions/bookings";
+import { assignBookingCoverage, createAthleteFromBooking, createBooking, createPaymentRequest, deleteManualPayment, linkBookingToAthlete, markShootComplete, recordFinalAmount, recordManualPayment, transitionBooking } from "@/lib/actions/bookings";
 import { createLogger, setLogSink } from "@/lib/log";
+import { isPaymentsEnabled } from "@/lib/payments/config";
 import { processWebhook, type WebhookDeps } from "@/lib/payments/myfatoorah/webhook";
 import { FakeSupabase } from "./payments/fake-supabase";
 import { BOOKING_ID, booking, paymentEvent } from "./payments/fixtures";
@@ -99,6 +100,10 @@ describe("signed out", () => {
     expect(await assignBookingCoverage(BOOKING_ID, { photographerId: null })).toMatchObject({ ok: false, error: expect.stringMatching(/signed out/i) });
     expect(await linkBookingToAthlete(BOOKING_ID, ATH)).toMatchObject({ ok: false, error: expect.stringMatching(/signed out/i) });
     expect(await createAthleteFromBooking(BOOKING_ID, null, fd({}))).toMatchObject({ error: expect.stringMatching(/signed out/i) });
+    expect(await markShootComplete(BOOKING_ID)).toMatchObject({ ok: false, error: expect.stringMatching(/signed out/i) });
+    expect(await recordFinalAmount(BOOKING_ID, null, fd({ amount_qr: "350" }))).toMatchObject({ error: expect.stringMatching(/signed out/i) });
+    vi.mocked(isPaymentsEnabled).mockReturnValue(true);
+    expect(await createPaymentRequest(BOOKING_ID)).toMatchObject({ ok: false, error: expect.stringMatching(/signed out/i) });
     expect(writes).toEqual([]);
   });
 });
@@ -112,7 +117,9 @@ describe("input guards", () => {
     expect(await assignBookingCoverage(BOOKING_ID, { photographerId: "not-a-uuid" })).toMatchObject({ ok: false, error: expect.stringMatching(/assignee/i) });
     expect(await linkBookingToAthlete(BOOKING_ID, "nope")).toMatchObject({ ok: false, error: expect.stringMatching(/athlete/i) });
     expect(await createAthleteFromBooking("nope", null, fd({}))).toMatchObject({ error: expect.stringMatching(/invalid booking/i) });
-    expect(await requestBookingInvoice("nope")).toMatchObject({ ok: false, error: expect.stringMatching(/invalid booking/i) });
+    expect(await createPaymentRequest("nope")).toMatchObject({ ok: false, error: expect.stringMatching(/invalid booking/i) });
+    expect(await markShootComplete("nope")).toMatchObject({ ok: false, error: expect.stringMatching(/invalid booking/i) });
+    expect(await recordFinalAmount("nope", null, fd({ amount_qr: "1" }))).toMatchObject({ error: expect.stringMatching(/invalid booking/i) });
     expect(writes).toEqual([]);
   });
 
@@ -122,9 +129,131 @@ describe("input guards", () => {
     expect(writes).toEqual([]);
   });
 
-  it("requestBookingInvoice is inert while payments are off", async () => {
-    expect(await requestBookingInvoice(BOOKING_ID, true)).toMatchObject({ ok: false, error: expect.stringMatching(/not enabled/i) });
+  it("createPaymentRequest is inert while payments are off", async () => {
+    expect(await createPaymentRequest(BOOKING_ID, { notifyClient: true })).toMatchObject({ ok: false, error: expect.stringMatching(/not enabled/i) });
     expect(writes).toEqual([]);
+  });
+});
+
+const DONE = "2026-10-06T09:00:00.000Z";
+const payable = () => booking({ booking_status: "in_progress", coverage_done_at: DONE, amount_qr: 350, status: "pending", provider_invoice_id: null, payment_url: null, metadata: {} });
+
+describe("markShootComplete", () => {
+  it("stamps coverage_done_at once and moves a confirmed booking to in_progress through the transition rules", async () => {
+    const b = booking({ booking_status: "confirmed", confirmed_at: "2026-10-01T00:00:00.000Z", coverage_done_at: null });
+    results.photo_bookings = [
+      { data: b, error: null },
+      { data: { ...b, booking_status: "in_progress", coverage_done_at: DONE }, error: null },
+    ];
+    expect(await markShootComplete(BOOKING_ID)).toEqual({ ok: true });
+    const update = writes.find((w) => w.table === "photo_bookings" && w.op === "update")?.payload as Record<string, unknown>;
+    expect(update).toMatchObject({ booking_status: "in_progress", coverage_done_at: expect.any(String) });
+    expect("status" in update || "paid_at" in update || "amount_qr" in update).toBe(false);
+    expect(writeAudit).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ action: "booking.shoot_complete", entityId: BOOKING_ID }));
+    expect(writeAudit).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ action: "booking.status", data: expect.objectContaining({ from: "confirmed", to: "in_progress" }) }));
+    expect(enqueueClientEmail).not.toHaveBeenCalled();
+  });
+
+  it("keeps a later stage as it is, is a no-op when already done, and refuses before confirmation or after cancellation", async () => {
+    const delivered = booking({ booking_status: "delivered", coverage_done_at: null });
+    results.photo_bookings = [{ data: delivered, error: null }, { data: { ...delivered, coverage_done_at: DONE }, error: null }];
+    expect(await markShootComplete(BOOKING_ID)).toEqual({ ok: true });
+    expect((writes.find((w) => w.op === "update")?.payload as Record<string, unknown>).booking_status).toBeUndefined();
+
+    writes.length = 0;
+    results.photo_bookings = { data: booking({ booking_status: "in_progress", coverage_done_at: DONE }), error: null };
+    expect(await markShootComplete(BOOKING_ID)).toEqual({ ok: true });
+    expect(writes).toEqual([]);
+
+    results.photo_bookings = { data: booking({ booking_status: "inquiry" }), error: null };
+    expect(await markShootComplete(BOOKING_ID)).toMatchObject({ ok: false, error: expect.stringMatching(/confirm the booking/i) });
+    results.photo_bookings = { data: booking({ booking_status: "cancelled" }), error: null };
+    expect(await markShootComplete(BOOKING_ID)).toMatchObject({ ok: false, error: expect.stringMatching(/cancelled/i) });
+    expect(writes).toEqual([]);
+  });
+});
+
+describe("recordFinalAmount", () => {
+  it("validates the amount and note before loading the booking", async () => {
+    expect(await recordFinalAmount(BOOKING_ID, null, fd({ amount_qr: "0" }))).toMatchObject({ fieldErrors: { amount_qr: expect.any(String) } });
+    expect(await recordFinalAmount(BOOKING_ID, null, fd({ amount_qr: "2000000" }))).toMatchObject({ fieldErrors: { amount_qr: expect.any(String) } });
+    expect(await recordFinalAmount(BOOKING_ID, null, fd({ amount_qr: "350", note: "x".repeat(301) }))).toMatchObject({ fieldErrors: { note: expect.any(String) } });
+    expect(writes).toEqual([]);
+  });
+
+  it("refuses once MyFatoorah has verified a payment; otherwise updates the amount and stamps metadata", async () => {
+    results.photo_bookings = { data: booking({ status: "paid" }), error: null };
+    expect(await recordFinalAmount(BOOKING_ID, null, fd({ amount_qr: "400" }))).toMatchObject({ error: expect.stringMatching(/already paid/i) });
+    expect(writes).toEqual([]);
+
+    const b = payable();
+    results.photo_bookings = [{ data: b, error: null }, { data: { ...b, amount_qr: 1200.5 }, error: null }];
+    expect(await recordFinalAmount(BOOKING_ID, null, fd({ amount_qr: "1,200.50", note: "Two extra hours" }))).toEqual({ saved: true });
+    const update = writes.find((w) => w.table === "photo_bookings" && w.op === "update")?.payload as Record<string, unknown>;
+    expect(update).toMatchObject({ amount_qr: 1200.5, currency: "QAR", metadata: expect.objectContaining({ final_amount_recorded_at: expect.any(String), final_amount_note: "Two extra hours", final_amount_previous: 350 }) });
+    expect("status" in update || "booking_status" in update).toBe(false);
+    expect(writeAudit).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ action: "booking.final_amount", data: expect.objectContaining({ amount_qr: 1200.5, previous_qr: 350 }) }));
+  });
+});
+
+describe("createPaymentRequest", () => {
+  beforeEach(() => {
+    vi.mocked(isPaymentsEnabled).mockReturnValue(true);
+  });
+
+  it("refuses before the shoot is complete, without an amount, or once paid; nothing is written or sent", async () => {
+    results.photo_bookings = { data: { ...payable(), coverage_done_at: null }, error: null };
+    expect(await createPaymentRequest(BOOKING_ID)).toMatchObject({ ok: false, error: expect.stringMatching(/shoot complete/i) });
+    results.photo_bookings = { data: { ...payable(), amount_qr: 0 }, error: null };
+    expect(await createPaymentRequest(BOOKING_ID)).toMatchObject({ ok: false, error: expect.stringMatching(/final amount/i) });
+    results.photo_bookings = { data: { ...payable(), status: "paid" }, error: null };
+    expect(await createPaymentRequest(BOOKING_ID)).toMatchObject({ ok: false, error: expect.stringMatching(/already paid/i) });
+    results.photo_bookings = { data: { ...payable(), amount_paid_qr: 350, manual_paid_at: DONE }, error: null };
+    expect(await createPaymentRequest(BOOKING_ID)).toMatchObject({ ok: false, error: expect.stringMatching(/already paid/i) });
+    results.photo_bookings = { data: { ...payable(), booking_status: "inquiry" }, error: null };
+    expect(await createPaymentRequest(BOOKING_ID)).toMatchObject({ ok: false, error: expect.stringMatching(/confirm the booking/i) });
+    expect(writes).toEqual([]);
+    expect(enqueueOwnerTelegram).not.toHaveBeenCalled();
+    expect(enqueueClientEmail).not.toHaveBeenCalled();
+  });
+
+  it("stores the WEBSITE pay link (token hash in metadata), leaves the lifecycle alone, tells the owner, and e-mails the client only when asked", async () => {
+    const b = payable();
+    const updated = (payload: Record<string, unknown>) => ({ ...b, ...payload });
+    results.photo_bookings = [{ data: b, error: null }, { data: updated({ payment_url: "https://site.test/pay/placeholder" }), error: null }];
+    const out = await createPaymentRequest(BOOKING_ID);
+    expect(out).toMatchObject({ ok: true, emailQueued: false });
+    if (!out.ok) throw new Error("unreachable");
+    expect(out.payUrl).toMatch(/^https:\/\/site\.test\/pay\/bbp_[A-Za-z0-9]{40}$/);
+    const update = writes.find((w) => w.table === "photo_bookings" && w.op === "update")?.payload as Record<string, unknown>;
+    expect(update.payment_url).toBe(out.payUrl);
+    expect(update.metadata).toMatchObject({ pay_token_hash: expect.stringMatching(/^[0-9a-f]{64}$/), pay_token_created_at: expect.any(String), payment_requested_at: expect.any(String) });
+    expect((update.metadata as Record<string, unknown>).pay_token_hash).not.toContain(out.payUrl.split("/pay/")[1]);
+    expect("booking_status" in update || "status" in update || "provider_invoice_id" in update || "amount_qr" in update).toBe(false);
+    expect(writeAudit).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ action: "booking.payment_requested", data: expect.objectContaining({ amount_qr: 350, notify_client: false }) }));
+    expect(enqueueOwnerTelegram).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ kind: "BOOKING_PAYMENT_REQUESTED", lines: expect.arrayContaining([`Pay: ${out.payUrl}`]) }));
+    expect(enqueueClientEmail).not.toHaveBeenCalled();
+
+    // Opt-in e-mail: the PAYMENT_REQUESTED mail goes out with the website link as its button.
+    writes.length = 0;
+    results.photo_bookings = [{ data: b, error: null }, { data: updated({ payment_url: "https://site.test/pay/bbp_" + "a".repeat(40) }), error: null }];
+    const sent = await createPaymentRequest(BOOKING_ID, { notifyClient: true });
+    expect(sent).toMatchObject({ ok: true, emailQueued: true });
+    const mail = enqueueClientEmail.mock.calls.map((c) => (c as unknown as [unknown, { kind: string; draft: { subject: string; text: string } }])[1])[0];
+    expect(mail.kind).toBe("PAYMENT_REQUESTED");
+    expect(mail.draft.subject).toMatch(/^Pay online for your booking/);
+    expect(mail.draft.text).toContain("https://site.test/pay/bbp_");
+    expect(mail.draft.text).not.toContain("\u2014");
+  });
+
+  it("keeps an earlier provider URL out of payment_url: it moves to metadata.provider_payment_url", async () => {
+    const b = { ...payable(), payment_url: "https://demo.myfatoorah.com/ie/0106230003434", provider_invoice_id: "6409988" };
+    results.photo_bookings = [{ data: b, error: null }, { data: b, error: null }];
+    const out = await createPaymentRequest(BOOKING_ID);
+    expect(out.ok).toBe(true);
+    const update = writes.find((w) => w.table === "photo_bookings" && w.op === "update")?.payload as Record<string, unknown>;
+    expect(update.payment_url).toMatch(/^https:\/\/site\.test\/pay\//);
+    expect((update.metadata as Record<string, unknown>).provider_payment_url).toBe("https://demo.myfatoorah.com/ie/0106230003434");
   });
 });
 

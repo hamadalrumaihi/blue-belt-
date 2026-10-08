@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ChevronLeftIcon, DownloadIcon, ExternalIcon, MapPinIcon } from "@/components/icons";
 import { BOOKING_TYPE_LABEL, bookingDetails, effectivePayment, formatQr, PAYMENT_METHOD_LABEL } from "@/lib/bookings/state";
-import { getMyBooking, loadMyPeople } from "@/lib/client-portal/queries";
+import { clientPaymentLine, getMyBooking, loadMyPeople } from "@/lib/client-portal/queries";
 import { DOCUMENT_KIND_LABEL, DOCUMENT_STATUS_LABEL, isDocumentKind } from "@/lib/documents/state";
 import { isStudioRole, resolveViewer } from "@/lib/roles";
 import { formatDateTime } from "@/lib/time";
@@ -24,6 +24,7 @@ export default async function ClientBookingPage({ params }: PageProps<"/client/b
   if (!item) notFound();
   const { booking, documents, gallery, payments } = item;
   const pay = effectivePayment(booking);
+  const payLine = clientPaymentLine(booking);
   const details = bookingDetails(booking);
   const galleryOpen = gallery && (gallery.status === "ready" || gallery.status === "delivered") && gallery.pictime_url ? gallery.pictime_url : null;
 
@@ -56,8 +57,9 @@ export default async function ClientBookingPage({ params }: PageProps<"/client/b
         <section className="card mt-4 p-4">
           <p className="eyebrow">Payment</p>
           <p className="mt-1 text-2xl font-black text-ink">{formatQr(booking.amount_qr)}</p>
-          <p className="text-sm font-semibold text-ink">{pay.state === "paid" ? "Paid, thank you" : pay.state === "partial" ? `${formatQr(pay.paidQr)} received · ${formatQr(pay.dueQr)} still due` : pay.state === "refunded" ? "Refunded" : Number(booking.amount_qr) > 0 ? "Payment pending" : "Nothing to pay"}</p>
-          {pay.state !== "paid" && pay.state !== "refunded" && booking.payment_url && booking.booking_status !== "cancelled" && <a href={booking.payment_url} target="_blank" rel="noopener noreferrer" className="btn-primary mt-3 min-h-12 w-full sm:w-auto">Pay now</a>}
+          <p className="text-sm font-semibold text-ink">{payLine.title}</p>
+          {payLine.detail && <p className="mt-1 text-sm text-muted">{payLine.detail}</p>}
+          {payLine.payUrl && <a href={payLine.payUrl} className="btn-primary mt-3 min-h-12 w-full sm:w-auto">Pay online{pay.state === "partial" ? ` (${formatQr(pay.dueQr)})` : ""}</a>}
           {payments.length > 0 && (
             <ul className="mt-3 divide-y divide-line text-sm">
               {payments.map((p) => (
@@ -85,7 +87,7 @@ export default async function ClientBookingPage({ params }: PageProps<"/client/b
                   {d.status === "signed" ? (
                     <a href={`/api/documents/${d.id}/pdf`} className="btn-secondary min-h-11"><DownloadIcon size={16} /> Download signed copy</a>
                   ) : d.status === "sent" || d.status === "viewed" ? (
-                    <p className="text-xs text-muted">Open the signing link from your e-mail or WhatsApp.</p>
+                    <p className="text-xs text-muted">Open the signing link from your e-mail or WhatsApp to sign.</p>
                   ) : null}
                 </li>
               ))}

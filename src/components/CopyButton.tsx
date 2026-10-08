@@ -55,7 +55,7 @@ export function CopyButton({ value, label = "Copy", copiedLabel = "Copied", clas
   }, [value]);
 
   const Icon = status === "copied" ? CheckIcon : status === "error" ? CloseIcon : CopyIcon;
-  const text = status === "copied" ? copiedLabel : status === "error" ? "Copy failed — select the text" : label;
+  const text = status === "copied" ? copiedLabel : status === "error" ? "Copy failed. Select the text" : label;
 
   return (
     <button type="button" onClick={copy} className={cn("btn-secondary min-h-11", status === "copied" && "border-success/40 text-success", status === "error" && "text-danger", className)}>

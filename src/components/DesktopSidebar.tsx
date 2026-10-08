@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { LogoutIcon } from "./icons";
 import { Logo } from "./Logo";
 import { groupNavItems, isActivePath, NAV_GROUP_LABEL, navItemsFor, SIDEBAR_ITEMS } from "./nav";
+import { ThemeToggle } from "./ThemeToggle";
 
 export function DesktopSidebar({ email, collaboratorOnly = false }: { email: string | null; collaboratorOnly?: boolean }) {
   const pathname = usePathname();
@@ -44,6 +45,10 @@ export function DesktopSidebar({ email, collaboratorOnly = false }: { email: str
         ))}
       </nav>
       <div className="border-t border-white/10 p-4">
+        <div className="mb-3">
+          <p id="sidebar-appearance" className="mb-1.5 px-1 text-[10px] font-bold uppercase tracking-[0.16em] text-white/40">Appearance</p>
+          <ThemeToggle showLabels onNavy className="w-full" aria-labelledby="sidebar-appearance" />
+        </div>
         {email && <p className="mb-2 truncate px-1 text-xs text-white/60" title={email}>{email}</p>}
         <form action={signOut}>
           <button type="submit" className="flex min-h-10 w-full items-center gap-2 rounded-xl px-2 text-sm font-semibold text-white/80 hover:bg-white/10 hover:text-white">

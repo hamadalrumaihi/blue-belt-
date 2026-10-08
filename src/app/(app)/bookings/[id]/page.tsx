@@ -3,11 +3,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { BrandHeader } from "@/components/BrandHeader";
 import { PageBody } from "@/components/AppShell";
-import { EditIcon, FileTextIcon, ImageIcon, MailIcon, PhoneIcon, TrashIcon, WhatsAppIcon } from "@/components/icons";
+import { EditIcon, MailIcon, PhoneIcon, TrashIcon, WhatsAppIcon } from "@/components/icons";
 import { getBooking, listAssignableTeam } from "@/lib/bookings/queries";
-import { BOOKING_TYPE_LABEL, bookingDetails, formatQr, PAYMENT_METHOD_LABEL, PAYMENT_MODE_LABEL } from "@/lib/bookings/state";
-import { DOCUMENT_STATUS_LABEL } from "@/lib/documents/state";
-import { GALLERY_STATUS_LABEL } from "@/lib/galleries/state";
+import { BOOKING_TYPE_LABEL, bookingDetails } from "@/lib/bookings/state";
 import { isPaymentsEnabled } from "@/lib/payments/config";
 import { whatsappDigits } from "@/lib/people/form";
 import { listAthletes } from "@/lib/queries";
@@ -18,17 +16,16 @@ import { AthleteLink } from "../AthleteLink";
 import { BookingActions } from "../BookingActions";
 import { BookingStatusBadge } from "../BookingStatusBadge";
 import { CoverageAssign } from "../CoverageAssign";
-import { InvoicePanel } from "../InvoicePanel";
-import { ManualPaymentForm } from "../ManualPaymentForm";
 import { PaymentBadge } from "../PaymentBadge";
-import { DeletePaymentButton } from "./DeletePaymentButton";
+import { PaymentSteps } from "./PaymentSteps";
+import { QuoteFromPricing } from "./QuoteFromPricing";
 
 export const dynamic = "force-dynamic";
 
 export async function generateMetadata({ params }: PageProps<"/bookings/[id]">): Promise<Metadata> {
   const { id } = await params;
   const detail = isUuid(id) ? await getBooking(id) : null;
-  return { title: detail ? `${detail.booking.public_ref ?? "Booking"} — ${detail.booking.customer_name}` : "Booking" };
+  return { title: detail ? `${detail.booking.public_ref ?? "Booking"}: ${detail.booking.customer_name}` : "Booking" };
 }
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
@@ -46,14 +43,13 @@ export default async function BookingDetailPage({ params }: PageProps<"/bookings
   if (!isUuid(id)) notFound();
   const detail = await getBooking(id);
   if (!detail) notFound();
-  const { booking, client, organization, service, event, gallery, documents, paymentRecords, payment, audit, linkedAthlete } = detail;
+  const { booking, client, organization, service, event, payment, audit, linkedAthlete } = detail;
   const [team, athletes] = await Promise.all([listAssignableTeam(booking.event_id), booking.event_id ? listAthletes(booking.event_id) : Promise.resolve([])]);
   const d = bookingDetails(booking);
   const phone = client?.phone ?? booking.customer_phone;
   const email = client?.email ?? booking.customer_email;
   const wa = whatsappDigits(client?.whatsapp ?? phone);
   const paymentsEnabled = isPaymentsEnabled();
-  const canInvoice = !booking.provider_invoice_id && booking.status !== "paid" && booking.status !== "refunded" && booking.booking_status !== "cancelled" && booking.booking_status !== "completed" && Number(booking.amount_qr) > 0;
 
   return (
     <>
@@ -85,7 +81,7 @@ export default async function BookingDetailPage({ params }: PageProps<"/bookings
                 <Row label="Phone" value={phone} />
                 <Row label="Email" value={email} />
                 <Row label="Instagram" value={client?.instagram ? `@${client.instagram}` : d.instagram} />
-                {!email && <Row label="Note" value={<span className="text-warning">No e-mail on file — confirmations and payment links cannot be e-mailed.</span>} />}
+                {!email && <Row label="Note" value={<span className="text-warning">No e-mail on file: confirmations and payment links cannot be e-mailed.</span>} />}
               </dl>
             </section>
 
@@ -123,69 +119,16 @@ export default async function BookingDetailPage({ params }: PageProps<"/bookings
 
             <section className="card p-4" aria-labelledby="pay-h">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <h2 id="pay-h" className="eyebrow">Payment</h2>
+                <h2 id="pay-h" className="eyebrow">Payment flow</h2>
                 <PaymentBadge payment={payment} amountQr={booking.amount_qr} detailed />
               </div>
-              <p className="mt-1 text-2xl font-black text-ink">{formatQr(booking.amount_qr)}</p>
-              <p className="text-xs text-muted">{PAYMENT_MODE_LABEL[booking.payment_mode]}{payment.paidQr > 0 ? ` · received ${formatQr(payment.paidQr)}` : ""}{payment.dueQr > 0 && Number(booking.amount_qr) > 0 ? ` · due ${formatQr(payment.dueQr)}` : ""}</p>
-              {booking.status === "paid" && <p className="mt-2 rounded-lg bg-success-soft px-3 py-2 text-xs font-semibold text-success">Paid online — verified by MyFatoorah{booking.paid_at ? ` on ${formatStamp(booking.paid_at)}` : ""}.</p>}
-              {booking.status === "refunded" && <p className="mt-2 rounded-lg bg-page px-3 py-2 text-xs font-semibold text-muted">Refunded through MyFatoorah{booking.refunded_at ? ` on ${formatStamp(booking.refunded_at)}` : ""}.</p>}
-              {paymentRecords.length > 0 && (
-                <ul className="mt-3 divide-y divide-line rounded-xl border border-line text-sm">
-                  {paymentRecords.map((r) => (
-                    <li key={r.id} className="flex items-center gap-3 px-3 py-2">
-                      <div className="min-w-0 flex-1">
-                        <p className="font-semibold text-ink">{formatQr(r.amount_qr)} <span className="font-normal text-muted">· {PAYMENT_METHOD_LABEL[r.method]}{r.kind === "provider" ? " (verified)" : ""}</span></p>
-                        <p className="truncate text-xs text-muted">{formatStamp(r.paid_at)}{r.note ? ` · ${r.note}` : ""}</p>
-                      </div>
-                      {r.kind === "manual" && <DeletePaymentButton recordId={r.id} summary={`${formatQr(r.amount_qr)} · ${PAYMENT_METHOD_LABEL[r.method]}`} />}
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <div className="mt-3 flex flex-wrap gap-2">
-                {booking.booking_status !== "cancelled" && <ManualPaymentForm bookingId={id} providerPaid={booking.status === "paid"} dueQr={payment.dueQr} currency={booking.currency} />}
-              </div>
-              <div className="mt-4 border-t border-line pt-3">
-                <p className="mb-2 text-xs font-semibold text-muted">MyFatoorah</p>
-                <InvoicePanel bookingId={id} paymentsEnabled={paymentsEnabled} paymentUrl={booking.payment_url} canInvoice={canInvoice} invoiceId={booking.provider_invoice_id} />
-              </div>
+              <p className="mb-3 mt-1 text-xs text-muted">No payment is needed to book. After the shoot you record the final amount and the client pays online through MyFatoorah.</p>
+              <PaymentSteps detail={detail} paymentsEnabled={paymentsEnabled} />
+              <QuoteFromPricing bookingId={booking.id} />
             </section>
           </div>
 
           <div className="space-y-4">
-            <section className="card p-4" aria-labelledby="agree-h">
-              <h2 id="agree-h" className="eyebrow">Agreement</h2>
-              {documents.length === 0 ? (
-                <p className="mt-1 text-sm text-muted">No agreement yet.</p>
-              ) : (
-                <ul className="mt-2 space-y-1.5 text-sm">
-                  {documents.map((doc) => (
-                    <li key={doc.id}>
-                      <Link href={`/documents/${doc.id}`} className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 hover:bg-page">
-                        <span className="truncate font-semibold text-ink">{doc.title}</span>
-                        <span className="shrink-0 text-xs text-muted">{DOCUMENT_STATUS_LABEL[doc.status]}</span>
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <Link href={`/documents/new?booking=${id}`} className="btn-secondary mt-3 min-h-11 w-full"><FileTextIcon size={16} /> New agreement</Link>
-            </section>
-
-            <section className="card p-4" aria-labelledby="gal-h">
-              <h2 id="gal-h" className="eyebrow">Gallery</h2>
-              {gallery ? (
-                <Link href={`/galleries/${gallery.id}`} className="mt-1 block rounded-lg px-2 py-1.5 hover:bg-page">
-                  <p className="truncate font-semibold text-ink">{gallery.name}</p>
-                  <p className="text-xs text-muted">{GALLERY_STATUS_LABEL[gallery.status]}{gallery.delivered_at ? ` · ${formatStamp(gallery.delivered_at)}` : gallery.ready_at ? ` · ready ${formatStamp(gallery.ready_at)}` : ""}</p>
-                </Link>
-              ) : (
-                <p className="mt-1 text-sm text-muted">No gallery linked yet.</p>
-              )}
-              {!gallery && <Link href={`/galleries/new?booking=${id}`} className="btn-secondary mt-3 min-h-11 w-full"><ImageIcon size={16} /> Add gallery</Link>}
-            </section>
-
             <section className="card p-4" aria-labelledby="tour-h">
               <h2 id="tour-h" className="eyebrow">Tournament link</h2>
               <div className="mt-2">
@@ -214,7 +157,8 @@ export default async function BookingDetailPage({ params }: PageProps<"/bookings
                 <div className="flex justify-between"><dt>Created</dt><dd>{formatStamp(booking.created_at)}</dd></div>
                 {booking.confirmed_at && <div className="flex justify-between"><dt>Confirmed</dt><dd>{formatStamp(booking.confirmed_at)}</dd></div>}
                 {booking.delivered_at && <div className="flex justify-between"><dt>Delivered</dt><dd>{formatStamp(booking.delivered_at)}</dd></div>}
-                {booking.cancelled_at && <div className="flex justify-between"><dt>Cancelled</dt><dd>{formatStamp(booking.cancelled_at)}{booking.cancel_reason ? ` — ${booking.cancel_reason}` : ""}</dd></div>}
+                {booking.coverage_done_at && <div className="flex justify-between"><dt>Shoot done</dt><dd>{formatStamp(booking.coverage_done_at)}</dd></div>}
+                {booking.cancelled_at && <div className="flex justify-between"><dt>Cancelled</dt><dd>{formatStamp(booking.cancelled_at)}{booking.cancel_reason ? `: ${booking.cancel_reason}` : ""}</dd></div>}
               </dl>
             </section>
             <p className="flex items-center gap-1.5 px-1 text-[11px] text-muted"><TrashIcon size={12} /> Bookings are never deleted; cancel them instead so the history stays intact.</p>

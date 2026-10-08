@@ -18,6 +18,15 @@ type Row = Record<string, unknown>;
 type Filter = (row: Row) => boolean;
 type Op = "select" | "insert" | "update" | "upsert";
 
+/** PostgREST JSON path columns (`metadata->>pay_token_hash`): read the nested text value. */
+function readColumn(row: Row, col: string): unknown {
+  if (!col.includes("->")) return row[col];
+  const [base, ...path] = col.split(/->>?/);
+  let v: unknown = row[base];
+  for (const key of path) v = v && typeof v === "object" ? (v as Row)[key] : undefined;
+  return v === undefined ? null : v;
+}
+
 const UNIQUE: Record<string, string[][]> = {
   photo_payment_events: [["provider", "provider_event_id"]],
   photo_payment_attempts: [["provider", "provider_payment_id"]],
@@ -121,7 +130,7 @@ class FakeQuery {
     return this;
   }
   eq(col: string, val: unknown) {
-    this.filters.push((r) => r[col] === val);
+    this.filters.push((r) => readColumn(r, col) === val);
     return this;
   }
   neq(col: string, val: unknown) {

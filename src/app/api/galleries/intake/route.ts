@@ -95,7 +95,7 @@ export async function POST(request: Request) {
           ownerId,
           kind: "GALLERY_READY",
           alertKey: `gallery:${gallery.id}:ready`,
-          title: `Gallery ready — ${gallery.name} (Pic-Time invite sent)`,
+          title: `Gallery ready: ${gallery.name} (Pic-Time invite sent)`,
           lines: [event.client?.email ? "Pic-Time e-mailed the client the gallery invite." : "Pic-Time sent the gallery invite.", "Nothing was e-mailed from the studio."],
           url: `${siteUrl()}/galleries/${gallery.id}`,
           now,

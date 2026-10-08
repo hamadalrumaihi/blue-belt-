@@ -101,7 +101,7 @@ export function ClientForm({ action, events, initial, defaultEventId, defaultPla
         {manual && (
           <p className="rounded-xl bg-lightblue px-3 py-2 text-xs font-semibold text-primary">This event is tracked by hand: no page is checked automatically. A link is optional; you enter matches yourself.</p>
         )}
-        <FormField label="Player / schedule URL" htmlFor="source_url" required={!manual} error={fe.source_url} hint={manual ? "Optional — a bracket page, if one exists, for your own reference" : "The athlete's AJP or Smoothcomp profile / schedule page"}>
+        <FormField label="Player / schedule URL" htmlFor="source_url" required={!manual} error={fe.source_url} hint={manual ? "Optional. A bracket page, if one exists, for your own reference" : "The athlete's AJP or Smoothcomp profile / schedule page"}>
           <input id="source_url" name="source_url" type="url" inputMode="url" className="input" value={url} onChange={(e) => onUrlChange(e.target.value)} placeholder="https://ajptour.com/en/…" autoComplete="off" />
         </FormField>
         <FormField label="Platform" htmlFor="platform" required error={fe.platform}>

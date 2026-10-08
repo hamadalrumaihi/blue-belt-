@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { EmptyState } from "@/components/EmptyState";
 import { BookmarkIcon, ChevronRightIcon, ExternalIcon } from "@/components/icons";
 import { BOOKING_TYPE_LABEL, effectivePayment, formatQr } from "@/lib/bookings/state";
-import { listMyBookings, loadMyPeople } from "@/lib/client-portal/queries";
+import { clientPaymentLine, listMyBookings, loadMyPeople } from "@/lib/client-portal/queries";
 import { DOCUMENT_STATUS_LABEL } from "@/lib/documents/state";
 import { isStudioRole, resolveViewer } from "@/lib/roles";
 import { loadPublicStudio } from "@/lib/studio/queries";
@@ -43,6 +43,7 @@ export default async function ClientPortalPage() {
           <ul className="mt-6 space-y-3">
             {items.map(({ booking, documents, gallery, payments }) => {
               const pay = effectivePayment(booking);
+              const payLine = clientPaymentLine(booking);
               const contract = documents[0] ?? null;
               const when = booking.session_at ? formatDateTime(booking.session_at) : null;
               return (
@@ -59,8 +60,9 @@ export default async function ClientPortalPage() {
                   <dl className="mt-4 grid gap-2 text-sm sm:grid-cols-3">
                     <div className="rounded-xl bg-page p-3">
                       <dt className="text-xs font-semibold text-muted">Payment</dt>
-                      <dd className="mt-0.5 font-bold text-ink">{pay.state === "paid" ? "Paid" : pay.state === "partial" ? `Part paid · ${formatQr(pay.dueQr)} due` : pay.state === "refunded" ? "Refunded" : Number(booking.amount_qr) > 0 ? `Payment pending · ${formatQr(booking.amount_qr)}` : "No payment due"}</dd>
-                      {pay.state !== "paid" && pay.state !== "refunded" && booking.payment_url && booking.booking_status !== "cancelled" && <a href={booking.payment_url} target="_blank" rel="noopener noreferrer" className="btn-primary mt-2 min-h-10 w-full px-3 text-xs">Pay now</a>}
+                      <dd className="mt-0.5 font-bold text-ink">{payLine.title}</dd>
+                      {payLine.detail && <p className="mt-1 text-xs text-muted">{payLine.detail}</p>}
+                      {payLine.payUrl && <a href={payLine.payUrl} className="btn-primary mt-2 min-h-10 w-full px-3 text-xs">Pay online{pay.state === "partial" ? ` (${formatQr(pay.dueQr)})` : ""}</a>}
                     </div>
                     <div className="rounded-xl bg-page p-3">
                       <dt className="text-xs font-semibold text-muted">Agreement</dt>

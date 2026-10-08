@@ -60,7 +60,7 @@ export function BookingForm({ action, initial, people, organizations, services, 
               {services.filter((s) => s.active || s.id === initial?.service_id).map((s) => <option key={s.id} value={s.id}>{s.name}{s.booking_type !== type ? ` (${BOOKING_TYPE_LABEL[s.booking_type]})` : ""}</option>)}
             </select>
           </FormField>
-          <FormField label="Tournament / event" htmlFor="event_id" error={fe.event_id} hint="Optional — links the booking to the Watcher">
+          <FormField label="Tournament / event" htmlFor="event_id" error={fe.event_id} hint="Optional. Links the booking to the Watcher">
             <select id="event_id" name="event_id" className="input" defaultValue={initial?.event_id ?? defaultEventId ?? ""}>
               <option value="">No event</option>
               {events.map((e) => <option key={e.id} value={e.id}>{e.name}{e.event_date ? ` · ${e.event_date}` : ""}{e.active ? "" : " (past)"}</option>)}
@@ -177,7 +177,7 @@ export function BookingForm({ action, initial, people, organizations, services, 
             </FormField>
           )}
           {show("source_url") && (
-            <FormField label="Bracket / player URL" htmlFor="source_url" error={fe.source_url} hint="Optional — prefills the tracked athlete later" className="sm:col-span-2">
+            <FormField label="Bracket / player URL" htmlFor="source_url" error={fe.source_url} hint="Optional. Prefills the tracked athlete later" className="sm:col-span-2">
               <input id="source_url" name="source_url" className="input" type="url" inputMode="url" defaultValue={details.source_url ?? ""} placeholder="https://" autoComplete="off" />
             </FormField>
           )}
@@ -220,13 +220,13 @@ export function BookingForm({ action, initial, people, organizations, services, 
         {!initial && (
           <label className="flex min-h-11 items-center gap-3 rounded-xl border border-line px-3">
             <input type="checkbox" name="requires_contract" value="1" className="h-5 w-5 accent-primary" />
-            <span className="text-sm text-ink"><span className="font-semibold">Needs a signed agreement first</span> <span className="text-muted">— the booking waits for the contract before payment</span></span>
+            <span className="text-sm text-ink"><span className="font-semibold">Needs a signed agreement first</span> <span className="text-muted">(the booking is confirmed once the agreement is signed)</span></span>
           </label>
         )}
       </section>
 
       <section className="card space-y-4 p-5">
-        <FormField label="Notes" htmlFor="notes" error={fe.notes} hint="Internal — not shown to the client">
+        <FormField label="Notes" htmlFor="notes" error={fe.notes} hint="Internal, not shown to the client">
           <textarea id="notes" name="notes" className="input min-h-24 py-2" defaultValue={initial?.notes ?? ""} maxLength={2000} rows={3} />
         </FormField>
       </section>

@@ -52,7 +52,7 @@ export default async function EventDetailPage({ params }: PageProps<"/events/[id
                 <PlatformBadge platform={event.platform} />
                 <LiveIndicator status={eventStatus(event)} />
                 {manual && <span className="rounded-full bg-lightblue px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">Tracked by hand</span>}
-                {!event.active && <span className="rounded-full border border-line bg-page px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted">Paused — not checked</span>}
+                {!event.active && <span className="rounded-full border border-line bg-page px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted">Paused, not checked</span>}
               </div>
               <h2 className="mt-2 text-xl font-extrabold leading-snug text-ink">{event.name}</h2>
               <p className="mt-1 flex items-center gap-1 text-sm text-muted"><MapPinIcon size={14} /> {[event.venue, event.country].filter(Boolean).join(", ") || "Venue TBC"}</p>

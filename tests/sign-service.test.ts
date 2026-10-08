@@ -75,7 +75,7 @@ describe("loadSigningDocument", () => {
 });
 
 describe("signDocument", () => {
-  it("signs once, stores evidence, audits as client, notifies, and moves the booking to awaiting_payment when money is due", async () => {
+  it("signs once, stores evidence, audits as client, notifies, and confirms the booking without asking for payment", async () => {
     const { db, token, supabase } = seed();
     const res = await signDocument(token, SIGN, { supabase });
     expect(res).toEqual({ ok: true, documentId: DOC, signedAt: NOW.toISOString() });
@@ -92,7 +92,7 @@ describe("signDocument", () => {
     expect(audit).toMatchObject({ owner_id: OWNER, actor_kind: "client", actor_id: null, entity: "document", entity_id: DOC });
 
     const booking = db.tables.photo_bookings[0];
-    expect(booking.booking_status).toBe("awaiting_payment");
+    expect(booking.booking_status).toBe("confirmed");
     expect(booking.contract_document_id).toBe(DOC);
     expect(booking.status).toBe("pending");
 

@@ -1,8 +1,33 @@
 import "server-only";
+import { effectivePayment, formatQr } from "@/lib/bookings/state";
+import { isWebsitePayUrl } from "@/lib/payments/pay-token";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient, isServiceClientConfigured } from "@/lib/supabase/service";
 import type { ClientBookingView, ClientGalleryView, ClientPaymentView, ClientPersonView, PhotoDocumentRow } from "@/lib/supabase/database.types";
+import { formatDateTime } from "@/lib/time";
 import { isUuid } from "@/lib/validation";
+
+export type ClientPaymentLine = { title: string; detail: string | null; /** Our pay page, never the provider's URL. */ payUrl: string | null };
+
+/**
+ * The payment sentence a client sees for a booking. Paid: when. Requested:
+ * the website pay link. Otherwise the house wording: nothing is needed to
+ * book, payment happens online after the shoot. A provider URL (MyFatoorah's
+ * own invoice page) is never shown; only our `/pay/<token>` page is linked.
+ */
+export function clientPaymentLine(b: Pick<ClientBookingView, "status" | "amount_qr" | "amount_paid_qr" | "manual_paid_at" | "paid_at" | "payment_url" | "booking_status">): ClientPaymentLine {
+  const pay = effectivePayment(b);
+  const amount = Number(b.amount_qr) || 0;
+  const when = b.status === "paid" ? b.paid_at : b.manual_paid_at;
+  if (pay.state === "paid") return { title: `Paid${when ? ` on ${formatDateTime(when)} Qatar time` : ""}`, detail: "Thank you.", payUrl: null };
+  if (pay.state === "refunded") return { title: "Refunded", detail: null, payUrl: null };
+  if (b.booking_status === "cancelled") return { title: "Cancelled", detail: "Nothing to pay.", payUrl: null };
+  if (amount <= 0) return { title: "No payment due", detail: null, payUrl: null };
+  const link = isWebsitePayUrl(b.payment_url) ? b.payment_url : null;
+  if (pay.state === "partial") return { title: `${formatQr(pay.paidQr)} received, ${formatQr(pay.dueQr)} still due`, detail: link ? "Payment requested. Pay the balance online through MyFatoorah." : null, payUrl: link };
+  if (link) return { title: "Payment requested", detail: `Pay ${formatQr(amount)} online through MyFatoorah.`, payUrl: link };
+  return { title: "Not due yet", detail: "No payment is needed to book. After the shoot you pay online through MyFatoorah.", payUrl: null };
+}
 
 /**
  * Loaders for the client portal. Everything runs through the signed-in

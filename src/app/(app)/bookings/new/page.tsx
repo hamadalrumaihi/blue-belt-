@@ -19,7 +19,7 @@ export default async function NewBookingPage({ searchParams }: PageProps<"/booki
   const defaultEventId = typeof params.event === "string" && isUuid(params.event) ? params.event : null;
   return (
     <>
-      <BrandHeader title="New booking" subtitle="Capture a request by hand — the client is matched or created for you" backHref="/bookings" />
+      <BrandHeader title="New booking" subtitle="Capture a request by hand. The client is matched or created for you" backHref="/bookings" />
       <PageBody className="max-w-2xl">
         <BookingForm action={createBooking} people={people} organizations={organizations} services={services} events={events} defaultClientId={defaultClientId} defaultEventId={defaultEventId} submitLabel="Create booking" />
       </PageBody>

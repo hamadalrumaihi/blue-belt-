@@ -207,6 +207,26 @@ export function parseManualPayment(formData: FormData, now: Date = new Date()): 
   return { fieldErrors, values: { method, amount_qr: amount.ok && amount.value ? amount.value : 0, paid_at, note: noteRaw ? noteRaw.slice(0, MAX_PAYMENT_NOTE) : null } };
 }
 
+export const MAX_FINAL_AMOUNT_NOTE = 300;
+
+export type ParsedFinalAmount = {
+  fieldErrors: Record<string, string>;
+  values: { amount_qr: number; currency: "QAR"; note: string | null };
+};
+
+/**
+ * The "Record final amount" form after the shoot: a positive QAR amount (the
+ * currency is fixed) and an optional short note such as "2 extra hours".
+ */
+export function parseFinalAmount(formData: FormData): ParsedFinalAmount {
+  const fieldErrors: Record<string, string> = {};
+  const amount = parseAmountQr(trimOrNull(formData.get("amount_qr")));
+  if (!amount.ok || amount.value === null || amount.value <= 0) fieldErrors.amount_qr = "Enter the final amount in QAR, e.g. 350.";
+  const noteRaw = trimOrNull(formData.get("note"));
+  if (noteRaw && noteRaw.length > MAX_FINAL_AMOUNT_NOTE) fieldErrors.note = `Keep the note under ${MAX_FINAL_AMOUNT_NOTE} characters.`;
+  return { fieldErrors, values: { amount_qr: amount.ok && amount.value ? amount.value : 0, currency: "QAR", note: noteRaw ? noteRaw.slice(0, MAX_FINAL_AMOUNT_NOTE) : null } };
+}
+
 /** The Qatar wall-clock date and time of an instant, for prefilling the edit form. */
 export function isoToWallClock(iso: string | null | undefined, timeZone = DEFAULT_TIMEZONE): { date: string; time: string } | null {
   if (!iso) return null;

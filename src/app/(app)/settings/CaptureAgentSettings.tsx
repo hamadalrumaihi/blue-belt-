@@ -55,14 +55,14 @@ export function CaptureAgentSettings({ configured, state, now }: Props) {
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 id="capture-agent-heading" className="text-base font-bold text-ink">Capture agent (Windows)</h2>
-          <p className="mt-1 text-sm text-muted">A small program on your event laptop keeps the bracket pages open in a real browser and sends what it sees every minute. It signs in with a credential you create here — never with your account password or any server key — and you can revoke it at any time.</p>
+          <p className="mt-1 text-sm text-muted">A small program on your event laptop keeps the bracket pages open in a real browser and sends what it sees every minute. It signs in with a credential you create here, never with your account password or any server key, and you can revoke it at any time.</p>
         </div>
         <span className={cn("shrink-0 rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider", configured ? "bg-lightblue text-primary" : "bg-page text-muted")}>{configured ? "Available" : "Not configured on the server"}</span>
       </div>
 
       {issued ? (
         <div className="rounded-xl border-2 border-primary bg-lightblue/40 p-4" aria-live="polite">
-          <p className="eyebrow">Credential “{issued.name}” — copy it now</p>
+          <p className="eyebrow">Credential “{issued.name}”: copy it now</p>
           <p className="mt-1 text-xs text-muted">This is the only time the token is shown. Paste it into the agent&rsquo;s <code>agent.env</code> as <code>CAPTURE_TOKEN</code>. Expires {new Date(issued.expiresAt).toLocaleString()}.</p>
           <pre className="mt-2 overflow-x-auto rounded-lg bg-white p-3 font-mono text-xs text-ink">{issued.token}</pre>
           <div className="mt-2 flex gap-2">

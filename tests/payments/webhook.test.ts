@@ -149,6 +149,85 @@ describe("processWebhook", () => {
     expect(db.tables.photo_payment_events.map((e) => e.processing_result)).toEqual(["booking_not_found", "ignored_event:unsupported_event"]);
   });
 
+  it("a verified SUCCESS for the wrong amount never marks the booking paid: amount_mismatch, evidence kept, owner alerted once per event", async () => {
+    const ev = paymentEvent();
+    ev.Data.Amount.ValueInBaseCurrency = "35";
+    ev.Data.Amount.ValueInDisplayCurrency = "35";
+    const out = await processWebhook({ body: ev, signatureValid: true }, deps);
+    expect(out).toMatchObject({ result: "amount_mismatch", bookingId: BOOKING_ID, status: "pending" });
+    const b = bookingRow(db);
+    expect(b.status).toBe("pending");
+    expect(b.paid_at).toBeNull();
+    expect(b.metadata).toMatchObject({ payment_mismatch: { invoice_id: INVOICE_ID, amount: 35, currency: "QAR", expected: 350 } });
+    expect(db.tables.photo_payment_attempts).toHaveLength(0);
+    expect(db.tables.photo_payment_records).toHaveLength(0);
+    expect(db.rpcCalls).toHaveLength(0);
+    expect(db.tables.photo_payment_events[0].processing_result).toMatch(/^amount_mismatch:/);
+    const alerts = db.tables.photo_notification_deliveries.filter((d) => d.kind === "INTEGRATION_FAILED");
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toMatchObject({ owner_id: b.owner_id, alert_key: `payment:${BOOKING_ID}:mismatch:WH-626519` });
+    expect(JSON.stringify(alerts[0].payload)).toContain("35.00");
+    // No client "payment received" mail either.
+    expect(db.tables.photo_notification_deliveries.filter((d) => d.channel === "email")).toHaveLength(0);
+
+    // A redelivery is a plain duplicate; a retry under a new reference stays a mismatch and reuses nothing.
+    expect(await processWebhook({ body: ev, signatureValid: true }, deps)).toMatchObject({ result: "duplicate" });
+    const again = paymentEvent({ reference: "WH-626520" });
+    again.Data.Amount.ValueInBaseCurrency = "35";
+    expect(await processWebhook({ body: again, signatureValid: true }, deps)).toMatchObject({ result: "amount_mismatch" });
+    expect(db.tables.photo_notification_deliveries.filter((d) => d.kind === "INTEGRATION_FAILED")).toHaveLength(2);
+    expect(bookingRow(db).status).toBe("pending");
+
+    // The right amount afterwards is applied normally.
+    expect(await processWebhook({ body: paymentEvent({ reference: "WH-626521" }), signatureValid: true }, deps)).toMatchObject({ result: "processed", status: "paid" });
+  });
+
+  it("a wrong currency is a mismatch too, a tiny rounding difference is not, and a missing amount is accepted", async () => {
+    const wrongCurrency = paymentEvent();
+    wrongCurrency.Data.Amount.BaseCurrency = "KWD";
+    expect(await processWebhook({ body: wrongCurrency, signatureValid: true }, deps)).toMatchObject({ result: "amount_mismatch", detail: expect.stringMatching(/currency KWD/) });
+    expect(bookingRow(db).status).toBe("pending");
+
+    ({ db, deps } = setup());
+    const rounding = paymentEvent();
+    rounding.Data.Amount.ValueInBaseCurrency = "350.005";
+    expect(await processWebhook({ body: rounding, signatureValid: true }, deps)).toMatchObject({ result: "processed", status: "paid" });
+
+    ({ db, deps } = setup());
+    const noAmount = paymentEvent();
+    delete (noAmount.Data as Partial<typeof noAmount.Data>).Amount;
+    expect(await processWebhook({ body: noAmount, signatureValid: true }, deps)).toMatchObject({ result: "processed", status: "paid" });
+  });
+
+  it("the expected amount is what the website checkout asked for, or the booking amount less manual payments", async () => {
+    // A 100 QAR cash payment was recorded by hand; the card pays the remaining 250.
+    ({ db, deps } = setup([booking({ amount_paid_qr: 100, manual_paid_at: "2026-10-01T00:00:00.000Z" })]));
+    const balance = paymentEvent();
+    balance.Data.Amount.ValueInBaseCurrency = "250";
+    expect(await processWebhook({ body: balance, signatureValid: true }, deps)).toMatchObject({ result: "processed", status: "paid" });
+
+    // The pay page recorded the session amount for this invoice: that is the truth.
+    ({ db, deps } = setup([booking({ amount_qr: 400, metadata: { pay_session: { invoice_id: INVOICE_ID, amount: 350, currency: "QAR" } } })]));
+    expect(await processWebhook({ body: paymentEvent(), signatureValid: true }, deps)).toMatchObject({ result: "processed", status: "paid" });
+  });
+
+  it("a paid event for an invoice this booking superseded (an earlier checkout attempt) still finds and pays the booking", async () => {
+    ({ db, deps } = setup([booking({ provider_invoice_id: "NEWER", metadata: { superseded_invoices: [INVOICE_ID] } })]));
+    const ev = paymentEvent();
+    ev.Data.Invoice.ExternalIdentifier = BOOKING_ID; // our CustomerReference, echoed by MyFatoorah
+    const out = await processWebhook({ body: ev, signatureValid: true }, deps);
+    expect(out).toMatchObject({ result: "processed", status: "paid", bookingId: BOOKING_ID });
+    const b = bookingRow(db);
+    expect(b.status).toBe("paid");
+    expect(b.provider_invoice_id).toBe(INVOICE_ID);
+    expect(b.metadata).toMatchObject({ superseded_invoices: [INVOICE_ID, "NEWER"] });
+    // Only PAID events take the fallback; a failed attempt on an old invoice is not matched to the booking.
+    ({ db, deps } = setup([booking({ provider_invoice_id: "NEWER", metadata: { superseded_invoices: [INVOICE_ID] } })]));
+    const failed = paymentEvent({ transactionStatus: "FAILED" });
+    failed.Data.Invoice.ExternalIdentifier = BOOKING_ID;
+    expect(await processWebhook({ body: failed, signatureValid: true }, deps)).toMatchObject({ result: "booking_not_found" });
+  });
+
   it("NEVER creates a photo_athletes row from a paid booking; it only flags pending_athlete_link", async () => {
     await processWebhook({ body: paymentEvent(), signatureValid: true }, deps);
     expect(db.tables.photo_athletes).toHaveLength(0);

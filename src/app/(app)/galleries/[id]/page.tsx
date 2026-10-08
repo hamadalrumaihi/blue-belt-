@@ -18,7 +18,7 @@ export const dynamic = "force-dynamic";
 export async function generateMetadata({ params }: PageProps<"/galleries/[id]">): Promise<Metadata> {
   const { id } = await params;
   const detail = isUuid(id) ? await getGallery(id) : null;
-  return { title: detail ? `Gallery — ${detail.gallery.name}` : "Gallery" };
+  return { title: detail ? `Gallery: ${detail.gallery.name}` : "Gallery" };
 }
 
 export default async function GalleryDetailPage({ params }: PageProps<"/galleries/[id]">) {

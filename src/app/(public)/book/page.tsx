@@ -1,12 +1,17 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ShieldIcon } from "@/components/icons";
+import { pageMetadata } from "@/lib/seo";
 import { listPublicEvents } from "@/lib/studio/public-events";
 import { loadPublicStudio } from "@/lib/studio/queries";
 import { BookingWizard } from "./BookingWizard";
 
 export const dynamic = "force-dynamic";
-export const metadata: Metadata = { title: "Book — Blue Belt Media", description: "Request tournament, club, training or private session coverage. Two minutes, no payment up front." };
+export const metadata: Metadata = pageMetadata({
+  title: "Book a jiu-jitsu photographer in Doha",
+  description: "Request tournament, club, training session or private athlete coverage in Qatar. About two minutes. No payment is needed to book.",
+  path: "/book",
+});
 
 function first(v: string | string[] | undefined): string | null {
   const s = Array.isArray(v) ? v[0] : v;
@@ -20,8 +25,8 @@ export default async function BookPage({ searchParams }: PageProps<"/book">) {
       <main className="mx-auto max-w-2xl px-4 py-16 text-center lg:px-8">
         <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-lightblue text-primary"><ShieldIcon size={24} /></span>
         <h1 className="mt-4 text-3xl font-extrabold tracking-tight text-navy">Online booking opens soon</h1>
-        <p className="mt-3 text-base text-muted">We are not taking bookings through the website yet. Send us a message and we will sort it out directly.</p>
-        <Link href="/contact" className="btn-primary mt-6">Contact us</Link>
+        <p className="mt-3 text-base text-muted">We are not taking bookings through the website yet. Send us a message and we will arrange it with you.</p>
+        <Link href="/contact" data-umami-event="contact-click" className="btn-primary mt-6">Contact us</Link>
       </main>
     );
   }
@@ -35,7 +40,7 @@ export default async function BookPage({ searchParams }: PageProps<"/book">) {
         <div className="card mt-6 p-5 sm:p-8">
           <BookingWizard events={events} services={services} initialType={first(params.type)} initialEventId={first(params.event)} initialServiceId={first(params.service)} />
         </div>
-        <p className="mt-6 text-center text-xs text-muted">Prefer to talk first? <Link href="/contact" className="font-semibold text-primary">Send a message</Link> instead.</p>
+        <p className="mt-6 text-center text-xs text-muted">Prefer to talk first? <Link href="/contact" data-umami-event="contact-click" className="font-semibold text-primary">Send a message</Link> instead. Prices are on the <Link href="/services" className="font-semibold text-primary">services page</Link>.</p>
       </div>
     </main>
   );

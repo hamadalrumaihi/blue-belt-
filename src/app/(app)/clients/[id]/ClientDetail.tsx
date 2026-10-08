@@ -57,7 +57,7 @@ export function ClientDetail({ athlete: initialAthlete, history: initialHistory 
               <div className="mt-2 flex items-end justify-between gap-3">
                 <div>
                   <p className="text-3xl font-black text-ink">
-                    {current.mat ?? "Mat —"}
+                    {current.mat ?? "Mat –"}
                     {current.manual?.mat && <span className="ml-2 align-middle rounded-md bg-lightblue px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-primary">Manual</span>}
                   </p>
                   <p className="text-sm text-muted">vs <span className="font-bold text-ink">{current.opponent ?? "Unknown"}</span></p>
@@ -138,7 +138,7 @@ export function ClientDetail({ athlete: initialAthlete, history: initialHistory 
             <Row label="Source URL" value={athlete.source_url ? <a href={athlete.source_url} target="_blank" rel="noopener noreferrer" className="break-all text-primary hover:underline">{athlete.source_url}</a> : null} />
             <Row label="Notes" value={athlete.notes} />
             <Row label="Internal notes" value={athlete.internal_notes} />
-            <Row label="Tracking" value={manual ? "By hand — no automatic checks" : athlete.active ? "Active — checked automatically" : "Paused — not checked automatically"} />
+            <Row label="Tracking" value={manual ? "By hand, no automatic checks" : athlete.active ? "Active, checked automatically" : "Paused, not checked automatically"} />
           </dl>
           {!manual && <details className="mt-4 rounded-xl border border-line px-3 py-2 text-xs text-muted">
             <summary className="cursor-pointer font-semibold text-ink">Source diagnostics</summary>
@@ -174,7 +174,7 @@ export function ClientDetail({ athlete: initialAthlete, history: initialHistory 
                   <li key={m.id} className="px-4 py-3">
                     <div className="flex items-center gap-3">
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm font-bold text-ink">{m.round ? `${m.round} · ` : ""}{m.mat ?? "Mat —"} · {formatTime(m.estimated_at ?? m.scheduled_at, tz)}{snapshotNumber(m) ? ` · #${snapshotNumber(m)}` : ""}</p>
+                        <p className="text-sm font-bold text-ink">{m.round ? `${m.round} · ` : ""}{m.mat ?? "Mat –"} · {formatTime(m.estimated_at ?? m.scheduled_at, tz)}{snapshotNumber(m) ? ` · #${snapshotNumber(m)}` : ""}</p>
                         <p className="break-words text-xs text-muted">vs {m.opponent ?? "Unknown"} · {STATUS_LABEL[matchStatusOf(m)]}{m.result ? ` · ${m.result}` : ""} · {m.is_manual ? "entered by hand" : "changed"} {formatDateTime(m.last_changed_at, tz)}</p>
                         {m.next_round && <p className="mt-0.5 break-words text-xs text-ink"><span className="font-semibold">Next:</span> {m.next_round}</p>}
                       </div>

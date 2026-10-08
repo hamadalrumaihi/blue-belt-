@@ -137,6 +137,18 @@ export const LinkIcon = (p: IconProps) => (
 export const InstagramIcon = (p: IconProps) => (
   <svg {...base(p)}><rect x="3" y="3" width="18" height="18" rx="5" /><circle cx="12" cy="12" r="4" /><circle cx="17.5" cy="6.5" r="0.75" fill="currentColor" /></svg>
 );
+export const TagIcon = (p: IconProps) => (
+  <svg {...base(p)}><path d="M3 12V4h8l10 10-8 8L3 12Z" /><circle cx="7.5" cy="8.5" r="1.25" fill="currentColor" /></svg>
+);
 export const WhatsAppIcon = (p: IconProps) => (
   <svg {...base(p)}><path d="M20 11.5a8 8 0 0 1-11.6 7.1L4 20l1.5-4.2A8 8 0 1 1 20 11.5Z" /><path d="M9.5 9c.2 1.8 2.7 4.3 4.5 4.5l1-1 2 1c-.5 1.5-1.5 2-2.5 2C11 15.5 8.5 13 8.5 9.5c0-1 .5-2 2-2.5l1 2-1.5 1Z" /></svg>
+);
+export const SunIcon = (p: IconProps) => (
+  <svg {...base(p)}><circle cx="12" cy="12" r="4" /><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8" /></svg>
+);
+export const MoonIcon = (p: IconProps) => (
+  <svg {...base(p)}><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z" /></svg>
+);
+export const MonitorIcon = (p: IconProps) => (
+  <svg {...base(p)}><rect x="3" y="4" width="18" height="13" rx="2.5" /><path d="M8 21h8M12 17v4" /></svg>
 );

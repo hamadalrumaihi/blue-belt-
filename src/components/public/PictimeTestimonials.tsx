@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
  * Pic-Time's testimonials widget, embedded as the studio's own gallery
  * account publishes it. The iframe loads straight from Pic-Time (no proxy, no
  * scraping); after it loads, Pic-Time's resize helper is appended next to the
- * iframe — the same thing their inline `onload` snippet does — so the frame
+ * iframe (the same thing their inline `onload` snippet does) so the frame
  * grows to fit its content instead of scrolling inside a fixed box.
  *
  * States: skeleton while loading; the live widget once it loads; the

@@ -117,7 +117,7 @@ export function BracketPhotoReview({ eventId, configured, clientNames }: Props) 
           <span className="label">Bracket photo or screenshot</span>
           <input ref={fileRef} type="file" accept="image/*" className="input py-2" disabled={busy} onChange={(e) => onFile(e.target.files?.[0] ?? null)} />
         </label>
-        <p className="hint">One bracket per picture reads best. The names, round, mat, time and result are read for you to check — nothing is saved until you add the rows below.</p>
+        <p className="hint">One bracket per picture reads best. The names, round, mat, time and result are read for you to check. Nothing is saved until you add the rows below.</p>
         {busy && <p className="text-sm font-semibold text-ink" role="status">Reading the bracket… this takes a few seconds.</p>}
         {error && <p className="flex gap-2 rounded-lg bg-danger-soft px-3 py-2 text-sm font-semibold text-danger" role="alert"><AlertIcon size={16} className="mt-px shrink-0" /> {error}</p>}
       </div>

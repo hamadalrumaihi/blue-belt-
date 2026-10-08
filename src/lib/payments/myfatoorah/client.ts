@@ -6,6 +6,8 @@
  * Endpoints (https://docs.myfatoorah.com/docs/api-key for base URLs + auth):
  *   POST {base}/v2/SendPayment       https://docs.myfatoorah.com/reference/send-payment
  *   POST {base}/v2/GetPaymentStatus  https://docs.myfatoorah.com/reference/get-payment-status
+ *   POST {base}/v2/InitiateSession   https://docs.myfatoorah.com/docs/embedded-payment (card view)
+ *   POST {base}/v2/ExecutePayment    https://docs.myfatoorah.com/reference/execute-payment
  * Auth: `Authorization: Bearer <API key>` (portal → Integration Settings → API Key).
  */
 import type { Json } from "@/lib/supabase/database.types";
@@ -74,6 +76,27 @@ export type PaymentStatusOutput = {
 export type RefundInput = { invoiceId: string; amount: number; comment?: string };
 export type RefundOutput = { refundId: string; raw: Json };
 
+/** POST /v2/InitiateSession (embedded card view). */
+export type InitiateSessionInput = { customerIdentifier?: string };
+export type InitiateSessionOutput = { sessionId: string; countryCode: string; raw: Json };
+
+/** POST /v2/ExecutePayment with a card-view SessionId. */
+export type ExecutePaymentInput = {
+  sessionId: string;
+  /** Amount in the account's base currency. */
+  amount: number;
+  displayCurrencyIso?: string;
+  customerReference: string;
+  customerName: string;
+  customerEmail?: string;
+  customerMobile?: string;
+  callbackUrl: string;
+  errorUrl: string;
+  language?: "EN" | "AR";
+  userDefinedField?: string;
+};
+export type ExecutePaymentOutput = { invoiceId: string; paymentUrl: string; customerReference: string | null; raw: Json };
+
 /** Adapter boundary: the rest of the app only talks to this interface. */
 export interface PaymentProvider {
   readonly name: typeof MYFATOORAH_PROVIDER;
@@ -81,6 +104,12 @@ export interface PaymentProvider {
   getPaymentStatus(input: GetPaymentStatusInput): Promise<ProviderResult<PaymentStatusOutput>>;
   /** Not implemented yet (MakeRefund); kept optional so callers can feature-detect. */
   refund?(input: RefundInput): Promise<ProviderResult<RefundOutput>>;
+}
+
+/** The website checkout needs the two embedded-payment calls on top of the basics. */
+export interface CardPaymentProvider extends PaymentProvider {
+  initiateSession(input: InitiateSessionInput): Promise<ProviderResult<InitiateSessionOutput>>;
+  executePayment(input: ExecutePaymentInput): Promise<ProviderResult<ExecutePaymentOutput>>;
 }
 
 export type MyFatoorahClientOptions = {
@@ -109,7 +138,7 @@ function num(v: unknown): number | null {
   return null;
 }
 
-export function createMyFatoorahClient(opts: MyFatoorahClientOptions): PaymentProvider {
+export function createMyFatoorahClient(opts: MyFatoorahClientOptions): CardPaymentProvider {
   const baseUrl = opts.baseUrl.replace(/\/+$/, "");
   const doFetch = opts.fetch ?? globalThis.fetch;
   const timeoutMs = opts.timeoutMs ?? 15_000;
@@ -211,6 +240,46 @@ export function createMyFatoorahClient(opts: MyFatoorahClientOptions): PaymentPr
           raw: data as Json,
         },
       };
+    },
+
+    // Embedded card view (https://docs.myfatoorah.com/docs/embedded-payment):
+    //   POST /v2/InitiateSession  { CustomerIdentifier? } -> { SessionId, CountryCode }
+    //   POST /v2/ExecutePayment   { SessionId, InvoiceValue, ... } -> { InvoiceId, PaymentURL }
+    // The browser never sees the API key: the session id is the only thing it
+    // holds, and the amount always comes from our booking row.
+    async initiateSession(input) {
+      const payload: Record<string, unknown> = {};
+      if (input.customerIdentifier) payload.CustomerIdentifier = input.customerIdentifier;
+      const res = await post("/v2/InitiateSession", payload);
+      if (!res.ok) return res;
+      const data = isRecord(res.data) ? res.data : null;
+      const sessionId = data ? str(data.SessionId) : null;
+      const countryCode = data ? str(data.CountryCode) : null;
+      if (!sessionId || !countryCode) return { ok: false, error: { code: "invalid_response", message: "InitiateSession response is missing SessionId or CountryCode." } };
+      return { ok: true, data: { sessionId, countryCode, raw: (res.data ?? null) as Json } };
+    },
+
+    async executePayment(input) {
+      const payload: Record<string, unknown> = {
+        SessionId: input.sessionId,
+        InvoiceValue: input.amount,
+        CustomerReference: input.customerReference,
+        CustomerName: input.customerName,
+        CallBackUrl: input.callbackUrl,
+        ErrorUrl: input.errorUrl,
+        Language: input.language ?? "EN",
+      };
+      if (input.displayCurrencyIso) payload.DisplayCurrencyIso = input.displayCurrencyIso;
+      if (input.customerEmail) payload.CustomerEmail = input.customerEmail;
+      if (input.customerMobile) payload.CustomerMobile = input.customerMobile;
+      if (input.userDefinedField) payload.UserDefinedField = input.userDefinedField;
+      const res = await post("/v2/ExecutePayment", payload);
+      if (!res.ok) return res;
+      const data = isRecord(res.data) ? res.data : null;
+      const invoiceId = data ? str(data.InvoiceId) : null;
+      const paymentUrl = data ? str(data.PaymentURL) : null;
+      if (!invoiceId || !paymentUrl) return { ok: false, error: { code: "invalid_response", message: "ExecutePayment response is missing InvoiceId or PaymentURL." } };
+      return { ok: true, data: { invoiceId, paymentUrl, customerReference: data ? str(data.CustomerReference) : null, raw: (res.data ?? null) as Json } };
     },
   };
 }

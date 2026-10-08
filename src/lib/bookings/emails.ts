@@ -3,13 +3,20 @@
  * and a few facts, so the server actions, the MyFatoorah webhook and tests
  * all produce the same wording. Nothing here sends anything.
  */
-import { BOOKING_STATUS_CLIENT_LABEL, BOOKING_TYPE_LABEL, formatQr } from "@/lib/bookings/state";
+import { BOOKING_STATUS_CLIENT_LABEL, BOOKING_TYPE_LABEL, effectivePayment, formatQr } from "@/lib/bookings/state";
 import type { ClientNotificationKind } from "@/lib/notifications/email/kinds";
 import { buildEmail, type EmailContent, type EmailDraft } from "@/lib/notifications/email/templates";
+import { isWebsitePayUrl } from "@/lib/payments/pay-token";
 import type { PhotoBookingRow } from "@/lib/supabase/database.types";
 import { formatDateTime, zoneLabel } from "@/lib/time";
 
-export type BookingEmailBooking = Pick<PhotoBookingRow, "id" | "public_ref" | "booking_type" | "booking_status" | "customer_name" | "customer_email" | "amount_qr" | "session_at" | "location" | "package_name" | "athlete_name" | "payment_url" | "cancel_reason">;
+export type BookingEmailBooking = Pick<
+  PhotoBookingRow,
+  "id" | "public_ref" | "booking_type" | "booking_status" | "customer_name" | "customer_email" | "amount_qr" | "session_at" | "location" | "package_name" | "athlete_name" | "payment_url" | "cancel_reason" | "status" | "amount_paid_qr" | "manual_paid_at"
+>;
+
+/** House wording for every booking mail that mentions money. No em dashes anywhere in customer text. */
+export const NO_PAYMENT_NEEDED_NOW = "No payment is needed now. After the shoot you pay online through MyFatoorah.";
 
 export type BookingEmailOptions = {
   businessName: string;
@@ -52,32 +59,41 @@ export function bookingEmailContent(kind: BookingEmailKind, b: BookingEmailBooki
   const ref = b.public_ref ? ` (${b.public_ref})` : "";
   const portal = { label: "View your booking", url: o.portalUrl };
   const base = { kind, greeting, businessName: o.businessName, facts: bookingFacts(b) };
+  const payment = effectivePayment(b);
+  const priced = Number(b.amount_qr) > 0;
   switch (kind) {
     case "BOOKING_RECEIVED":
       return {
         ...base,
         subject: `We received your booking request${ref}`,
-        paragraphs: [`Thank you — your request for ${b.package_name || BOOKING_TYPE_LABEL[b.booking_type].toLowerCase()} is with us.`, `We will confirm the details shortly. Current status: ${BOOKING_STATUS_CLIENT_LABEL[b.booking_status]}.`],
+        paragraphs: [`Thank you. Your request for ${b.package_name || BOOKING_TYPE_LABEL[b.booking_type].toLowerCase()} is with us.`, `We will confirm the details shortly. Current status: ${BOOKING_STATUS_CLIENT_LABEL[b.booking_status]}.`, NO_PAYMENT_NEEDED_NOW],
         cta: portal,
       };
     case "BOOKING_CONFIRMED":
       return {
         ...base,
         subject: `Your booking is confirmed${ref}`,
-        paragraphs: ["Your booking is confirmed. The details are below; reply to this e-mail if anything needs to change.", "See you there."],
+        paragraphs: ["Your booking is confirmed. The details are below; reply to this e-mail if anything needs to change.", priced && payment.state !== "paid" ? NO_PAYMENT_NEEDED_NOW : priced ? "Your payment has been received. Thank you." : "There is nothing to pay for this booking.", "See you there."],
         cta: portal,
       };
-    case "PAYMENT_REQUESTED":
+    case "PAYMENT_REQUESTED": {
+      const due = payment.state === "partial" ? payment.dueQr : Number(b.amount_qr);
+      const website = isWebsitePayUrl(b.payment_url);
       return {
         ...base,
-        subject: `Payment link for your booking${ref}`,
-        paragraphs: [`To confirm your booking, please pay ${formatQr(b.amount_qr)} using the secure link below.`, "The link opens MyFatoorah, where you can pay by card. Your booking is confirmed as soon as the payment goes through."],
-        cta: b.payment_url ? { label: "Pay securely", url: b.payment_url } : portal,
+        subject: `Pay online for your booking${ref}`,
+        paragraphs: [
+          `Your shoot is done and the final amount is ${formatQr(due)}.`,
+          `You pay online through MyFatoorah on the ${o.businessName} website. Open the link below, enter your card details and confirm. The page shows the amount and your booking reference before you pay.`,
+          "Your booking is marked paid as soon as MyFatoorah confirms the payment. If anything looks wrong, reply to this e-mail before paying.",
+        ],
+        cta: website && b.payment_url ? { label: "Pay online", url: b.payment_url } : portal,
       };
+    }
     case "PAYMENT_RECEIVED": {
       const p = o.payment;
       const line = p ? `We received ${formatQr(p.amountQr)} by ${p.methodLabel.toLowerCase()}.` : "We received your payment.";
-      const balance = p && p.dueQr > 0 ? `Remaining balance: ${formatQr(p.dueQr)}.` : "Your booking is fully paid — thank you.";
+      const balance = p && p.dueQr > 0 ? `Remaining balance: ${formatQr(p.dueQr)}.` : "Your booking is fully paid. Thank you.";
       return { ...base, subject: `Payment received${ref}`, paragraphs: [line, balance], cta: portal };
     }
     case "BOOKING_CHANGED": {
@@ -101,7 +117,7 @@ export function bookingEmailContent(kind: BookingEmailKind, b: BookingEmailBooki
       return {
         ...base,
         subject: `Your photos and videos are delivered${ref}`,
-        paragraphs: ["Everything from your session has been delivered. Open your booking to find the gallery link.", "Thank you for shooting with us — tag us when you share them."],
+        paragraphs: ["Everything from your session has been delivered. Open your booking to find the gallery link.", "Thank you for shooting with us. Tag us when you share them."],
         cta: portal,
       };
   }

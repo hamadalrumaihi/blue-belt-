@@ -5,7 +5,7 @@ import { Logo } from "@/components/Logo";
 import { resolveViewer } from "@/lib/roles";
 import { ClientLoginForm } from "./ClientLoginForm";
 
-export const metadata: Metadata = { title: "Client portal — sign in" };
+export const metadata: Metadata = { title: "Client portal: sign in" };
 export const dynamic = "force-dynamic";
 
 export default async function ClientLoginPage({ searchParams }: PageProps<"/client/login">) {

@@ -31,7 +31,7 @@ export function ManualPaymentForm({ bookingId, providerPaid, dueQr, currency }: 
   const fe = state?.fieldErrors ?? {};
   const ids = { method: useId(), amount: useId(), paid: useId(), note: useId() };
 
-  if (providerPaid) return <p className="text-xs text-muted">Paid online — verified by MyFatoorah. Manual records are not needed.</p>;
+  if (providerPaid) return <p className="text-xs text-muted">Paid online, verified by MyFatoorah. Manual records are not needed.</p>;
 
   return (
     <>
@@ -60,7 +60,7 @@ export function ManualPaymentForm({ bookingId, providerPaid, dueQr, currency }: 
                 <input id={ids.paid} name="paid_at" className="input" type="date" defaultValue={todayInZone()} />
               </FormField>
             </div>
-            <FormField label="Note" htmlFor={ids.note} error={fe.note} hint="Optional — e.g. a Fawran reference">
+            <FormField label="Note" htmlFor={ids.note} error={fe.note} hint="Optional, e.g. a Fawran reference">
               <input id={ids.note} name="note" className="input" maxLength={500} autoComplete="off" />
             </FormField>
             <div className="flex gap-2">

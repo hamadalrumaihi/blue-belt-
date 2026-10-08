@@ -60,7 +60,7 @@ export function CoverageBoard({ events, selectedId, rows, timezone }: Props) {
                 </div>
                 {next && (next.mat || next.scheduled_at) ? (
                   <p className={cn("mt-2 text-sm font-semibold", next.status === "on_mat" ? "text-danger" : "text-ink")}>
-                    {next.mat ?? "Mat —"}
+                    {next.mat ?? "Mat –"}
                     {next.scheduled_at ? ` · ${formatTime(next.scheduled_at, timezone)}` : ""}
                     {next.opponent ? ` · vs ${next.opponent}` : ""}
                   </p>

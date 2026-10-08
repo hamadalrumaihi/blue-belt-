@@ -90,7 +90,7 @@ export function publicBookingFields(type: BookingType): PublicStep[] {
                 { value: "both", label: "Both" },
               ],
             },
-            { name: "service_id", label: "Package", kind: "service", hint: "Prices are confirmed before anything is paid." },
+            { name: "service_id", label: "Package", kind: "service", hint: "Prices are confirmed before the shoot. No payment is needed to book." },
             {
               name: "coverage",
               label: "What do you want?",
@@ -106,7 +106,7 @@ export function publicBookingFields(type: BookingType): PublicStep[] {
             NOTES,
           ],
         },
-        { key: "contact", title: "How to reach you", intro: "We confirm within 24 hours. Nothing is paid now.", fields: CONTACT_BASE },
+        { key: "contact", title: "How to reach you", intro: "We confirm within 24 hours. No payment is needed to book.", fields: CONTACT_BASE },
       ];
     case "club":
       return [
@@ -147,7 +147,7 @@ export function publicBookingFields(type: BookingType): PublicStep[] {
           title: type === "training_session" ? "The session" : "Your session",
           intro: type === "training_session" ? "Photos or video during a class, open mat or sparring round." : "A dedicated shoot for one athlete: portraits, technique or sponsor material.",
           fields: [
-            { name: "service_id", label: "Package", kind: "service", hint: "Prices are confirmed before anything is paid." },
+            { name: "service_id", label: "Package", kind: "service", hint: "Prices are confirmed before the shoot. No payment is needed to book." },
             { name: "requested_date", label: "Preferred date", kind: "date", required: true },
             { name: "requested_time", label: "Preferred time", kind: "time", hint: "Optional. We confirm the exact slot with you." },
             { name: "location_preference", label: "Where?", kind: "text", max: MAX.short, placeholder: "Your academy, outdoor, our studio…", hint: "Academy name or area in Doha." },
@@ -155,14 +155,14 @@ export function publicBookingFields(type: BookingType): PublicStep[] {
             NOTES,
           ],
         },
-        { key: "contact", title: "How to reach you", intro: "We confirm within 24 hours. Nothing is paid now.", fields: CONTACT_BASE },
+        { key: "contact", title: "How to reach you", intro: "We confirm within 24 hours. No payment is needed to book.", fields: CONTACT_BASE },
       ];
     case "custom":
       return [
         {
           key: "details",
           title: "What do you have in mind?",
-          intro: "Seminars, gradings, promotions, documentary pieces — describe it and we will come back with a plan and a quote.",
+          intro: "Seminars, gradings, promotions, documentary pieces: describe it and we will come back with a plan and a quote.",
           fields: [
             { name: "request", label: "Describe the coverage you need", kind: "textarea", required: true, max: MAX.request, placeholder: "What, where, when, and for whom." },
             { name: "requested_date", label: "Date (if known)", kind: "date" },
@@ -445,9 +445,9 @@ export function summarizePublicBooking(v: PublicBookingValues, services: PublicS
   if (service) rows.push(["Package", service.name]);
   const d = v.details;
   if (v.booking_type === "club") {
-    rows.push(["Club", v.club_name ?? "—"]);
+    rows.push(["Club", v.club_name ?? "Not given"]);
     if (d.athlete_count) rows.push(["Athletes", String(d.athlete_count)]);
-    rows.push(["Needs", [d.wants_photographer && "Photographer", d.wants_videographer && "Videographer"].filter(Boolean).join(" + ") || "—"]);
+    rows.push(["Needs", [d.wants_photographer && "Photographer", d.wants_videographer && "Videographer"].filter(Boolean).join(" + ") || "Not given"]);
   } else if (v.athlete_name !== v.full_name) rows.push(["Athlete", v.athlete_name]);
   if (d.event_name) rows.push(["Event", d.event_name]);
   if (d.competition_date) rows.push(["Date", d.competition_date]);

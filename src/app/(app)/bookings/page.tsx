@@ -17,6 +17,7 @@ export const dynamic = "force-dynamic";
 const FILTERS: Array<{ key: BookingFilter; label: string }> = [
   { key: "needs_action", label: "Needs action" },
   { key: "confirmed", label: "Confirmed / upcoming" },
+  { key: "shoot_done", label: "Shoot done, awaiting payment" },
   { key: "delivered", label: "Delivered" },
   { key: "all", label: "All" },
 ];
@@ -68,7 +69,7 @@ export default async function BookingsPage({ searchParams }: PageProps<"/booking
           counts.all === 0 ? (
             <EmptyState icon={<BookmarkIcon />} title="No bookings yet" description="Add a booking by hand, or open public booking on your website so clients can request one." action={<Link href="/bookings/new" className="btn-primary">New booking</Link>} />
           ) : (
-            <EmptyState compact title={q ? `Nothing matches “${q}”` : `Nothing under “${current.label}”`} description={filter === "needs_action" && !q ? "Every booking is confirmed, delivered or closed." : "Try another filter or search."} action={<Link href="/bookings?filter=all" className="btn-secondary">Show all bookings</Link>} />
+            <EmptyState compact title={q ? `Nothing matches “${q}”` : `Nothing under “${current.label}”`} description={filter === "needs_action" && !q ? "Every booking is confirmed, delivered or closed." : filter === "shoot_done" && !q ? "No completed shoot is waiting for payment." : "Try another filter or search."} action={<Link href="/bookings?filter=all" className="btn-secondary">Show all bookings</Link>} />
           )
         ) : (
           <ul className="card divide-y divide-line">
