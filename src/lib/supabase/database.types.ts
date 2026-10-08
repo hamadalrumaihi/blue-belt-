@@ -386,8 +386,80 @@ export type PhotoBookingRow = {
   cancelled_at: string | null;
   cancel_reason: string | null;
   public_ref: string | null;
+  /** Round 3: who books and how the work is used (public form). */
+  client_type: ClientType | null;
+  usage_type: UsageType | null;
+  subject_is_minor: boolean;
+  /** {name, email, phone, consent_at}; owner only, never exposed to clients. */
+  guardian: Json | null;
+  /** {terms_version, privacy_version, accepted_at, ip, user_agent, consents}. */
+  legal_acceptance: Json | null;
+  idempotency_key: string | null;
+  requires_contract: boolean;
+  requires_guardian_release: boolean;
+  contract_state: ContractState;
+  /** 50% before, 50% after delivery. Server-computed, never from the browser. */
+  deposit_percent: number;
+  deposit_qr: number;
+  balance_qr: number;
+  deposit_state: DepositState;
+  deposit_paid_at: string | null;
+  balance_state: BalanceState;
+  balance_due_at: string | null;
+  balance_paid_at: string | null;
+  gallery_delivered_at: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type ClientType = "individual" | "parent_guardian" | "club_team" | "company_brand" | "event_organiser";
+export type UsageType = "personal" | "club_team" | "commercial";
+export type ContractState = "not_required" | "required" | "sent" | "signed" | "declined" | "void";
+export type DepositState = "not_required" | "pending" | "paid" | "waived";
+export type BalanceState = "not_due" | "due" | "paid" | "waived";
+export type PaymentStage = "deposit" | "balance";
+export type PaymentRequestStatus = "pending" | "paid" | "failed" | "cancelled" | "expired";
+
+/** One payment request per booking stage; at most one pending per (booking, stage). */
+export type PhotoBookingPaymentRequestRow = {
+  id: string;
+  owner_id: string;
+  booking_id: string;
+  stage: PaymentStage;
+  amount_qr: number;
+  currency: string;
+  /** MYFATOORAH (API invoice), MANUAL_LINK (owner pasted), WEBSITE (our /pay page). */
+  provider: string;
+  provider_invoice_id: string | null;
+  provider_payment_id: string | null;
+  provider_reference: string | null;
+  payment_url: string | null;
+  status: PaymentRequestStatus;
+  idempotency_key: string;
+  generation: number;
+  pay_token_hash: string | null;
+  error_code: string | null;
+  error_message: string | null;
+  metadata: Json;
+  created_at: string;
+  sent_at: string | null;
+  paid_at: string | null;
+  failed_at: string | null;
+  cancelled_at: string | null;
+  expired_at: string | null;
+  updated_at: string;
+};
+
+export type PhotoEsignEventRow = {
+  id: number;
+  provider: string;
+  event_id: string;
+  envelope_id: string | null;
+  event_type: string | null;
+  payload: Json | null;
+  received_at: string;
+  processed_at: string | null;
+  result: string | null;
 };
 
 export type PhotoPaymentAttemptRow = {
@@ -575,8 +647,9 @@ export type PhotoLeadRow = {
   updated_at: string;
 };
 
-export type DocumentKind = "services_agreement" | "event_agreement" | "session_agreement" | "print_release" | "model_release" | "club_agreement" | "custom";
-export type DocumentStatus = "draft" | "sent" | "viewed" | "signed" | "declined" | "expired";
+export type DocumentKind = "services_agreement" | "event_agreement" | "session_agreement" | "print_release" | "model_release" | "guardian_release" | "club_agreement" | "custom";
+export type DocumentStatus = "draft" | "sent" | "viewed" | "signed" | "declined" | "expired" | "void";
+export type SignerRole = "client" | "guardian";
 
 export type PhotoDocumentTemplateRow = {
   id: string;
@@ -613,6 +686,17 @@ export type PhotoDocumentRow = {
   signer_email: string | null;
   signer_phone: string | null;
   signature_evidence: Json | null;
+  /** Round 3: e-signature provider abstraction (internal | mock | docusign). */
+  provider: string;
+  provider_envelope_id: string | null;
+  provider_status: string | null;
+  provider_error: string | null;
+  signer_role: SignerRole;
+  required_for_confirmation: boolean;
+  document_version: string | null;
+  voided_at: string | null;
+  completed_document_ref: string | null;
+  certificate_ref: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -723,6 +807,8 @@ export type PhotoQuoteRow = {
 
 /** Client-portal views (SECURITY DEFINER): only client-safe columns. */
 export type ClientPersonView =Pick<PhotoPersonRow, "id" | "owner_id" | "full_name" | "email" | "phone" | "instagram" | "whatsapp" | "created_at">;
+export type ClientPaymentRequestView = Pick<PhotoBookingPaymentRequestRow, "id" | "owner_id" | "booking_id" | "stage" | "amount_qr" | "currency" | "status" | "payment_url" | "created_at" | "paid_at">;
+
 export type ClientBookingView = Pick<
   PhotoBookingRow,
   | "id"
@@ -754,6 +840,20 @@ export type ClientBookingView = Pick<
   | "details"
   | "contract_document_id"
   | "gallery_id"
+  | "client_type"
+  | "subject_is_minor"
+  | "requires_contract"
+  | "requires_guardian_release"
+  | "contract_state"
+  | "deposit_percent"
+  | "deposit_qr"
+  | "balance_qr"
+  | "deposit_state"
+  | "deposit_paid_at"
+  | "balance_state"
+  | "balance_due_at"
+  | "balance_paid_at"
+  | "gallery_delivered_at"
   | "confirmed_at"
   | "delivered_at"
   | "completed_at"
@@ -1004,6 +1104,24 @@ export type Database = {
           | "cancelled_at"
           | "cancel_reason"
           | "public_ref"
+          | "client_type"
+          | "usage_type"
+          | "subject_is_minor"
+          | "guardian"
+          | "legal_acceptance"
+          | "idempotency_key"
+          | "requires_contract"
+          | "requires_guardian_release"
+          | "contract_state"
+          | "deposit_percent"
+          | "deposit_qr"
+          | "balance_qr"
+          | "deposit_state"
+          | "deposit_paid_at"
+          | "balance_state"
+          | "balance_due_at"
+          | "balance_paid_at"
+          | "gallery_delivered_at"
         >;
         Update: Partial<PhotoBookingRow>;
         Relationships: [];
@@ -1129,8 +1247,52 @@ export type Database = {
           | "signer_email"
           | "signer_phone"
           | "signature_evidence"
+          | "provider"
+          | "provider_envelope_id"
+          | "provider_status"
+          | "provider_error"
+          | "signer_role"
+          | "required_for_confirmation"
+          | "document_version"
+          | "voided_at"
+          | "completed_document_ref"
+          | "certificate_ref"
         >;
         Update: Partial<PhotoDocumentRow>;
+        Relationships: [];
+      };
+      photo_booking_payment_requests: {
+        Row: PhotoBookingPaymentRequestRow;
+        Insert: Optional<
+          PhotoBookingPaymentRequestRow,
+          | "id"
+          | "created_at"
+          | "updated_at"
+          | "currency"
+          | "provider"
+          | "provider_invoice_id"
+          | "provider_payment_id"
+          | "provider_reference"
+          | "payment_url"
+          | "status"
+          | "generation"
+          | "pay_token_hash"
+          | "error_code"
+          | "error_message"
+          | "metadata"
+          | "sent_at"
+          | "paid_at"
+          | "failed_at"
+          | "cancelled_at"
+          | "expired_at"
+        >;
+        Update: Partial<PhotoBookingPaymentRequestRow>;
+        Relationships: [];
+      };
+      photo_esign_events: {
+        Row: PhotoEsignEventRow;
+        Insert: Optional<PhotoEsignEventRow, "id" | "received_at" | "envelope_id" | "event_type" | "payload" | "processed_at" | "result">;
+        Update: Partial<PhotoEsignEventRow>;
         Relationships: [];
       };
       photo_galleries: {
@@ -1178,6 +1340,7 @@ export type Database = {
       photo_client_bookings_v: { Row: ClientBookingView; Relationships: [] };
       photo_client_galleries_v: { Row: ClientGalleryView; Relationships: [] };
       photo_client_payments_v: { Row: ClientPaymentView; Relationships: [] };
+      photo_client_payment_requests_v: { Row: ClientPaymentRequestView; Relationships: [] };
     };
     Functions: {
       photo_apply_refresh: {

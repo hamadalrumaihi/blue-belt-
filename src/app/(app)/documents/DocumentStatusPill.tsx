@@ -9,6 +9,7 @@ const TONE: Record<DocumentStatus, string> = {
   signed: "bg-success-soft text-success border border-success/30",
   declined: "bg-danger-soft text-danger border border-danger/30",
   expired: "bg-page text-muted border border-line",
+  void: "bg-page text-muted border border-line line-through",
 };
 
 export function DocumentStatusPill({ status, className }: { status: DocumentStatus; className?: string }) {

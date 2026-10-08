@@ -11,15 +11,16 @@ import type { DocumentKind, DocumentStatus } from "@/lib/supabase/database.types
  * declined or expired document is re-issued as a NEW document (new token,
  * new version), never edited in place.
  */
-export const DOCUMENT_STATUSES = ["draft", "sent", "viewed", "signed", "declined", "expired"] as const satisfies readonly DocumentStatus[];
+export const DOCUMENT_STATUSES = ["draft", "sent", "viewed", "signed", "declined", "expired", "void"] as const satisfies readonly DocumentStatus[];
 
 export const DOCUMENT_TRANSITIONS: Record<DocumentStatus, readonly DocumentStatus[]> = {
-  draft: ["sent"],
-  sent: ["viewed", "signed", "declined", "expired"],
-  viewed: ["signed", "declined", "expired"],
+  draft: ["sent", "void"],
+  sent: ["viewed", "signed", "declined", "expired", "void"],
+  viewed: ["signed", "declined", "expired", "void"],
   signed: [],
   declined: [],
   expired: [],
+  void: [],
 };
 
 export const DOCUMENT_STATUS_LABEL: Record<DocumentStatus, string> = {
@@ -29,9 +30,10 @@ export const DOCUMENT_STATUS_LABEL: Record<DocumentStatus, string> = {
   signed: "Signed",
   declined: "Declined",
   expired: "Expired",
+  void: "Voided",
 };
 
-export const DOCUMENT_KINDS = ["services_agreement", "event_agreement", "session_agreement", "print_release", "model_release", "club_agreement", "custom"] as const satisfies readonly DocumentKind[];
+export const DOCUMENT_KINDS = ["services_agreement", "event_agreement", "session_agreement", "print_release", "model_release", "guardian_release", "club_agreement", "custom"] as const satisfies readonly DocumentKind[];
 
 export const DOCUMENT_KIND_LABEL: Record<DocumentKind, string> = {
   services_agreement: "Photography services agreement",
@@ -39,6 +41,7 @@ export const DOCUMENT_KIND_LABEL: Record<DocumentKind, string> = {
   session_agreement: "Fighter portrait / session agreement",
   print_release: "Print release",
   model_release: "Model / image release",
+  guardian_release: "Minor / guardian release",
   club_agreement: "Club / team agreement",
   custom: "Custom document",
 };
