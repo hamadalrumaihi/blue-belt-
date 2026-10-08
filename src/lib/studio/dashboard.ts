@@ -103,6 +103,18 @@ export function describeAudit(row: Pick<PhotoAuditLogRow, "id" | "entity" | "ent
     case "booking.invoice_created":
       text = `MyFatoorah payment link created (${formatQr(Number(d.amount_qr))})`;
       break;
+    case "booking.shoot_complete":
+      text = "Shoot marked complete";
+      break;
+    case "booking.final_amount":
+      text = `Final amount recorded: ${formatQr(Number(d.amount_qr))}`;
+      break;
+    case "booking.payment_requested":
+      text = `Online payment requested: ${formatQr(Number(d.due_qr ?? d.amount_qr))}`;
+      break;
+    case "payment.session_started":
+      text = `Client started an online payment (${formatQr(Number(d.amount_qr))})`;
+      break;
     case "booking.athlete_linked":
       text = "Booking linked to a tracked athlete";
       break;

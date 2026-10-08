@@ -1,7 +1,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { writeAudit } from "@/lib/audit";
-import { bookingTransitionColumns, canTransitionBooking, effectivePayment } from "@/lib/bookings/state";
+import { bookingTransitionColumns, canTransitionBooking } from "@/lib/bookings/state";
 import { bodyHash } from "@/lib/documents/hash";
 import { isAcceptableSignerName, isSignable } from "@/lib/documents/state";
 import { hashSigningToken, isSigningTokenShape } from "@/lib/documents/tokens";
@@ -114,17 +114,21 @@ export type SignError = "not_found" | "expired" | "already_signed" | "declined" 
 
 export type SignResult = { ok: true; documentId: string; signedAt: string } | { ok: false; error: SignError };
 
-function bookingTargetAfterSignature(booking: PhotoBookingRow): "awaiting_payment" | "confirmed" {
-  const amount = Number(booking.amount_qr) || 0;
-  return amount > 0 && effectivePayment(booking).state !== "paid" ? "awaiting_payment" : "confirmed";
+/**
+ * A signed agreement confirms the booking. Nothing is paid up front: the
+ * owner records the final amount after the shoot and only then requests
+ * payment, so the booking never waits on money before the date.
+ */
+function bookingTargetAfterSignature(): "confirmed" {
+  return "confirmed";
 }
 
 /**
  * Records a typed-name signature. Atomic against double submission: the
  * update only matches while the row is still sent/viewed. After the row is
  * signed: audit (actor 'client'), owner Telegram, client copy e-mail, and
- * the booking moves on from awaiting_contract (to payment when money is
- * still due, otherwise confirmed). Never touches photo_athletes.
+ * the booking moves on from awaiting_contract to confirmed (payment comes
+ * after the shoot). Never touches photo_athletes.
  */
 export async function signDocument(token: string, input: SignInput, deps: SigningDeps = {}): Promise<SignResult> {
   const supabase = clientOf(deps);
@@ -173,7 +177,7 @@ export async function signDocument(token: string, input: SignInput, deps: Signin
     const { data } = await supabase.from("photo_bookings").select("*").eq("id", doc.booking_id).maybeSingle();
     booking = data ?? null;
     if (booking && booking.booking_status === "awaiting_contract") {
-      const target = bookingTargetAfterSignature(booking);
+      const target = bookingTargetAfterSignature();
       if (canTransitionBooking(booking.booking_status, target)) {
         await supabase.from("photo_bookings").update({ ...bookingTransitionColumns(booking, target, now), contract_document_id: doc.id }).eq("id", booking.id).eq("booking_status", "awaiting_contract");
       }

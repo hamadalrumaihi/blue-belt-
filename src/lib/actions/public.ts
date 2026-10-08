@@ -193,7 +193,7 @@ export async function submitPublicBooking(_prev: PublicFormState, fd: FormData):
         greeting: `Hi ${values.full_name},`,
         paragraphs: [
           `Thanks for booking with ${studio.business_name}. We will look at the details and confirm within 24 hours.`,
-          quoteOnly ? "This request is quoted individually: we will send you a price before anything is booked." : "Once confirmed, a payment link follows by e-mail or WhatsApp. Nothing has been charged.",
+          quoteOnly ? "This request is quoted individually: we will send you a price before anything is booked." : "No payment is needed to book. After the shoot you pay online through MyFatoorah.",
         ],
         facts: [["Reference", ref], ...summary.filter(([k]) => !["Name", "Phone", "E-mail", "Instagram", "Notes"].includes(k))],
         cta: { label: "View my bookings", url: `${siteUrl()}/client` },

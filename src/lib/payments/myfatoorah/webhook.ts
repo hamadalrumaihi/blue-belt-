@@ -21,8 +21,10 @@ import type { Database, Json, PhotoBookingRow, PhotoOrderRow } from "@/lib/supab
 import { bookingEmailAlertKey, bookingEmailDraft, type BookingEmailKind } from "@/lib/bookings/emails";
 import { deliveryInsert } from "@/lib/notifications/delivery-runner";
 import { enqueueClientEmail } from "@/lib/notifications/email/outbox";
+import { enqueueOwnerTelegram } from "@/lib/notifications/owner";
 import { fulfillmentPlan } from "@/lib/payments/fulfillment";
 import { applyTransition, isPaymentStatus, type PaymentStatus } from "@/lib/payments/types";
+import { isUuid } from "@/lib/validation";
 import { MYFATOORAH_PROVIDER, type PaymentProvider, type PaymentStatusOutput } from "./client";
 import { buildSignaturePayload, eventNameOf, readPath, signatureValue, type SignedEventName } from "./signature";
 
@@ -47,6 +49,7 @@ export type ProcessingResult =
   | "booking_not_found"
   | "unchanged"
   | "ignored_transition"
+  | "amount_mismatch"
   | "error";
 
 export type ProcessWebhookOutcome = {
@@ -104,7 +107,17 @@ export function providerEventIdOf(body: Record<string, unknown>): string {
 // ---------------------------------------------------------------------------
 
 export type StatusMapping =
-  | { kind: "apply"; status: PaymentStatus; invoiceId: string; paymentId: string | null; amount: number | null; currency: string | null; transaction: Json }
+  | {
+      kind: "apply";
+      status: PaymentStatus;
+      invoiceId: string;
+      paymentId: string | null;
+      amount: number | null;
+      currency: string | null;
+      transaction: Json;
+      /** Our CustomerReference (the booking id) as MyFatoorah echoes it; lets a superseded invoice find its booking. */
+      externalIdentifier?: string | null;
+    }
   | { kind: "ignore"; reason: string };
 
 /**
@@ -132,6 +145,7 @@ export function mapWebhookEvent(eventName: SignedEventName | null, data: Record<
         amount: num(readPath(data, "Amount.ValueInBaseCurrency")),
         currency: text(readPath(data, "Amount.BaseCurrency")),
         transaction: (isRecord(data.Transaction) ? data.Transaction : {}) as Json,
+        externalIdentifier: text(readPath(data, "Invoice.ExternalIdentifier")),
       };
     }
     case "REFUND_STATUS_CHANGED": {
@@ -182,7 +196,7 @@ export function mapInquiry(inquiry: PaymentStatusOutput): StatusMapping {
   const invoiceStatus = inquiry.invoiceStatus.toUpperCase();
   const success = inquiry.transactions.find((t) => ["SUCCSS", "SUCCESS"].includes(t.status.toUpperCase()));
   const latest = inquiry.transactions[inquiry.transactions.length - 1] ?? null;
-  const base = { invoiceId: inquiry.invoiceId, amount: inquiry.invoiceValue, currency: latest?.currency ?? null };
+  const base = { invoiceId: inquiry.invoiceId, amount: inquiry.invoiceValue, currency: latest?.currency ?? null, externalIdentifier: inquiry.customerReference };
   // "DuplicatePayment" is a paid invoice that was paid twice (official library
   // treats it as Paid; the duplicate is refunded by MyFatoorah).
   if (invoiceStatus === "PAID" || invoiceStatus === "DUPLICATEPAYMENT" || success) {
@@ -201,7 +215,37 @@ export function mapInquiry(inquiry: PaymentStatusOutput): StatusMapping {
 // Booking updates (shared by webhook + reconciliation)
 // ---------------------------------------------------------------------------
 
-type ApplyOutcome = { result: Extract<ProcessingResult, "processed" | "unchanged" | "ignored_transition" | "error">; status: PaymentStatus; detail?: string };
+export type ApplyOutcome = { result: Extract<ProcessingResult, "processed" | "unchanged" | "ignored_transition" | "amount_mismatch" | "error">; status: PaymentStatus; detail?: string };
+
+/** Amount tolerance when comparing what the provider says was paid with what the booking expects. */
+export const AMOUNT_TOLERANCE_QR = 0.01;
+
+/**
+ * What a provider payment for this booking must be worth. The website
+ * checkout records the amount it asked for in metadata.pay_session (keyed by
+ * invoice id); otherwise it is the booking amount less anything already
+ * recorded by hand (a partial cash payment followed by card for the rest).
+ */
+export function expectedChargeQr(booking: Pick<PhotoBookingRow, "amount_qr" | "amount_paid_qr" | "metadata">, invoiceId?: string | null): number {
+  const metadata = isRecord(booking.metadata) ? booking.metadata : {};
+  const session = isRecord(metadata.pay_session) ? metadata.pay_session : null;
+  if (session && invoiceId && session.invoice_id === invoiceId && typeof session.amount === "number" && Number.isFinite(session.amount)) return session.amount;
+  const paid = Number(booking.amount_paid_qr) || 0;
+  return Math.max(0, Math.round((Number(booking.amount_qr) - paid) * 100) / 100);
+}
+
+/**
+ * Null when the provider's amount and currency match what the booking
+ * expects (or the event carries no amount at all); otherwise a short reason.
+ * A verified "paid" with the wrong amount must never mark the booking paid.
+ */
+export function amountMismatch(booking: Pick<PhotoBookingRow, "amount_qr" | "amount_paid_qr" | "metadata" | "currency">, mapping: Pick<Extract<StatusMapping, { kind: "apply" }>, "amount" | "currency" | "invoiceId">): string | null {
+  if (mapping.amount === null) return null;
+  const expected = expectedChargeQr(booking, mapping.invoiceId);
+  if (Math.abs(mapping.amount - expected) > AMOUNT_TOLERANCE_QR) return `amount ${mapping.amount} expected ${expected}`;
+  if (mapping.currency && booking.currency && mapping.currency.trim().toUpperCase() !== booking.currency.trim().toUpperCase()) return `currency ${mapping.currency} expected ${booking.currency}`;
+  return null;
+}
 
 /**
  * TODO(payments): the real link from a paid booking to a tracked athlete.
@@ -219,7 +263,7 @@ export async function linkBookingToAthlete(booking: PhotoBookingRow, deps: Webho
   if (error) deps.log.warn("payments.link_flag_failed", { bookingId: booking.id, error: error.message });
 }
 
-type ApplyContext = { source: string; eventRowId?: number | null };
+export type ApplyContext = { source: string; eventRowId?: number | null; /** Provider event reference (or another stable id) for alert dedupe keys. */ eventId?: string | null };
 
 /**
  * Applies one status transition ATOMICALLY through photo_apply_payment_transition:
@@ -227,15 +271,26 @@ type ApplyContext = { source: string; eventRowId?: number | null };
  * the delivery row's outcome and — on paid — the owner's [Orders]
  * confirmation in the notification outbox, in one database transaction.
  * A concurrent writer wins and this delivery is reported as an ignored
- * transition instead of clobbering it.
+ * transition instead of clobbering it. Shared by the webhook, the replay and
+ * reconcile jobs and the website pay page's return-visit verification.
  */
-async function applyStatusToBooking(booking: PhotoBookingRow, mapping: Extract<StatusMapping, { kind: "apply" }>, ctx: ApplyContext, deps: WebhookDeps): Promise<ApplyOutcome> {
+export async function applyStatusToBooking(booking: PhotoBookingRow, mapping: Extract<StatusMapping, { kind: "apply" }>, ctx: ApplyContext, deps: WebhookDeps): Promise<ApplyOutcome> {
   const now = deps.now();
   const transition = applyTransition(booking.status, mapping.status, now, booking);
   if (!transition.ok) {
     if (transition.reason === "same_status") return { result: "unchanged", status: booking.status };
     deps.log.warn("payments.illegal_transition", { bookingId: booking.id, from: booking.status, to: mapping.status, source: ctx.source });
     return { result: "ignored_transition", status: booking.status, detail: `${booking.status}->${mapping.status}` };
+  }
+
+  // A verified SUCCESS for the wrong amount or currency is still not a payment
+  // of THIS booking: keep the status, keep the evidence, tell the owner.
+  if (mapping.status === "paid") {
+    const mismatch = amountMismatch(booking, mapping);
+    if (mismatch) {
+      await recordAmountMismatch(booking, mapping, mismatch, ctx, deps);
+      return { result: "amount_mismatch", status: booking.status, detail: mismatch };
+    }
   }
 
   // Signature validity is not payment: only Transaction.Status SUCCESS reaches
@@ -245,7 +300,9 @@ async function applyStatusToBooking(booking: PhotoBookingRow, mapping: Extract<S
   if (mapping.status === "paid") {
     const plan = fulfillmentPlan(booking);
     const metadata = isRecord(booking.metadata) ? booking.metadata : {};
-    columns.metadata = { ...metadata, ...plan.metadata, pending_athlete_link: true } as Json;
+    const relink = booking.provider_invoice_id && booking.provider_invoice_id !== mapping.invoiceId ? { provider_invoice_id: mapping.invoiceId, superseded_invoices: supersededInvoices(metadata, booking.provider_invoice_id) } : {};
+    columns.metadata = { ...metadata, ...plan.metadata, pending_athlete_link: true, ...(relink.superseded_invoices ? { superseded_invoices: relink.superseded_invoices as Json } : {}) } as Json;
+    if (relink.provider_invoice_id) columns.provider_invoice_id = relink.provider_invoice_id;
     const amount = `${Number(mapping.amount ?? booking.amount_qr).toFixed(2)} ${mapping.currency ?? booking.currency}`;
     delivery = {
       alert_key: `payment:${booking.id}:paid`,
@@ -279,6 +336,51 @@ async function applyStatusToBooking(booking: PhotoBookingRow, mapping: Extract<S
   if (out.applied !== true) return { result: "ignored_transition", status: booking.status, detail: out.reason === "booking_not_found" ? "booking_not_found" : "concurrent_update" };
   if (mapping.status === "paid") await afterProviderPaid(booking, mapping, now, deps);
   return { result: "processed", status: mapping.status };
+}
+
+/** Invoice ids this booking used before (each website checkout attempt creates a new one); the newest last, bounded. */
+export function supersededInvoices(metadata: Record<string, unknown>, invoiceId: string | null | undefined): string[] {
+  const existing = Array.isArray(metadata.superseded_invoices) ? metadata.superseded_invoices.filter((v): v is string => typeof v === "string") : [];
+  if (!invoiceId || existing.includes(invoiceId)) return existing;
+  return [...existing, invoiceId].slice(-20);
+}
+
+/**
+ * Keeps the evidence of a mismatched payment on the booking (metadata only;
+ * the provider status is untouched) and alerts the owner once per event.
+ * Best effort: a failure here never changes the outcome.
+ */
+async function recordAmountMismatch(booking: PhotoBookingRow, mapping: Extract<StatusMapping, { kind: "apply" }>, reason: string, ctx: ApplyContext, deps: WebhookDeps): Promise<void> {
+  const now = deps.now();
+  const eventKey = ctx.eventId ?? mapping.paymentId ?? mapping.invoiceId;
+  deps.log.warn("payments.amount_mismatch", { bookingId: booking.id, invoiceId: mapping.invoiceId, reason, source: ctx.source });
+  try {
+    const metadata = isRecord(booking.metadata) ? booking.metadata : {};
+    const { error } = await deps.supabase
+      .from("photo_bookings")
+      .update({ metadata: { ...metadata, payment_mismatch: { invoice_id: mapping.invoiceId, payment_id: mapping.paymentId, amount: mapping.amount, currency: mapping.currency, expected: expectedChargeQr(booking, mapping.invoiceId), reason, source: ctx.source, at: now.toISOString() } } as Json })
+      .eq("id", booking.id);
+    if (error) deps.log.warn("payments.mismatch_record_failed", { bookingId: booking.id, error: error.message });
+  } catch (err) {
+    deps.log.warn("payments.mismatch_record_failed", { bookingId: booking.id, error: err instanceof Error ? err.message : "unknown" });
+  }
+  try {
+    await enqueueOwnerTelegram(deps.supabase, {
+      ownerId: booking.owner_id,
+      kind: "INTEGRATION_FAILED",
+      alertKey: `payment:${booking.id}:mismatch:${eventKey}`,
+      title: `Payment amount mismatch: ${booking.customer_name}`,
+      lines: [
+        `${booking.public_ref ?? booking.id.slice(0, 8)} · ${booking.package_name}`,
+        `MyFatoorah reports ${Number(mapping.amount).toFixed(2)} ${mapping.currency ?? ""}; the booking expects ${expectedChargeQr(booking, mapping.invoiceId).toFixed(2)} ${booking.currency}.`,
+        `Invoice ${mapping.invoiceId}. The booking was NOT marked paid. Check the MyFatoorah portal and record the payment by hand if it is genuine.`,
+      ],
+      url: `${portalBase()}/bookings/${booking.id}`,
+      now,
+    });
+  } catch (err) {
+    deps.log.warn("payments.mismatch_alert_failed", { bookingId: booking.id, error: err instanceof Error ? err.message : "unknown" });
+  }
 }
 
 /** Lifecycle stages a verified payment confirms. Later stages (confirmed, in progress…) are left alone. */
@@ -361,6 +463,24 @@ async function findBookingByInvoice(invoiceId: string, deps: WebhookDeps): Promi
     return null;
   }
   return data ?? null;
+}
+
+/**
+ * The booking an event belongs to. Normally found by (provider, invoice id).
+ * Each website checkout attempt creates a fresh invoice, so a customer who
+ * pays an EARLIER attempt's invoice (e.g. a hosted link they kept) would not
+ * match: for a PAID event only, fall back to the CustomerReference we set
+ * (the booking id, echoed as Invoice.ExternalIdentifier) and accept it when
+ * that booking lists the invoice among its superseded ones. The amount check
+ * in applyStatusToBooking still applies.
+ */
+async function findBookingForMapping(mapping: Extract<StatusMapping, { kind: "apply" }>, deps: WebhookDeps): Promise<PhotoBookingRow | null> {
+  const direct = await findBookingByInvoice(mapping.invoiceId, deps);
+  if (direct || mapping.status !== "paid" || !isUuid(mapping.externalIdentifier ?? "")) return direct;
+  const { data } = await deps.supabase.from("photo_bookings").select("*").eq("id", mapping.externalIdentifier!).eq("provider", MYFATOORAH_PROVIDER).maybeSingle();
+  if (!data) return null;
+  const metadata = isRecord(data.metadata) ? data.metadata : {};
+  return supersededInvoices(metadata, null).includes(mapping.invoiceId) ? data : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -545,7 +665,7 @@ export async function processWebhook(event: WebhookEvent, deps: WebhookDeps): Pr
   const mapping = mapWebhookEvent(eventName, isRecord(body.Data) ? body.Data : {});
   if (mapping.kind === "ignore") return finish("ignored_event", null, undefined, mapping.reason);
 
-  const booking = await findBookingByInvoice(mapping.invoiceId, deps);
+  const booking = await findBookingForMapping(mapping, deps);
   if (!booking) {
     // Not a standalone booking — the invoice may belong to a Pic-Time order.
     const order = await findOrderByInvoice(mapping.invoiceId, deps);
@@ -557,7 +677,7 @@ export async function processWebhook(event: WebhookEvent, deps: WebhookDeps): Pr
     return finish("booking_not_found", null);
   }
 
-  const applied = await applyStatusToBooking(booking, mapping, { source: `webhook:${eventId}`, eventRowId: rowId }, deps);
+  const applied = await applyStatusToBooking(booking, mapping, { source: `webhook:${eventId}`, eventRowId: rowId, eventId }, deps);
   // "processed" already marked the delivery row inside the transaction.
   if (applied.result === "processed") return { result: "processed", eventId, eventType, bookingId: booking.id, status: applied.status };
   return finish(applied.result, booking, applied.status, applied.detail);
@@ -604,9 +724,9 @@ export async function replayUnmatchedEvents(deps: WebhookDeps, limit = 50): Prom
     const mapping = mapWebhookEvent(eventNameOf(body), isRecord(body.Data) ? body.Data : {});
     if (mapping.kind === "ignore") continue;
     const source = `replay:${ev.provider_event_id ?? ev.id}`;
-    const booking = await findBookingByInvoice(mapping.invoiceId, deps);
+    const booking = await findBookingForMapping(mapping, deps);
     if (booking) {
-      const out = await applyStatusToBooking(booking, mapping, { source, eventRowId: ev.id }, deps);
+      const out = await applyStatusToBooking(booking, mapping, { source, eventRowId: ev.id, eventId: String(ev.provider_event_id ?? ev.id) }, deps);
       if (out.result !== "processed") {
         await deps.supabase.from("photo_payment_events").update({ processing_result: out.detail ? `${out.result}:${out.detail}` : out.result, processed_at: deps.now().toISOString(), booking_id: booking.id, owner_id: booking.owner_id }).eq("id", ev.id);
       } else {
@@ -682,7 +802,7 @@ export async function reconcileBooking(bookingId: string, provider: PaymentProvi
   if (mapping.kind === "ignore") return { result: "unchanged", bookingId, status: booking.status, detail: mapping.reason };
   if (!isPaymentStatus(mapping.status)) return { result: "error", bookingId, status: booking.status, detail: "bad_status" };
 
-  const applied = await applyStatusToBooking(booking, mapping, { source: "reconcile" }, deps);
+  const applied = await applyStatusToBooking(booking, mapping, { source: "reconcile", eventId: mapping.paymentId ? `reconcile:${mapping.paymentId}` : null }, deps);
   deps.log.info("payments.reconcile", { bookingId, result: applied.result, from: booking.status, to: applied.status });
   return { result: applied.result, bookingId, status: applied.status, detail: applied.detail };
 }

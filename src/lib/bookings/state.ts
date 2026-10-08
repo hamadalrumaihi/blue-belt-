@@ -117,16 +117,55 @@ export function bookingTransitionColumns(booking: Pick<PhotoBookingRow, "quoted_
 }
 
 /**
- * Where a brand-new booking starts, from how it will be paid. A quote always
- * starts as an inquiry; a priced service waits for the contract when one is
- * required, otherwise for payment; a free (0 QAR) service is confirmed at once.
+ * Where a brand-new booking starts. Booking never requires payment: a quote
+ * and a priced service both start as an inquiry the owner reviews and
+ * confirms; a service that requires a contract waits for it first; only a
+ * free (0 QAR) service is confirmed at once. Payment is requested after the
+ * shoot (see canRequestPayment) and never decides the initial stage.
  */
 export function initialBookingStatus(input: { paymentMode: PaymentMode; amountQr: number; requiresContract: boolean }): BookingStatus {
   if (input.paymentMode === "quote") return "inquiry";
   if (input.requiresContract) return "awaiting_contract";
   if (input.amountQr <= 0) return "confirmed";
-  return "awaiting_payment";
+  return "inquiry";
 }
+
+/** The shoot is done once the owner marked it (coverage_done_at). */
+export function isShootComplete(b: Pick<PhotoBookingRow, "coverage_done_at">): boolean {
+  return Boolean(b.coverage_done_at);
+}
+
+/** Lifecycle stages in which a payment may be requested (the shoot happened or is under way). */
+export const PAYABLE_BOOKING_STATUSES: readonly BookingStatus[] = ["confirmed", "in_progress", "delivered", "completed"];
+
+export type PaymentRequestBooking = Pick<PhotoBookingRow, "coverage_done_at" | "amount_qr" | "booking_status" | "status" | "amount_paid_qr" | "manual_paid_at">;
+
+/**
+ * Why a payment cannot be requested yet, or null when it can. The customer
+ * pays online only after the shoot, for the final amount the owner recorded,
+ * and only while something is still due.
+ */
+export function paymentRequestBlocker(b: PaymentRequestBooking): "shoot_not_complete" | "no_amount" | "wrong_stage" | "already_paid" | "refunded" | null {
+  if (!isShootComplete(b)) return "shoot_not_complete";
+  if (!(Number(b.amount_qr) > 0)) return "no_amount";
+  if (!PAYABLE_BOOKING_STATUSES.includes(b.booking_status)) return "wrong_stage";
+  const state = effectivePayment(b).state;
+  if (state === "paid") return "already_paid";
+  if (state === "refunded") return "refunded";
+  return null;
+}
+
+export function canRequestPayment(b: PaymentRequestBooking): boolean {
+  return paymentRequestBlocker(b) === null;
+}
+
+export const PAYMENT_REQUEST_BLOCKER_LABEL: Record<NonNullable<ReturnType<typeof paymentRequestBlocker>>, string> = {
+  shoot_not_complete: "Mark the shoot complete first.",
+  no_amount: "Record the final amount first.",
+  wrong_stage: "Confirm the booking first.",
+  already_paid: "This booking is already paid.",
+  refunded: "This booking was refunded through MyFatoorah.",
+};
 
 export type EffectivePayment = { state: "unpaid" | "partial" | "paid" | "refunded"; source: "provider" | "manual" | "none"; paidQr: number; dueQr: number };
 

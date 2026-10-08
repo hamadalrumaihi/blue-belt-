@@ -6,7 +6,7 @@ import { isPublicRef } from "@/lib/bookings/public-form";
 import { loadPublicStudio } from "@/lib/studio/queries";
 
 export const dynamic = "force-dynamic";
-export const metadata: Metadata = { title: "Request received — Blue Belt Media" };
+export const metadata: Metadata = { title: "Request received | Blue Belt Media" };
 
 export default async function BookingDonePage({ searchParams }: PageProps<"/book/done">) {
   const [pub, params] = await Promise.all([loadPublicStudio(), searchParams]);
@@ -17,10 +17,10 @@ export default async function BookingDonePage({ searchParams }: PageProps<"/book
   return (
     <main className="bg-page">
       <div className="mx-auto max-w-2xl px-4 py-12 lg:px-8 lg:py-16">
-        <div className="card p-6 sm:p-10" role="status" aria-live="polite">
+        <div className="card p-6 sm:p-10" role="status" aria-live="polite" data-umami-event="booking-submitted">
           <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-success-soft text-success"><CheckIcon size={28} /></span>
           <p className="eyebrow mt-6">Request received</p>
-          <h1 className="mt-2 text-3xl font-extrabold tracking-tight text-navy">Thank you — we are on it.</h1>
+          <h1 className="mt-2 text-3xl font-extrabold tracking-tight text-navy">Thank you. We are on it.</h1>
           {ref ? (
             <div className="mt-6 rounded-card border border-line bg-page p-4">
               <p className="text-xs font-bold uppercase tracking-[0.14em] text-muted">Your reference</p>
@@ -36,8 +36,8 @@ export default async function BookingDonePage({ searchParams }: PageProps<"/book
           <h2 className="mt-8 text-base font-extrabold text-ink">What happens next</h2>
           <ol className="mt-3 space-y-3 text-sm text-ink">
             <li className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-navy text-xs font-bold text-white">1</span> {name} checks the schedule and confirms within 24 hours, by e-mail or WhatsApp.</li>
-            <li className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-navy text-xs font-bold text-white">2</span> Once the price is agreed, a payment link follows by e-mail or WhatsApp. No payment is taken now.</li>
-            <li className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-navy text-xs font-bold text-white">3</span> After the shoot, your gallery arrives as a private Pic-Time link.</li>
+            <li className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-navy text-xs font-bold text-white">2</span> No payment is needed to book. After the shoot you pay online through MyFatoorah.</li>
+            <li className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-navy text-xs font-bold text-white">3</span> Your gallery arrives as a private Pic-Time link.</li>
           </ol>
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
             <Link href="/client" className="btn-primary min-h-12">Open the client portal</Link>

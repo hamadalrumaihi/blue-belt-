@@ -5,15 +5,16 @@ import { redirect } from "next/navigation";
 import { writeAudit } from "@/lib/audit";
 import { requireOwnedAthlete, requireOwnedEvent } from "@/lib/authz";
 import { bookingEmailAlertKey, bookingEmailDraft, type BookingEmailKind, type BookingEmailOptions } from "@/lib/bookings/emails";
-import { parseBookingForm, parseManualPayment } from "@/lib/bookings/form";
-import { BOOKING_STATUS_LABEL, BOOKING_TYPE_LABEL, bookingTransitionColumns, canTransitionBooking, effectivePayment, formatQr, initialBookingStatus, isBookingStatus, makePublicRef, PAYMENT_METHOD_LABEL } from "@/lib/bookings/state";
+import { parseBookingForm, parseFinalAmount, parseManualPayment } from "@/lib/bookings/form";
+import { BOOKING_STATUS_LABEL, BOOKING_TYPE_LABEL, bookingTransitionColumns, canTransitionBooking, effectivePayment, formatQr, initialBookingStatus, isBookingStatus, makePublicRef, PAYMENT_METHOD_LABEL, PAYMENT_REQUEST_BLOCKER_LABEL, paymentRequestBlocker } from "@/lib/bookings/state";
 import { parseClientForm } from "@/lib/client-form";
 import { createLogger } from "@/lib/log";
 import { enqueueClientEmail } from "@/lib/notifications/email/outbox";
 import { enqueueOwnerTelegram } from "@/lib/notifications/owner";
 import { findOrCreatePerson } from "@/lib/people/match";
-import { getPaymentsConfig, isPaymentsEnabled } from "@/lib/payments/config";
-import { createMyFatoorahClient, MYFATOORAH_PROVIDER } from "@/lib/payments/myfatoorah/client";
+import { isPaymentsEnabled } from "@/lib/payments/config";
+import { MYFATOORAH_PROVIDER } from "@/lib/payments/myfatoorah/client";
+import { createPayToken, isWebsitePayUrl, payPageUrl } from "@/lib/payments/pay-token";
 import { rateLimit, RULES } from "@/lib/rate-limit";
 import { DEFAULT_STUDIO, loadStudio, siteUrl } from "@/lib/studio/queries";
 import { requireStudioUser } from "@/lib/roles";
@@ -290,78 +291,134 @@ export async function transitionBooking(id: string, to: string, reason?: string 
 }
 
 // ---------------------------------------------------------------------------
-// Payments
+// After the shoot: mark complete, record the final amount, request payment
 // ---------------------------------------------------------------------------
 
-export type InvoiceResult = { ok: true; paymentUrl: string | null; alreadyInvoiced: boolean; emailQueued: boolean } | { ok: false; error: string };
+function metadataOf(booking: Pick<PhotoBookingRow, "metadata">): Record<string, unknown> {
+  return booking.metadata && typeof booking.metadata === "object" && !Array.isArray(booking.metadata) ? (booking.metadata as Record<string, unknown>) : {};
+}
 
 /**
- * Creates a MyFatoorah payment link for the booking (explicit owner action,
- * gated by isPaymentsEnabled()). The link is stored on the booking and sent
- * to the owner's Telegram; it reaches the client ONLY when `notifyClient` is
- * ticked — nothing is ever sent to a customer automatically.
+ * The shoot happened. Stamps coverage_done_at once and moves a confirmed
+ * booking to "in progress" through the normal transition rules. Payment is
+ * not touched: it becomes requestable, nothing more.
  */
-export async function requestBookingInvoice(id: string, notifyClient = false): Promise<InvoiceResult> {
+export async function markShootComplete(id: string): Promise<BookingActionResult> {
   if (!isUuid(id)) return { ok: false, error: "Invalid booking." };
-  if (!isPaymentsEnabled()) return { ok: false, error: "Online payments (MyFatoorah) are not enabled yet." };
   const { supabase, user } = await owner();
   if (!user) return { ok: false, error: "You are signed out." };
-  const limit = rateLimit(`invoice:${user.id}`, RULES.providerActionPerUser);
+  const booking = await ownedBooking(supabase, id);
+  if (!booking) return { ok: false, error: "Booking not found." };
+  if (booking.booking_status === "cancelled") return { ok: false, error: "This booking is cancelled." };
+  if (PRE_CONFIRMATION.includes(booking.booking_status)) return { ok: false, error: "Confirm the booking before marking the shoot complete." };
+  if (booking.coverage_done_at) return { ok: true };
+
+  const now = new Date();
+  const cols: Partial<PhotoBookingRow> = { coverage_done_at: now.toISOString() };
+  const moved = booking.booking_status === "confirmed" && canTransitionBooking(booking.booking_status, "in_progress");
+  if (moved) Object.assign(cols, bookingTransitionColumns(booking, "in_progress", now));
+  const { data: updated, error } = await supabase.from("photo_bookings").update(cols).eq("id", id).eq("owner_id", user.id).eq("booking_status", booking.booking_status).is("coverage_done_at", null).select("*").maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  if (!updated) return { ok: false, error: "The booking changed in the meantime. Refresh and try again." };
+
+  await writeAudit(supabase, { ownerId: user.id, actorId: user.id, entity: "booking", entityId: id, action: "booking.shoot_complete", data: { coverage_done_at: cols.coverage_done_at, from: booking.booking_status, to: updated.booking_status } });
+  if (moved) await writeAudit(supabase, { ownerId: user.id, actorId: user.id, entity: "booking", entityId: id, action: "booking.status", data: { from: booking.booking_status, to: "in_progress", reason: "shoot complete" } });
+  revalidateBooking(id, updated.client_id);
+  return { ok: true };
+}
+
+/**
+ * The amount the client pays after the shoot. Refused once MyFatoorah has
+ * verified a payment (the money already moved); an unpaid provider invoice
+ * from an earlier attempt stays linked, and the webhook's amount check plus
+ * the next checkout attempt (which creates a fresh invoice) handle the rest.
+ */
+export async function recordFinalAmount(id: string, _prev: BookingFormState, formData: FormData): Promise<BookingFormState> {
+  if (!isUuid(id)) return { error: "Invalid booking." };
+  const { supabase, user } = await owner();
+  if (!user) return { error: "You are signed out." };
+  const { fieldErrors, values } = parseFinalAmount(formData);
+  if (Object.keys(fieldErrors).length) return { fieldErrors };
+  const booking = await ownedBooking(supabase, id);
+  if (!booking) return { error: "Booking not found." };
+  if (booking.booking_status === "cancelled") return { error: "This booking is cancelled." };
+  if (booking.status === "paid" || booking.status === "disputed") return { error: "This booking is already paid through MyFatoorah; the amount cannot change." };
+  if (booking.status === "refunded") return { error: "This booking was refunded through MyFatoorah; record a new booking instead." };
+
+  const now = new Date().toISOString();
+  const metadata = metadataOf(booking);
+  const patch: Partial<PhotoBookingRow> = {
+    amount_qr: values.amount_qr,
+    currency: values.currency,
+    metadata: { ...metadata, final_amount_recorded_at: now, final_amount_note: values.note, final_amount_previous: Number(booking.amount_qr) } as Json,
+  };
+  const { data: updated, error } = await supabase.from("photo_bookings").update(patch).eq("id", id).eq("owner_id", user.id).select("*").maybeSingle();
+  if (error) return { error: error.message };
+  if (!updated) return { error: "Booking not found." };
+
+  await writeAudit(supabase, { ownerId: user.id, actorId: user.id, entity: "booking", entityId: id, action: "booking.final_amount", data: { amount_qr: values.amount_qr, previous_qr: Number(booking.amount_qr), currency: values.currency, note: values.note } });
+  revalidateBooking(id, updated.client_id);
+  return { saved: true };
+}
+
+export type PaymentRequestResult = { ok: true; payUrl: string; emailQueued: boolean } | { ok: false; error: string };
+
+/**
+ * Creates the website pay link for a booking (explicit owner action). Only
+ * after the shoot is marked complete and a final amount exists. The link is
+ * `/pay/<token>`: the token's hash and creation time go into the booking's
+ * metadata, the link itself into payment_url (the client portal shows it);
+ * an earlier provider URL moves to metadata.provider_payment_url. A new
+ * link replaces the previous one. The lifecycle is NOT changed: payment and
+ * booking status stay separate. The client is e-mailed ONLY when
+ * `notifyClient` is ticked; the owner always gets a Telegram notice.
+ */
+export async function createPaymentRequest(id: string, opts: { notifyClient?: boolean } = {}): Promise<PaymentRequestResult> {
+  const notifyClient = opts.notifyClient === true;
+  if (!isUuid(id)) return { ok: false, error: "Invalid booking." };
+  if (!isPaymentsEnabled()) return { ok: false, error: "Online payments (MyFatoorah) are not enabled yet. Record cash or bank payments by hand." };
+  const { supabase, user } = await owner();
+  if (!user) return { ok: false, error: "You are signed out." };
+  const limit = rateLimit(`payment-request:${user.id}`, RULES.providerActionPerUser);
   if (!limit.ok) return { ok: false, error: `Too many payment links in a short time. Try again in ${limit.retryAfterSeconds}s.` };
   const booking = await ownedBooking(supabase, id);
   if (!booking) return { ok: false, error: "Booking not found." };
-  if (booking.provider_invoice_id) return { ok: true, paymentUrl: booking.payment_url, alreadyInvoiced: true, emailQueued: false };
-  if (booking.booking_status === "cancelled" || booking.booking_status === "completed") return { ok: false, error: `This booking is ${BOOKING_STATUS_LABEL[booking.booking_status].toLowerCase()}; no payment link can be created.` };
-  if (booking.status === "paid" || booking.status === "refunded") return { ok: false, error: "This booking is already paid through MyFatoorah." };
-  if (!(Number(booking.amount_qr) > 0)) return { ok: false, error: "Set an amount on the booking before creating a payment link." };
-
-  const log = createLogger({ route: "actions/bookings", bookingId: id });
-  const config = getPaymentsConfig();
-  const provider = createMyFatoorahClient({ apiKey: config.apiKey, baseUrl: config.baseUrl });
-  const created = await provider.createInvoice({
-    amount: Number(booking.amount_qr),
-    customerName: booking.customer_name,
-    customerReference: booking.id,
-    customerEmail: booking.customer_email || undefined,
-    customerMobile: booking.customer_phone || undefined,
-    displayCurrencyIso: booking.currency,
-    language: "EN",
-    userDefinedField: booking.public_ref ?? undefined,
-    callbackUrl: `${siteUrl()}/client/bookings/${booking.id}?paid=1`,
-    errorUrl: `${siteUrl()}/client/bookings/${booking.id}?paid=0`,
-  });
-  if (!created.ok) {
-    log.warn("booking.invoice_failed", { code: created.error.code, httpStatus: created.error.httpStatus });
-    return { ok: false, error: "The payment provider could not create the link. Try again shortly." };
-  }
+  const blocker = paymentRequestBlocker(booking);
+  if (blocker) return { ok: false, error: PAYMENT_REQUEST_BLOCKER_LABEL[blocker] };
 
   const now = new Date();
-  const patch: Partial<PhotoBookingRow> = { provider: MYFATOORAH_PROVIDER, provider_invoice_id: created.data.invoiceId, payment_url: created.data.paymentUrl, payment_mode: "link_later" };
-  if (PRE_CONFIRMATION.includes(booking.booking_status) && booking.booking_status !== "awaiting_payment") patch.booking_status = "awaiting_payment";
-  const { data: updated, error } = await supabase.from("photo_bookings").update(patch).eq("id", id).eq("owner_id", user.id).is("provider_invoice_id", null).select("*").maybeSingle();
-  if (error || !updated) {
-    // The invoice exists at MyFatoorah but could not be recorded: say so loudly rather than create a second one.
-    log.error("booking.invoice_orphan", { invoiceId: created.data.invoiceId, error: error?.message ?? "booking already invoiced" });
-    return { ok: false, error: "The link was created but could not be saved to the booking. Refresh before trying again." };
-  }
+  const { token, hash } = createPayToken();
+  const payUrl = payPageUrl(siteUrl(), token);
+  const metadata = metadataOf(booking);
+  const providerUrl = booking.payment_url && !isWebsitePayUrl(booking.payment_url) ? booking.payment_url : (metadata.provider_payment_url as string | undefined) ?? null;
+  const patch: Partial<PhotoBookingRow> = {
+    payment_url: payUrl,
+    payment_mode: "link_later",
+    provider: booking.provider ?? MYFATOORAH_PROVIDER,
+    metadata: { ...metadata, pay_token_hash: hash, pay_token_created_at: now.toISOString(), payment_requested_at: now.toISOString(), ...(providerUrl ? { provider_payment_url: providerUrl } : {}) } as Json,
+  };
+  const { data: updated, error } = await supabase.from("photo_bookings").update(patch).eq("id", id).eq("owner_id", user.id).select("*").maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  if (!updated) return { ok: false, error: "Booking not found." };
 
-  await writeAudit(supabase, { ownerId: user.id, actorId: user.id, entity: "booking", entityId: id, action: "booking.invoice_created", data: { invoice_id: created.data.invoiceId, amount_qr: Number(booking.amount_qr), notify_client: notifyClient } });
+  const payment = effectivePayment(updated);
+  await writeAudit(supabase, { ownerId: user.id, actorId: user.id, entity: "booking", entityId: id, action: "booking.payment_requested", data: { amount_qr: Number(updated.amount_qr), due_qr: payment.dueQr, notify_client: notifyClient, token_hash_prefix: hash.slice(0, 8) } });
   await enqueueOwnerTelegram(supabase, {
     ownerId: user.id,
-    kind: "INVOICE_CREATED",
-    alertKey: `booking:${id}:invoice:${created.data.invoiceId}`,
-    title: `Payment link ready — ${booking.customer_name}`,
-    lines: [bookingLabel(updated), formatQr(booking.amount_qr), `Pay: ${created.data.paymentUrl}`, notifyClient ? "Sent to the client by e-mail." : "Not sent to the client — share it yourself or tick “Send to client”."],
+    kind: "BOOKING_PAYMENT_REQUESTED",
+    alertKey: `booking:${id}:payment-requested:${hash.slice(0, 8)}`,
+    title: `Payment link ready: ${updated.customer_name}`,
+    lines: [bookingLabel(updated), `${formatQr(payment.dueQr)} due`, `Pay: ${payUrl}`, notifyClient ? "Sent to the client by e-mail." : "Not sent to the client. Share the link yourself, or tick \"Send to client by e-mail\" next time."],
     url: `${siteUrl()}/bookings/${id}`,
     now,
   });
   let emailQueued = false;
   if (notifyClient && updated.customer_email) {
-    await sendBookingEmail(supabase, updated, "PAYMENT_REQUESTED", { suffix: created.data.invoiceId });
+    await sendBookingEmail(supabase, updated, "PAYMENT_REQUESTED", { suffix: hash.slice(0, 8) });
     emailQueued = true;
   }
   revalidateBooking(id, updated.client_id);
-  return { ok: true, paymentUrl: created.data.paymentUrl, alreadyInvoiced: false, emailQueued };
+  return { ok: true, payUrl, emailQueued };
 }
 
 /** Sum of manual records → booking summary columns. Returns the refreshed row. */

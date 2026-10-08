@@ -54,3 +54,24 @@ export function getPaymentsConfig(): PaymentsConfig {
   const baseUrl = (env("MYFATOORAH_BASE_URL") || MYFATOORAH_TEST_BASE_URL).replace(/\/+$/, "");
   return { enabled: isPaymentsEnabled(), apiKey: env("MYFATOORAH_API_KEY"), webhookSecret: env("MYFATOORAH_WEBHOOK_SECRET"), baseUrl };
 }
+
+/**
+ * Embedded card view (https://docs.myfatoorah.com/docs/embedded-payment):
+ * the browser loads `cardview/v3/session.js` from the PORTAL host that
+ * matches the API base in use. Test accounts use the demo portal; the Qatar
+ * production portal is qa.myfatoorah.com. An unknown base falls back to the
+ * demo script, which can never take a live card.
+ */
+export const MYFATOORAH_CARD_VIEW_SCRIPTS: Record<string, string> = {
+  [MYFATOORAH_TEST_BASE_URL]: "https://demo.myfatoorah.com/cardview/v3/session.js",
+  [MYFATOORAH_PRODUCTION_BASE_URLS.KWT]: "https://portal.myfatoorah.com/cardview/v3/session.js",
+  [MYFATOORAH_PRODUCTION_BASE_URLS.QAT]: "https://qa.myfatoorah.com/cardview/v3/session.js",
+  [MYFATOORAH_PRODUCTION_BASE_URLS.SAU]: "https://sa.myfatoorah.com/cardview/v3/session.js",
+  [MYFATOORAH_PRODUCTION_BASE_URLS.ARE]: "https://ae.myfatoorah.com/cardview/v3/session.js",
+  [MYFATOORAH_PRODUCTION_BASE_URLS.EGY]: "https://eg.myfatoorah.com/cardview/v3/session.js",
+};
+
+export function cardViewScriptUrl(baseUrl: string): string {
+  const key = baseUrl.trim().replace(/\/+$/, "").toLowerCase();
+  return MYFATOORAH_CARD_VIEW_SCRIPTS[key] ?? MYFATOORAH_CARD_VIEW_SCRIPTS[MYFATOORAH_TEST_BASE_URL];
+}

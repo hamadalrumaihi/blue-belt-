@@ -1,6 +1,6 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { effectivePayment, type EffectivePayment } from "@/lib/bookings/state";
+import { canRequestPayment, effectivePayment, PAYABLE_BOOKING_STATUSES, type EffectivePayment } from "@/lib/bookings/state";
 import { bookingSearchTerm } from "@/lib/bookings/form";
 import { createClient } from "@/lib/supabase/server";
 import type {
@@ -26,11 +26,14 @@ type Client = SupabaseClient<Database>;
  * type stays simple and a missing relation never breaks a page.
  */
 
-export type BookingFilter = "needs_action" | "confirmed" | "delivered" | "all";
+export type BookingFilter = "needs_action" | "confirmed" | "shoot_done" | "delivered" | "all";
 
 export const NEEDS_ACTION_STATUSES: readonly BookingStatus[] = ["inquiry", "quoted", "awaiting_contract", "awaiting_payment"];
 export const CONFIRMED_STATUSES: readonly BookingStatus[] = ["confirmed", "in_progress"];
 export const DELIVERED_STATUSES: readonly BookingStatus[] = ["delivered", "completed"];
+
+/** SQL-side narrowing for "shoot done, awaiting payment"; canRequestPayment finishes the job in memory (manual partials need a column comparison). */
+const SHOOT_DONE_FILTER = { statuses: PAYABLE_BOOKING_STATUSES, providerStatuses: "(paid,refunded)" } as const;
 
 export type BookingListRow = PhotoBookingRow & {
   client: Pick<PhotoPersonRow, "id" | "full_name" | "email" | "phone"> | null;
@@ -47,12 +50,13 @@ export async function listBookings(opts: ListBookingsOptions = {}): Promise<Book
   if (filter === "needs_action") query = query.in("booking_status", NEEDS_ACTION_STATUSES);
   if (filter === "confirmed") query = query.in("booking_status", CONFIRMED_STATUSES);
   if (filter === "delivered") query = query.in("booking_status", DELIVERED_STATUSES);
+  if (filter === "shoot_done") query = query.not("coverage_done_at", "is", null).in("booking_status", SHOOT_DONE_FILTER.statuses).gt("amount_qr", 0).not("status", "in", SHOOT_DONE_FILTER.providerStatuses);
   if (opts.type) query = query.eq("booking_type", opts.type);
   const q = bookingSearchTerm(opts.q);
   if (q) query = query.or(`customer_name.ilike.%${q}%,athlete_name.ilike.%${q}%,public_ref.ilike.%${q}%,customer_email.ilike.%${q}%`);
-  query = filter === "confirmed" ? query.order("session_at", { ascending: true, nullsFirst: false }) : query.order("created_at", { ascending: false });
+  query = filter === "confirmed" ? query.order("session_at", { ascending: true, nullsFirst: false }) : filter === "shoot_done" ? query.order("coverage_done_at", { ascending: true }) : query.order("created_at", { ascending: false });
   const { data } = await query.limit(opts.limit ?? 200);
-  const rows = data ?? [];
+  const rows = filter === "shoot_done" ? (data ?? []).filter(canRequestPayment) : (data ?? []);
   const [people, events] = await Promise.all([peopleById(supabase, rows.map((b) => b.client_id)), eventsById(supabase, rows.map((b) => b.event_id))]);
   return rows.map((b) => ({ ...b, client: (b.client_id && people.get(b.client_id)) || null, event: (b.event_id && events.get(b.event_id)) || null, payment: effectivePayment(b) }));
 }
@@ -66,8 +70,21 @@ export async function bookingCounts(): Promise<BookingCounts> {
     if (statuses) q = q.in("booking_status", statuses);
     return q;
   };
-  const [all, needs, confirmed, delivered] = await Promise.all([head(), head(NEEDS_ACTION_STATUSES), head(CONFIRMED_STATUSES), head(DELIVERED_STATUSES)]);
-  return { all: all.count ?? 0, needs_action: needs.count ?? 0, confirmed: confirmed.count ?? 0, delivered: delivered.count ?? 0 };
+  const [all, needs, confirmed, delivered, shootDone] = await Promise.all([
+    head(),
+    head(NEEDS_ACTION_STATUSES),
+    head(CONFIRMED_STATUSES),
+    head(DELIVERED_STATUSES),
+    supabase
+      .from("photo_bookings")
+      .select("id,coverage_done_at,amount_qr,booking_status,status,amount_paid_qr,manual_paid_at")
+      .not("coverage_done_at", "is", null)
+      .in("booking_status", SHOOT_DONE_FILTER.statuses)
+      .gt("amount_qr", 0)
+      .not("status", "in", SHOOT_DONE_FILTER.providerStatuses)
+      .limit(500),
+  ]);
+  return { all: all.count ?? 0, needs_action: needs.count ?? 0, confirmed: confirmed.count ?? 0, delivered: delivered.count ?? 0, shoot_done: (shootDone.data ?? []).filter(canRequestPayment).length };
 }
 
 /** Bookings with a session in the next `days` days that are still live (not cancelled, delivered or completed). */
