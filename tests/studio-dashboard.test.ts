@@ -62,6 +62,13 @@ describe("describeAudit", () => {
     expect(describeAudit({ ...base, action: "booking.status", data: { to: "cancelled", reason: "No show" } }).text).toBe("Booking → Cancelled (No show)");
     expect(describeAudit({ ...base, action: "payment.manual", data: { amount_qr: 350, method: "bank_transfer" } }).text).toBe("Manual payment recorded: 350 QAR by bank transfer");
     expect(describeAudit({ ...base, action: "booking.invoice_created", data: { amount_qr: 350 } }).text).toContain("payment link created");
+    expect(describeAudit({ ...base, action: "booking.price_set", data: { amount_qr: 1000, deposit_qr: 500, balance_qr: 500 } }).text).toBe("Price set: 1,000 QAR (deposit 500 QAR, balance 500 QAR)");
+    expect(describeAudit({ ...base, action: "payment_request.created", data: { stage: "deposit", amount_qr: 500, provider: "WEBSITE" } }).text).toBe("Deposit payment link created: 500 QAR");
+    expect(describeAudit({ ...base, action: "payment_request.regenerated", data: { stage: "balance", generation: 2 } }).text).toBe("Final balance payment link regenerated (generation 2)");
+    expect(describeAudit({ ...base, action: "deposit.paid", data: { amount_qr: 500, source: "provider" } }).text).toBe("Deposit paid: 500 QAR (verified online)");
+    expect(describeAudit({ ...base, action: "balance.due", data: { balance_qr: 500 } }).text).toBe("Final balance due: 500 QAR");
+    expect(describeAudit({ ...base, action: "gallery.delivered", data: { balanceDue: true } }).text).toBe("Gallery delivered, final balance now due");
+    expect(describeAudit({ ...base, action: "booking.completed", data: { reason: "final balance paid" } }).text).toBe("Booking completed (final balance paid)");
     expect(describeAudit({ ...base, entity: "person", action: "person.created", data: {} })).toMatchObject({ text: "person created", href: "/people/abc" });
     expect(describeAudit({ ...base, entity: "studio", entity_id: null, action: "studio.updated", data: null })).toMatchObject({ href: null });
   });

@@ -10,27 +10,28 @@ type Props = { token: string; amountLabel: string; businessName: string };
 type Session = { sessionId: string; countryCode: string; scriptUrl: string };
 type Phase = "starting" | "loading" | "ready" | "submitting" | "redirecting" | "failed";
 
-/** The global the MyFatoorah card-view script installs (https://docs.myfatoorah.com/docs/embedded-payment). */
-type MyFatoorahCardView = {
+/** The global the provider's card-view script installs (embedded payment form). */
+type ProviderCardView = {
   init(config: { countryCode: string; sessionId: string; cardViewId: string; supportedNetworks?: string; onCardBinChanged?: (bin: string) => void; style?: Record<string, unknown> }): void;
   submit(): Promise<{ sessionId: string; cardBrand?: string; cardIdentifier?: string }>;
 };
 
 declare global {
   interface Window {
-    myFatoorah?: MyFatoorahCardView;
+    myFatoorah?: ProviderCardView;
   }
 }
 
 const CARD_VIEW_ID = "card-element";
-/** If the card fields are not up by then, offer the hosted page instead of a blank box. */
+/** If the card fields are not up by then, offer the secure payment page instead of a blank box. */
 const LOAD_TIMEOUT_MS = 12_000;
+const FORM_FAILED = "The card form did not load. You can use the secure payment page instead.";
 
 /**
- * Embedded MyFatoorah card view. The browser only ever holds a session id:
- * the server opens the session, the script renders the card fields inside
+ * Embedded card view. The browser only ever holds a session id: the server
+ * opens the session, the provider script renders the card fields inside
  * `#card-element`, and on "Pay" the session goes back to the server, which
- * charges the booking's own amount and returns the 3-D Secure page to open.
+ * charges the payment request's own amount and returns the 3-D Secure page.
  */
 export function PayCard({ token, amountLabel, businessName }: Props) {
   const [phase, setPhase] = useState<Phase>("starting");
@@ -57,7 +58,7 @@ export function PayCard({ token, amountLabel, businessName }: Props) {
       setSession({ sessionId: res.sessionId, countryCode: res.countryCode, scriptUrl: res.scriptUrl });
       setPhase("loading");
       timeout.current = window.setTimeout(() => {
-        if (!initialised.current) fail("The card form did not load. You can pay on MyFatoorah's page instead.");
+        if (!initialised.current) fail(FORM_FAILED);
       }, LOAD_TIMEOUT_MS);
     })();
     return () => {
@@ -70,7 +71,7 @@ export function PayCard({ token, amountLabel, businessName }: Props) {
     if (!session || initialised.current) return;
     const mf = window.myFatoorah;
     if (!mf) {
-      fail("The card form did not load. You can pay on MyFatoorah's page instead.");
+      fail(FORM_FAILED);
       return;
     }
     try {
@@ -79,7 +80,7 @@ export function PayCard({ token, amountLabel, businessName }: Props) {
       if (timeout.current) window.clearTimeout(timeout.current);
       setPhase("ready");
     } catch {
-      fail("The card form did not load. You can pay on MyFatoorah's page instead.");
+      fail(FORM_FAILED);
     }
   }, [session, fail]);
 
@@ -120,27 +121,26 @@ export function PayCard({ token, amountLabel, businessName }: Props) {
   }
 
   const busy = phase === "submitting" || phase === "redirecting" || hostedPending;
-  const status =
-    phase === "starting" ? "Preparing secure payment" : phase === "loading" ? "Loading the card form" : phase === "submitting" ? "Checking your card" : phase === "redirecting" ? "Opening your bank's verification page" : "";
+  const status = phase === "starting" ? "Preparing secure payment" : phase === "loading" ? "Loading the card form" : phase === "submitting" ? "Checking your card" : phase === "redirecting" ? "Opening secure payment" : "";
 
   return (
     <div className="space-y-4">
-      {session && <Script src={session.scriptUrl} strategy="afterInteractive" onReady={initCardView} onError={() => fail("The card form did not load. You can pay on MyFatoorah's page instead.")} />}
+      {session && <Script src={session.scriptUrl} strategy="afterInteractive" onReady={initCardView} onError={() => fail(FORM_FAILED)} />}
       {phase !== "failed" && (
         <div className="rounded-2xl border border-line bg-white p-3 sm:p-4">
-          <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-muted"><ShieldIcon size={14} /> Card details are entered on MyFatoorah&rsquo;s secure form. {businessName} never sees your card number.</p>
+          <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-muted"><ShieldIcon size={14} /> Card details are entered on a secure payment form. {businessName} never sees your card number.</p>
           <div id={CARD_VIEW_ID} className="min-h-56 w-full" aria-busy={phase === "starting" || phase === "loading"} />
-          {(phase === "starting" || phase === "loading") && <p className="mt-2 text-sm text-muted">{status}…</p>}
+          {(phase === "starting" || phase === "loading") && <p className="mt-2 text-sm text-muted">{status}...</p>}
         </div>
       )}
       {phase !== "failed" && (
         <button type="button" className="btn-primary min-h-12 w-full text-base" onClick={pay} disabled={phase !== "ready" || busy} aria-busy={busy}>
-          <CreditCardIcon size={18} /> {phase === "submitting" ? "Checking your card…" : phase === "redirecting" ? "Opening verification…" : `Pay ${amountLabel}`}
+          <CreditCardIcon size={18} /> {phase === "submitting" ? "Checking your card..." : phase === "redirecting" ? "Opening secure payment..." : `Pay ${amountLabel}`}
         </button>
       )}
       {phase === "failed" && (
         <button type="button" className="btn-primary min-h-12 w-full text-base" onClick={payHosted} disabled={busy} aria-busy={busy}>
-          <ExternalIcon size={18} /> {hostedPending ? "Opening MyFatoorah…" : "Pay on MyFatoorah’s page"}
+          <ExternalIcon size={18} /> {hostedPending ? "Opening secure payment..." : "Open secure payment page"}
         </button>
       )}
       <p role="status" aria-live="polite" className="text-sm text-muted">{phase === "failed" ? "" : status}</p>

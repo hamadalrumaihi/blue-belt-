@@ -4,8 +4,8 @@
  * file is "use server" (every export must be async), so the logic lives here.
  */
 import type { BookingDetails } from "@/lib/bookings/state";
-import { isBookingType, isPaymentMethod, isPaymentMode } from "@/lib/bookings/state";
-import type { BookingType, PaymentMethod, PaymentMode } from "@/lib/supabase/database.types";
+import { isBookingType, isPaymentMethod, isPaymentMode, isPaymentStage } from "@/lib/bookings/state";
+import type { BookingType, PaymentMethod, PaymentMode, PaymentStage } from "@/lib/supabase/database.types";
 import { DEFAULT_TIMEZONE, wallClockToIso } from "@/lib/time";
 import { isValidEmail, isValidHttpUrl, trimOrNull } from "@/lib/utils";
 import { isUuid, isValidCalendarDate } from "@/lib/validation";
@@ -175,14 +175,15 @@ export function parseBookingForm(formData: FormData, now: Date = new Date()): Pa
 
 export type ParsedManualPayment = {
   fieldErrors: Record<string, string>;
-  values: { method: PaymentMethod; amount_qr: number; paid_at: string; note: string | null };
+  values: { method: PaymentMethod; amount_qr: number; paid_at: string; note: string | null; stage: PaymentStage };
 };
 
 const MANUAL_METHODS: readonly PaymentMethod[] = ["cash", "bank_transfer", "fawran", "other"];
 
 /**
- * The "Record a payment" sheet: an offline method (never MyFatoorah — that
- * comes from the webhook), a positive amount, the day it arrived (today by
+ * The "Record a payment" sheet: an offline method (never MyFatoorah, that
+ * comes from the webhook), WHICH STAGE it settles (the deposit or the
+ * remaining balance), a positive amount, the day it arrived (today by
  * default, Qatar time) and an optional note such as a Fawran reference.
  */
 export function parseManualPayment(formData: FormData, now: Date = new Date()): ParsedManualPayment {
@@ -190,6 +191,10 @@ export function parseManualPayment(formData: FormData, now: Date = new Date()): 
   const methodRaw = trimOrNull(formData.get("method"));
   const method: PaymentMethod = isPaymentMethod(methodRaw) && MANUAL_METHODS.includes(methodRaw) ? methodRaw : "cash";
   if (!isPaymentMethod(methodRaw) || !MANUAL_METHODS.includes(methodRaw)) fieldErrors.method = "Choose how the payment arrived.";
+
+  const stageRaw = trimOrNull(formData.get("stage"));
+  const stage: PaymentStage = isPaymentStage(stageRaw) ? stageRaw : "deposit";
+  if (!isPaymentStage(stageRaw)) fieldErrors.stage = "Say whether this settles the deposit or the remaining balance.";
 
   const amount = parseAmountQr(trimOrNull(formData.get("amount_qr")));
   if (!amount.ok || amount.value === null || amount.value <= 0) fieldErrors.amount_qr = "Enter the amount received in QAR.";
@@ -204,7 +209,7 @@ export function parseManualPayment(formData: FormData, now: Date = new Date()): 
   const noteRaw = trimOrNull(formData.get("note"));
   if (noteRaw && noteRaw.length > MAX_PAYMENT_NOTE) fieldErrors.note = `Keep the note under ${MAX_PAYMENT_NOTE} characters.`;
 
-  return { fieldErrors, values: { method, amount_qr: amount.ok && amount.value ? amount.value : 0, paid_at, note: noteRaw ? noteRaw.slice(0, MAX_PAYMENT_NOTE) : null } };
+  return { fieldErrors, values: { method, amount_qr: amount.ok && amount.value ? amount.value : 0, paid_at, note: noteRaw ? noteRaw.slice(0, MAX_PAYMENT_NOTE) : null, stage } };
 }
 
 export const MAX_FINAL_AMOUNT_NOTE = 300;
@@ -215,8 +220,9 @@ export type ParsedFinalAmount = {
 };
 
 /**
- * The "Record final amount" form after the shoot: a positive QAR amount (the
- * currency is fixed) and an optional short note such as "2 extra hours".
+ * The "Set the price" form: a positive QAR amount (the currency is fixed)
+ * and an optional short note such as "2 extra hours". The deposit and
+ * balance are split from it on the server (never typed by anyone).
  */
 export function parseFinalAmount(formData: FormData): ParsedFinalAmount {
   const fieldErrors: Record<string, string> = {};

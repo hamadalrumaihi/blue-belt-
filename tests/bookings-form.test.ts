@@ -63,19 +63,21 @@ describe("parseAmountQr", () => {
 });
 
 describe("parseManualPayment", () => {
-  it("needs an offline method and a positive amount; MyFatoorah is never a manual method", () => {
-    expect(parseManualPayment(fd({}), NOW).fieldErrors).toMatchObject({ method: expect.any(String), amount_qr: expect.any(String) });
-    expect(parseManualPayment(fd({ method: "myfatoorah", amount_qr: "10" }), NOW).fieldErrors.method).toBeTruthy();
-    expect(parseManualPayment(fd({ method: "cash", amount_qr: "0" }), NOW).fieldErrors.amount_qr).toBeTruthy();
+  it("needs an offline method, a positive amount and the stage it settles; MyFatoorah is never a manual method", () => {
+    expect(parseManualPayment(fd({}), NOW).fieldErrors).toMatchObject({ method: expect.any(String), amount_qr: expect.any(String), stage: expect.any(String) });
+    expect(parseManualPayment(fd({ method: "myfatoorah", amount_qr: "10", stage: "deposit" }), NOW).fieldErrors.method).toBeTruthy();
+    expect(parseManualPayment(fd({ method: "cash", amount_qr: "0", stage: "deposit" }), NOW).fieldErrors.amount_qr).toBeTruthy();
+    expect(parseManualPayment(fd({ method: "cash", amount_qr: "10", stage: "tip" }), NOW).fieldErrors.stage).toBeTruthy();
+    expect(parseManualPayment(fd({ method: "cash", amount_qr: "10", stage: "balance" }), NOW).values.stage).toBe("balance");
   });
 
   it("defaults paid_at to now, places a given date at midday Qatar time and bounds the note", () => {
-    const a = parseManualPayment(fd({ method: "fawran", amount_qr: "350", note: " ref 123 " }), NOW);
+    const a = parseManualPayment(fd({ method: "fawran", amount_qr: "350", note: " ref 123 ", stage: "deposit" }), NOW);
     expect(a.fieldErrors).toEqual({});
-    expect(a.values).toEqual({ method: "fawran", amount_qr: 350, paid_at: NOW.toISOString(), note: "ref 123" });
-    expect(parseManualPayment(fd({ method: "bank_transfer", amount_qr: "100", paid_at: "2026-10-01" }), NOW).values.paid_at).toBe("2026-10-01T09:00:00.000Z");
-    expect(parseManualPayment(fd({ method: "cash", amount_qr: "100", paid_at: "2026-13-01" }), NOW).fieldErrors.paid_at).toBeTruthy();
-    expect(parseManualPayment(fd({ method: "cash", amount_qr: "100", note: "x".repeat(501) }), NOW).fieldErrors.note).toBeTruthy();
+    expect(a.values).toEqual({ method: "fawran", amount_qr: 350, paid_at: NOW.toISOString(), note: "ref 123", stage: "deposit" });
+    expect(parseManualPayment(fd({ method: "bank_transfer", amount_qr: "100", paid_at: "2026-10-01", stage: "deposit" }), NOW).values.paid_at).toBe("2026-10-01T09:00:00.000Z");
+    expect(parseManualPayment(fd({ method: "cash", amount_qr: "100", paid_at: "2026-13-01", stage: "deposit" }), NOW).fieldErrors.paid_at).toBeTruthy();
+    expect(parseManualPayment(fd({ method: "cash", amount_qr: "100", note: "x".repeat(501), stage: "deposit" }), NOW).fieldErrors.note).toBeTruthy();
   });
 });
 

@@ -26,7 +26,7 @@ export type TodayCounts = {
 /** Pure: counts from already-loaded rows. */
 export function summariseToday(input: {
   upcoming: Array<Pick<PhotoBookingRow, "id">>;
-  bookings: Array<Pick<PhotoBookingRow, "booking_status" | "status" | "amount_qr" | "amount_paid_qr" | "manual_paid_at">>;
+  bookings: Array<Pick<PhotoBookingRow, "booking_status" | "status" | "amount_qr" | "amount_paid_qr" | "manual_paid_at"> & Partial<Pick<PhotoBookingRow, "deposit_state" | "deposit_qr" | "balance_state" | "balance_qr">>>;
   documents: Array<{ status: string }>;
   galleries: Array<{ status: string }>;
   openIssues: number;
@@ -73,6 +73,10 @@ export type ActivityItem = { id: number; at: string; text: string; href: string 
 
 const ENTITY_PATH: Record<string, string> = { booking: "/bookings", person: "/people", organization: "/clubs", document: "/documents", gallery: "/galleries", lead: "/leads", order: "/orders" };
 
+function stageName(v: unknown): string {
+  return v === "balance" ? "Final balance" : "Deposit";
+}
+
 function dataOf(row: Pick<PhotoAuditLogRow, "data">): Record<string, unknown> {
   return row.data && typeof row.data === "object" && !Array.isArray(row.data) ? (row.data as Record<string, unknown>) : {};
 }
@@ -113,7 +117,46 @@ export function describeAudit(row: Pick<PhotoAuditLogRow, "id" | "entity" | "ent
       text = `Online payment requested: ${formatQr(Number(d.due_qr ?? d.amount_qr))}`;
       break;
     case "payment.session_started":
-      text = `Client started an online payment (${formatQr(Number(d.amount_qr))})`;
+      text = `Client started an online payment (${formatQr(Number(d.amount_qr))}${label(d.stage) ? `, ${label(d.stage)}` : ""})`;
+      break;
+    case "booking.price_set":
+      text = `Price set: ${formatQr(Number(d.amount_qr))} (deposit ${formatQr(Number(d.deposit_qr))}, balance ${formatQr(Number(d.balance_qr))})`;
+      break;
+    case "booking.quote_approved":
+      text = `Quote approved: ${formatQr(Number(d.amount_qr))}`;
+      break;
+    case "payment_request.created":
+      text = `${stageName(d.stage)} payment link created: ${formatQr(Number(d.amount_qr))}${label(d.provider) === "MANUAL_LINK" ? " (pasted link)" : ""}`;
+      break;
+    case "payment_request.regenerated":
+      text = `${stageName(d.stage)} payment link regenerated (generation ${Number(d.generation) || "?"})`;
+      break;
+    case "payment_request.manual_link":
+      text = `${stageName(d.stage)} payment link pasted from the provider dashboard`;
+      break;
+    case "payment_request.sent":
+      text = `${stageName(d.stage)} payment link sent to the client${d.email_queued === false ? " (e-mail not queued)" : ""}`;
+      break;
+    case "payment_request.cancelled":
+      text = `${stageName(d.stage)} payment link cancelled${label(d.reason) ? ` (${label(d.reason)})` : ""}`;
+      break;
+    case "deposit.paid":
+      text = `Deposit paid: ${formatQr(Number(d.amount_qr))}${label(d.source) === "manual" ? " (recorded by hand)" : " (verified online)"}`;
+      break;
+    case "balance.due":
+      text = `Final balance due: ${formatQr(Number(d.balance_qr))}`;
+      break;
+    case "balance.paid":
+      text = `Final balance paid: ${formatQr(Number(d.amount_qr))}${label(d.source) === "manual" ? " (recorded by hand)" : " (verified online)"}`;
+      break;
+    case "gallery.url_added":
+      text = "Gallery link saved";
+      break;
+    case "gallery.delivered":
+      text = `Gallery delivered${d.balanceDue ? ", final balance now due" : ""}`;
+      break;
+    case "booking.completed":
+      text = `Booking completed${label(d.reason) ? ` (${label(d.reason)})` : ""}`;
       break;
     case "booking.athlete_linked":
       text = "Booking linked to a tracked athlete";
@@ -148,7 +191,7 @@ export async function loadStudioDashboard(now: Date = new Date()): Promise<Studi
   const [upcoming7, upcoming14, bookings, documents, galleries, openIssues, failed, events, audit, money] = await Promise.all([
     upcomingBookings(7, now),
     upcomingBookings(14, now),
-    supabase.from("photo_bookings").select("booking_status,status,amount_qr,amount_paid_qr,manual_paid_at").neq("booking_status", "cancelled").limit(2000),
+    supabase.from("photo_bookings").select("booking_status,status,amount_qr,amount_paid_qr,manual_paid_at,deposit_state,deposit_qr,balance_state,balance_qr").neq("booking_status", "cancelled").limit(2000),
     supabase.from("photo_documents").select("status").in("status", ["sent", "viewed"]).limit(500),
     supabase.from("photo_galleries").select("status").eq("status", "ready").limit(500),
     countOpenIssues(),

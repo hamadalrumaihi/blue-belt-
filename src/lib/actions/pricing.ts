@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { ActionState } from "./types";
 import { writeAudit } from "@/lib/audit";
+import { depositColumnsFor } from "@/lib/bookings/policy";
 import { BOOKING_STATUS_LABEL, bookingTransitionColumns, canTransitionBooking } from "@/lib/bookings/state";
 import { parseChosenAmount, parsePriceReferenceForm, parseQuoteInputs, validateQuoteInputs, type QuoteInputs } from "@/lib/pricing/form";
 import { suggestQuote } from "@/lib/pricing/suggest";
@@ -174,7 +175,11 @@ export async function applyQuoteToBooking(quoteId: string, chosenAmount: number 
   if (booking.status === "paid" || booking.status === "refunded") return { ok: false, error: "This booking is already paid through MyFatoorah; its amount cannot change." };
 
   const now = new Date();
-  const patch: Partial<PhotoBookingRow> = { amount_qr: amount.amount };
+  // The deposit split is server-side policy; once the deposit is paid only the balance moves.
+  const split = booking.deposit_state === "paid"
+    ? { balance_qr: Math.max(0, Math.round((amount.amount - Number(booking.deposit_qr)) * 100) / 100) }
+    : depositColumnsFor(amount.amount);
+  const patch: Partial<PhotoBookingRow> = { amount_qr: amount.amount, ...split };
   const moveToQuoted = booking.booking_status === "inquiry" && canTransitionBooking(booking.booking_status, "quoted");
   if (moveToQuoted) Object.assign(patch, bookingTransitionColumns(booking, "quoted", now));
   const { data: updated, error } = await supabase.from("photo_bookings").update(patch).eq("id", booking.id).eq("owner_id", user.id).eq("booking_status", booking.booking_status).select("id,client_id,booking_status").maybeSingle();

@@ -1,13 +1,15 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { canRequestPayment, effectivePayment, PAYABLE_BOOKING_STATUSES, type EffectivePayment } from "@/lib/bookings/state";
+import { effectivePayment, type EffectivePayment } from "@/lib/bookings/state";
 import { bookingSearchTerm } from "@/lib/bookings/form";
+import { listStageRequests } from "@/lib/payments/requests";
 import { createClient } from "@/lib/supabase/server";
 import type {
   BookingStatus,
   BookingType,
   Database,
   PhotoAuditLogRow,
+  PhotoBookingPaymentRequestRow,
   PhotoBookingRow,
   PhotoDocumentRow,
   PhotoEventRow,
@@ -26,14 +28,11 @@ type Client = SupabaseClient<Database>;
  * type stays simple and a missing relation never breaks a page.
  */
 
-export type BookingFilter = "needs_action" | "confirmed" | "shoot_done" | "delivered" | "all";
+export type BookingFilter = "needs_action" | "awaiting_deposit" | "confirmed" | "balance_due" | "delivered" | "all";
 
 export const NEEDS_ACTION_STATUSES: readonly BookingStatus[] = ["inquiry", "quoted", "awaiting_contract", "awaiting_payment"];
 export const CONFIRMED_STATUSES: readonly BookingStatus[] = ["confirmed", "in_progress"];
 export const DELIVERED_STATUSES: readonly BookingStatus[] = ["delivered", "completed"];
-
-/** SQL-side narrowing for "shoot done, awaiting payment"; canRequestPayment finishes the job in memory (manual partials need a column comparison). */
-const SHOOT_DONE_FILTER = { statuses: PAYABLE_BOOKING_STATUSES, providerStatuses: "(paid,refunded)" } as const;
 
 export type BookingListRow = PhotoBookingRow & {
   client: Pick<PhotoPersonRow, "id" | "full_name" | "email" | "phone"> | null;
@@ -48,15 +47,16 @@ export async function listBookings(opts: ListBookingsOptions = {}): Promise<Book
   const filter = opts.filter ?? "all";
   let query = supabase.from("photo_bookings").select("*");
   if (filter === "needs_action") query = query.in("booking_status", NEEDS_ACTION_STATUSES);
+  if (filter === "awaiting_deposit") query = query.eq("booking_status", "awaiting_payment").eq("deposit_state", "pending");
   if (filter === "confirmed") query = query.in("booking_status", CONFIRMED_STATUSES);
+  if (filter === "balance_due") query = query.eq("balance_state", "due").neq("booking_status", "cancelled");
   if (filter === "delivered") query = query.in("booking_status", DELIVERED_STATUSES);
-  if (filter === "shoot_done") query = query.not("coverage_done_at", "is", null).in("booking_status", SHOOT_DONE_FILTER.statuses).gt("amount_qr", 0).not("status", "in", SHOOT_DONE_FILTER.providerStatuses);
   if (opts.type) query = query.eq("booking_type", opts.type);
   const q = bookingSearchTerm(opts.q);
   if (q) query = query.or(`customer_name.ilike.%${q}%,athlete_name.ilike.%${q}%,public_ref.ilike.%${q}%,customer_email.ilike.%${q}%`);
-  query = filter === "confirmed" ? query.order("session_at", { ascending: true, nullsFirst: false }) : filter === "shoot_done" ? query.order("coverage_done_at", { ascending: true }) : query.order("created_at", { ascending: false });
+  query = filter === "confirmed" ? query.order("session_at", { ascending: true, nullsFirst: false }) : filter === "balance_due" ? query.order("balance_due_at", { ascending: true, nullsFirst: false }) : query.order("created_at", { ascending: false });
   const { data } = await query.limit(opts.limit ?? 200);
-  const rows = filter === "shoot_done" ? (data ?? []).filter(canRequestPayment) : (data ?? []);
+  const rows = data ?? [];
   const [people, events] = await Promise.all([peopleById(supabase, rows.map((b) => b.client_id)), eventsById(supabase, rows.map((b) => b.event_id))]);
   return rows.map((b) => ({ ...b, client: (b.client_id && people.get(b.client_id)) || null, event: (b.event_id && events.get(b.event_id)) || null, payment: effectivePayment(b) }));
 }
@@ -70,21 +70,15 @@ export async function bookingCounts(): Promise<BookingCounts> {
     if (statuses) q = q.in("booking_status", statuses);
     return q;
   };
-  const [all, needs, confirmed, delivered, shootDone] = await Promise.all([
+  const [all, needs, awaitingDeposit, confirmed, balanceDue, delivered] = await Promise.all([
     head(),
     head(NEEDS_ACTION_STATUSES),
+    supabase.from("photo_bookings").select("id", { count: "exact", head: true }).eq("booking_status", "awaiting_payment").eq("deposit_state", "pending"),
     head(CONFIRMED_STATUSES),
+    supabase.from("photo_bookings").select("id", { count: "exact", head: true }).eq("balance_state", "due").neq("booking_status", "cancelled"),
     head(DELIVERED_STATUSES),
-    supabase
-      .from("photo_bookings")
-      .select("id,coverage_done_at,amount_qr,booking_status,status,amount_paid_qr,manual_paid_at")
-      .not("coverage_done_at", "is", null)
-      .in("booking_status", SHOOT_DONE_FILTER.statuses)
-      .gt("amount_qr", 0)
-      .not("status", "in", SHOOT_DONE_FILTER.providerStatuses)
-      .limit(500),
   ]);
-  return { all: all.count ?? 0, needs_action: needs.count ?? 0, confirmed: confirmed.count ?? 0, delivered: delivered.count ?? 0, shoot_done: (shootDone.data ?? []).filter(canRequestPayment).length };
+  return { all: all.count ?? 0, needs_action: needs.count ?? 0, awaiting_deposit: awaitingDeposit.count ?? 0, confirmed: confirmed.count ?? 0, balance_due: balanceDue.count ?? 0, delivered: delivered.count ?? 0 };
 }
 
 /** Bookings with a session in the next `days` days that are still live (not cancelled, delivered or completed). */
@@ -105,6 +99,7 @@ export async function upcomingBookings(days = 7, now: Date = new Date()): Promis
   return rows.map((b) => ({ ...b, client: (b.client_id && people.get(b.client_id)) || null, event: (b.event_id && events.get(b.event_id)) || null, payment: effectivePayment(b) }));
 }
 
+/** @deprecated the detail now carries full document rows (the agreement panel needs them). */
 export type BookingDocumentSummary = Pick<PhotoDocumentRow, "id" | "title" | "status" | "kind" | "signed_at" | "sent_at">;
 
 export type BookingDetail = {
@@ -114,8 +109,10 @@ export type BookingDetail = {
   service: PhotoServiceRow | null;
   event: PhotoEventRow | null;
   gallery: PhotoGalleryRow | null;
-  documents: BookingDocumentSummary[];
+  documents: PhotoDocumentRow[];
   paymentRecords: PhotoPaymentRecordRow[];
+  /** Stage payment requests (deposit / balance), oldest generation first. */
+  paymentRequests: PhotoBookingPaymentRequestRow[];
   payment: EffectivePayment;
   audit: PhotoAuditLogRow[];
   linkedAthlete: { id: string; name: string } | null;
@@ -125,7 +122,7 @@ export async function getBooking(id: string): Promise<BookingDetail | null> {
   const supabase = await createClient();
   const { data: booking } = await supabase.from("photo_bookings").select("*").eq("id", id).maybeSingle();
   if (!booking) return null;
-  const [client, organization, service, event, gallery, documents, records, audit, athlete] = await Promise.all([
+  const [client, organization, service, event, gallery, documents, records, requests, audit, athlete] = await Promise.all([
     booking.client_id ? supabase.from("photo_people").select("*").eq("id", booking.client_id).maybeSingle() : null,
     booking.organization_id ? supabase.from("photo_organizations").select("*").eq("id", booking.organization_id).maybeSingle() : null,
     booking.service_id ? supabase.from("photo_services").select("*").eq("id", booking.service_id).maybeSingle() : null,
@@ -133,9 +130,10 @@ export async function getBooking(id: string): Promise<BookingDetail | null> {
     booking.gallery_id
       ? supabase.from("photo_galleries").select("*").eq("id", booking.gallery_id).maybeSingle()
       : supabase.from("photo_galleries").select("*").eq("booking_id", booking.id).order("created_at", { ascending: false }).limit(1).maybeSingle(),
-    supabase.from("photo_documents").select("id,title,status,kind,signed_at,sent_at").eq("booking_id", booking.id).order("created_at", { ascending: false }),
+    supabase.from("photo_documents").select("*").eq("booking_id", booking.id).order("created_at", { ascending: false }),
     supabase.from("photo_payment_records").select("*").eq("booking_id", booking.id).order("paid_at", { ascending: false }),
-    supabase.from("photo_audit_log").select("*").eq("entity", "booking").eq("entity_id", booking.id).order("created_at", { ascending: false }).limit(50),
+    listStageRequests(supabase, booking.id),
+    supabase.from("photo_audit_log").select("*").eq("entity", "booking").eq("entity_id", booking.id).order("created_at", { ascending: false }).limit(80),
     booking.watcher_athlete_id ? supabase.from("photo_athletes").select("id,name").eq("id", booking.watcher_athlete_id).maybeSingle() : null,
   ]);
   return {
@@ -147,6 +145,7 @@ export async function getBooking(id: string): Promise<BookingDetail | null> {
     gallery: gallery?.data ?? null,
     documents: documents.data ?? [],
     paymentRecords: records.data ?? [],
+    paymentRequests: requests,
     payment: effectivePayment(booking),
     audit: audit.data ?? [],
     linkedAthlete: athlete?.data ?? null,

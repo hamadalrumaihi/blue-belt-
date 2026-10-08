@@ -28,7 +28,10 @@ export default async function GalleryDetailPage({ params }: PageProps<"/gallerie
   if (!detail) notFound();
   const { gallery, client, booking, eventName } = detail;
   const supabase = await createClient();
-  const galleryReadyPrefOn = await isClientKindEnabled(supabase, gallery.owner_id, "GALLERY_READY");
+  const [galleryReadyPrefOn, bookingBalance] = await Promise.all([
+    isClientKindEnabled(supabase, gallery.owner_id, "GALLERY_READY"),
+    booking ? supabase.from("photo_bookings").select("balance_state,balance_qr").eq("id", booking.id).maybeSingle().then((r) => r.data) : Promise.resolve(null),
+  ]);
   const clientEmail = client?.email ?? booking?.customer_email ?? null;
   const now = new Date();
 
@@ -62,7 +65,7 @@ export default async function GalleryDetailPage({ params }: PageProps<"/gallerie
           {gallery.notes && <p className="mt-3 whitespace-pre-wrap rounded-xl bg-page px-3 py-2 text-sm text-ink">{gallery.notes}</p>}
         </section>
 
-        <GalleryActions id={gallery.id} name={gallery.name} status={gallery.status} pictimeUrl={gallery.pictime_url} clientEmail={clientEmail} emailEnabled={isEmailEnabled()} galleryReadyPrefOn={galleryReadyPrefOn} />
+        <GalleryActions id={gallery.id} name={gallery.name} status={gallery.status} pictimeUrl={gallery.pictime_url} clientEmail={clientEmail} emailEnabled={isEmailEnabled()} galleryReadyPrefOn={galleryReadyPrefOn} balanceQr={bookingBalance?.balance_state === "not_due" ? Number(bookingBalance.balance_qr) || 0 : 0} hasBooking={Boolean(booking)} />
       </PageBody>
     </>
   );

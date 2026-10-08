@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { DeleteDialog } from "@/components/DeleteDialog";
 import { EditIcon, ExternalIcon, SendIcon } from "@/components/icons";
-import { deleteGallery, markGalleryDelivered, markGalleryReady, transitionGallery, type GalleryActionResult } from "@/lib/actions/galleries";
+import { deleteGallery, deliverGallery, markGalleryReady, transitionGallery, type GalleryActionResult } from "@/lib/actions/galleries";
 import type { GalleryStatus } from "@/lib/supabase/database.types";
 
 type Props = {
@@ -17,20 +17,26 @@ type Props = {
   clientEmail: string | null;
   emailEnabled: boolean;
   galleryReadyPrefOn: boolean;
+  /** The linked booking's remaining balance (0 when none); shown in the delivery confirmation. */
+  balanceQr?: number;
+  hasBooking?: boolean;
 };
 
 /**
- * Owner actions for one gallery. "Mark ready" is the only path that e-mails
- * a client, and only when the box is ticked — the effect is spelled out next
- * to it so nothing goes out by surprise.
+ * Owner actions for one gallery. "Mark ready" tells the client the gallery
+ * is up (opt-in e-mail) and changes nothing on the booking. "Deliver
+ * gallery" is the explicit step that marks the booking delivered and makes
+ * the final balance due; its client e-mail is OFF by default and the final
+ * payment link is never created here.
  */
-export function GalleryActions({ id, name, status, pictimeUrl, clientEmail, emailEnabled, galleryReadyPrefOn }: Props) {
+export function GalleryActions({ id, name, status, pictimeUrl, clientEmail, emailEnabled, galleryReadyPrefOn, balanceQr = 0, hasBooking = false }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const canEmail = Boolean(clientEmail) && galleryReadyPrefOn;
-  const [notify, setNotify] = useState(canEmail && emailEnabled);
+  const [notifyReady, setNotifyReady] = useState(canEmail && emailEnabled);
+  const [notifyDeliver, setNotifyDeliver] = useState(false);
 
   function run(action: () => Promise<GalleryActionResult>, done?: (r: Extract<GalleryActionResult, { ok: true }>) => string | null) {
     setError(null);
@@ -46,8 +52,9 @@ export function GalleryActions({ id, name, status, pictimeUrl, clientEmail, emai
     });
   }
 
-  const canReady = Boolean(pictimeUrl) && (status === "pending" || status === "created" || status === "ready");
-  const canDeliver = status === "ready" && Boolean(pictimeUrl);
+  const canReady = Boolean(pictimeUrl) && (status === "pending" || status === "created");
+  const canDeliver = Boolean(pictimeUrl) && status !== "delivered";
+  const emailHint = !clientEmail ? "No e-mail address on file. Link a client or booking with an e-mail first." : !galleryReadyPrefOn ? "“Gallery ready” e-mails are switched off under Notifications." : emailEnabled ? `The client (${clientEmail}) receives the gallery link.` : `The client (${clientEmail}) receives the gallery link as soon as e-mail is switched on for this server.`;
 
   return (
     <section className="card space-y-4 p-4" aria-labelledby="gallery-actions-heading">
@@ -55,34 +62,41 @@ export function GalleryActions({ id, name, status, pictimeUrl, clientEmail, emai
 
       {canReady && (
         <div className="space-y-3 rounded-xl border border-line bg-page p-3">
+          <p className="text-sm font-semibold text-ink">Mark ready</p>
           <label className="flex min-h-11 cursor-pointer items-start gap-3">
-            <input type="checkbox" className="mt-1 h-5 w-5 shrink-0 accent-primary" checked={notify} disabled={pending || !canEmail} onChange={(e) => setNotify(e.target.checked)} />
+            <input type="checkbox" className="mt-1 h-5 w-5 shrink-0 accent-primary" checked={notifyReady} disabled={pending || !canEmail} onChange={(e) => setNotifyReady(e.target.checked)} />
             <span className="text-sm">
               <span className="block font-semibold text-ink">Notify the client by e-mail</span>
-              <span className="block text-xs text-muted">
-                {!clientEmail
-                  ? "No e-mail address on file. Link a client or booking with an e-mail first."
-                  : !galleryReadyPrefOn
-                    ? "“Gallery ready” e-mails are switched off under Notifications."
-                    : notify
-                      ? `The client (${clientEmail}) receives the Pic-Time link${emailEnabled ? "" : " as soon as e-mail is switched on for this server"}. The gallery and its booking then count as delivered.`
-                      : "Nothing is sent. Mark it delivered yourself once you have shared the link."}
-              </span>
+              <span className="block text-xs text-muted">{notifyReady ? emailHint : "Nothing is sent."} The booking and the final balance are not changed by this.</span>
             </span>
           </label>
-          <button type="button" className="btn-primary min-h-11 w-full sm:w-auto" disabled={pending} aria-busy={pending} onClick={() => run(() => markGalleryReady(id, { notifyClient: notify }), (r) => (r.notified ? "Marked ready. The client e-mail is queued." : r.notifyReason ?? "Marked ready. No e-mail was sent."))}>
-            <SendIcon size={16} /> {status === "ready" ? (notify ? "Send the gallery e-mail" : "Already ready") : "Mark ready"}
+          <button type="button" className="btn-secondary min-h-11 w-full sm:w-auto" disabled={pending} aria-busy={pending} onClick={() => run(() => markGalleryReady(id, { notifyClient: notifyReady }), (r) => (r.notified ? "Marked ready. The client e-mail is queued." : r.notifyReason ?? "Marked ready. No e-mail was sent."))}>
+            Mark ready
           </button>
         </div>
       )}
-      {!pictimeUrl && status !== "delivered" && <p className="text-xs text-muted">Add the Pic-Time link (Edit) before marking this gallery ready.</p>}
+
+      {canDeliver && (
+        <div className="space-y-3 rounded-xl border border-primary/30 bg-lightblue/40 p-3">
+          <p className="text-sm font-semibold text-ink">Deliver gallery</p>
+          <p className="text-xs text-muted">{hasBooking ? `The booking becomes delivered${balanceQr > 0 ? ` and the final balance (${balanceQr.toLocaleString("en-QA")} QAR) becomes due. The payment link is created and sent only by you, from the booking page.` : "."}` : "No booking is linked; only the gallery is marked delivered."}</p>
+          <label className="flex min-h-11 cursor-pointer items-start gap-3">
+            <input type="checkbox" className="mt-1 h-5 w-5 shrink-0 accent-primary" checked={notifyDeliver} disabled={pending || !canEmail} onChange={(e) => setNotifyDeliver(e.target.checked)} />
+            <span className="text-sm">
+              <span className="block font-semibold text-ink">Notify the client by e-mail</span>
+              <span className="block text-xs text-muted">{notifyDeliver ? emailHint : "Off by default. Nothing is sent unless you tick this."}</span>
+            </span>
+          </label>
+          <button type="button" className="btn-primary min-h-11 w-full sm:w-auto" disabled={pending} aria-busy={pending} onClick={() => run(() => deliverGallery(id, { notifyClient: notifyDeliver }), (r) => `Delivered.${r.balanceDue ? " The final balance is now due." : ""} ${r.notified ? "Client e-mailed." : r.notifyReason ?? "Client not e-mailed."}`)}>
+            <SendIcon size={16} /> Deliver gallery
+          </button>
+        </div>
+      )}
+      {!pictimeUrl && status !== "delivered" && <p className="text-xs text-muted">Add the gallery link (Edit) before marking this gallery ready or delivering it.</p>}
 
       <div className="flex flex-wrap gap-2">
-        {canDeliver && (
-          <button type="button" className="btn-secondary min-h-11" disabled={pending} onClick={() => run(() => markGalleryDelivered(id), () => "Marked delivered. No e-mail was sent.")}>Mark delivered (no e-mail)</button>
-        )}
         {status === "delivered" && (
-          <button type="button" className="btn-ghost min-h-11" disabled={pending} onClick={() => run(() => transitionGallery(id, "ready"), () => "Back to ready.")}>Reopen as ready</button>
+          <button type="button" className="btn-ghost min-h-11" disabled={pending} onClick={() => run(() => transitionGallery(id, "ready"), () => "Back to ready. The booking keeps its delivery date.")}>Reopen as ready</button>
         )}
         {status === "ready" && (
           <button type="button" className="btn-ghost min-h-11" disabled={pending} onClick={() => run(() => transitionGallery(id, "created"), () => "Stepped back to created.")}>Not ready yet</button>

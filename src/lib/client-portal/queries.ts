@@ -1,32 +1,82 @@
 import "server-only";
-import { effectivePayment, formatQr } from "@/lib/bookings/state";
+import { formatMoney } from "@/lib/bookings/state";
 import { isWebsitePayUrl } from "@/lib/payments/pay-token";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient, isServiceClientConfigured } from "@/lib/supabase/service";
-import type { ClientBookingView, ClientGalleryView, ClientPaymentView, ClientPersonView, PhotoDocumentRow } from "@/lib/supabase/database.types";
+import type { ClientBookingView, ClientGalleryView, ClientPaymentRequestView, ClientPaymentView, ClientPersonView, PaymentStage, PhotoDocumentRow } from "@/lib/supabase/database.types";
 import { formatDateTime } from "@/lib/time";
 import { isUuid } from "@/lib/validation";
 
-export type ClientPaymentLine = { title: string; detail: string | null; /** Our pay page, never the provider's URL. */ payUrl: string | null };
-
 /**
- * The payment sentence a client sees for a booking. Paid: when. Requested:
- * the website pay link. Otherwise the house wording: nothing is needed to
- * book, payment happens online after the shoot. A provider URL (MyFatoorah's
- * own invoice page) is never shown; only our `/pay/<token>` page is linked.
+ * What a client sees about money and paperwork on one booking. Plain words,
+ * no vendor names, no provider ids, no internal states. The only link ever
+ * offered is OUR pay page (`/pay/<token>`) from a pending payment request
+ * for the stage that is open right now.
  */
-export function clientPaymentLine(b: Pick<ClientBookingView, "status" | "amount_qr" | "amount_paid_qr" | "manual_paid_at" | "paid_at" | "payment_url" | "booking_status">): ClientPaymentLine {
-  const pay = effectivePayment(b);
-  const amount = Number(b.amount_qr) || 0;
-  const when = b.status === "paid" ? b.paid_at : b.manual_paid_at;
-  if (pay.state === "paid") return { title: `Paid${when ? ` on ${formatDateTime(when)} Qatar time` : ""}`, detail: "Thank you.", payUrl: null };
-  if (pay.state === "refunded") return { title: "Refunded", detail: null, payUrl: null };
-  if (b.booking_status === "cancelled") return { title: "Cancelled", detail: "Nothing to pay.", payUrl: null };
-  if (amount <= 0) return { title: "No payment due", detail: null, payUrl: null };
-  const link = isWebsitePayUrl(b.payment_url) ? b.payment_url : null;
-  if (pay.state === "partial") return { title: `${formatQr(pay.paidQr)} received, ${formatQr(pay.dueQr)} still due`, detail: link ? "Payment requested. Pay the balance online through MyFatoorah." : null, payUrl: link };
-  if (link) return { title: "Payment requested", detail: `Pay ${formatQr(amount)} online through MyFatoorah.`, payUrl: link };
-  return { title: "Not due yet", detail: "No payment is needed to book. After the shoot you pay online through MyFatoorah.", payUrl: null };
+export type ClientStageLine = { label: string; amount: string | null; paid: boolean; due: boolean };
+export type ClientBookingSummary = {
+  contract: { label: string; signed: boolean; needsAction: boolean };
+  deposit: ClientStageLine;
+  balance: ClientStageLine;
+  /** The stage the client can pay right now, with our pay link; null when nothing is payable. */
+  pay: { stage: PaymentStage; amount: string; payUrl: string } | null;
+  /** One sentence for the card ("Deposit due", "Paid in full", ...). */
+  headline: string;
+};
+
+type SummaryBooking = Pick<ClientBookingView, "amount_qr" | "currency" | "requires_contract" | "contract_state" | "deposit_qr" | "deposit_state" | "deposit_paid_at" | "balance_qr" | "balance_state" | "balance_paid_at" | "booking_status">;
+type SummaryRequest = Pick<ClientPaymentRequestView, "stage" | "status" | "payment_url" | "amount_qr" | "currency">;
+
+export function clientBookingSummary(b: SummaryBooking, requests: readonly SummaryRequest[] = []): ClientBookingSummary {
+  const money = (n: number | null | undefined) => formatMoney(n, b.currency);
+  const contractSigned = !b.requires_contract || b.contract_state === "signed" || b.contract_state === "not_required";
+  const contract = {
+    label: contractSigned ? "Agreement signed" : b.contract_state === "declined" ? "Agreement declined" : "Agreement to sign",
+    signed: contractSigned,
+    needsAction: !contractSigned && (b.contract_state === "sent" || b.contract_state === "required"),
+  };
+  const depositPaid = b.deposit_state === "paid";
+  const depositOwed = b.deposit_state === "pending" && Number(b.deposit_qr) > 0;
+  const deposit: ClientStageLine = depositPaid
+    ? { label: `Deposit paid${b.deposit_paid_at ? ` on ${formatDateTime(b.deposit_paid_at)} Qatar time` : ""}`, amount: money(b.deposit_qr), paid: true, due: false }
+    : depositOwed
+      ? { label: "Deposit due", amount: money(b.deposit_qr), paid: false, due: true }
+      : { label: "No deposit needed", amount: null, paid: false, due: false };
+  const balancePaid = b.balance_state === "paid";
+  const balanceDue = b.balance_state === "due" && Number(b.balance_qr) > 0;
+  const balance: ClientStageLine = balancePaid
+    ? { label: `Paid in full${b.balance_paid_at ? ` on ${formatDateTime(b.balance_paid_at)} Qatar time` : ""}`, amount: money(b.balance_qr), paid: true, due: false }
+    : balanceDue
+      ? { label: "Remaining balance due", amount: money(b.balance_qr), paid: false, due: true }
+      : b.balance_state === "waived" || !(Number(b.balance_qr) > 0)
+        ? { label: "Nothing more to pay", amount: null, paid: false, due: false }
+        : { label: "Not due yet", amount: money(b.balance_qr), paid: false, due: false };
+
+  // The pay button: a pending request for the stage that is open, our page only.
+  const open: PaymentStage | null = depositOwed && contractSigned ? "deposit" : balanceDue ? "balance" : null;
+  let pay: ClientBookingSummary["pay"] = null;
+  if (open) {
+    const r = requests.find((x) => x.stage === open && x.status === "pending" && isWebsitePayUrl(x.payment_url));
+    if (r && r.payment_url) pay = { stage: open, amount: money(r.amount_qr), payUrl: r.payment_url };
+  }
+
+  const cancelled = b.booking_status === "cancelled";
+  const headline = cancelled
+    ? "Cancelled"
+    : !(Number(b.amount_qr) > 0)
+      ? "No payment due"
+      : depositPaid && (balancePaid || b.balance_state === "waived" || !(Number(b.balance_qr) > 0))
+        ? "Paid in full"
+        : balanceDue
+          ? "Remaining balance due"
+          : depositOwed
+            ? contractSigned
+              ? "Deposit due"
+              : "Agreement to sign, then deposit"
+            : depositPaid
+              ? "Deposit paid"
+              : "Not due yet";
+  return { contract, deposit, balance, pay, headline };
 }
 
 /**
@@ -34,9 +84,9 @@ export function clientPaymentLine(b: Pick<ClientBookingView, "status" | "amount_
  * user's client against the client-safe SECURITY DEFINER views
  * (photo_client_*_v): a client sees the people rows linked to their auth
  * user, the bookings of those people, their non-draft documents, galleries
- * that are ready or delivered, and payment records of their bookings —
- * never internal notes, metadata, assignments or provider ids. Nothing here
- * takes an owner id from the caller.
+ * that are ready or delivered, payment records and payment requests of
+ * their bookings, never internal notes, metadata, assignments or provider
+ * ids. Nothing here takes an owner id from the caller.
  */
 
 export type PortalBooking = {
@@ -44,12 +94,14 @@ export type PortalBooking = {
   documents: Pick<PhotoDocumentRow, "id" | "kind" | "title" | "status" | "signed_at" | "sent_at" | "expires_at" | "created_at">[];
   gallery: ClientGalleryView | null;
   payments: ClientPaymentView[];
+  requests: ClientPaymentRequestView[];
+  summary: ClientBookingSummary;
 };
 
 /**
  * CRM people linked to this auth user. If none is linked yet but a person
  * with the user's verified e-mail exists (booked before signing in), link it
- * now — scoped by the auth user's own verified address, never by input.
+ * now, scoped by the auth user's own verified address, never by input.
  */
 export async function loadMyPeople(userId: string, email: string | null): Promise<ClientPersonView[]> {
   const supabase = await createClient();
@@ -67,22 +119,28 @@ async function attach(bookings: ClientBookingView[]): Promise<PortalBooking[]> {
   const supabase = await createClient();
   const ids = bookings.map((b) => b.id);
   const galleryIds = bookings.map((b) => b.gallery_id).filter((v): v is string => Boolean(v));
-  const [docs, galleriesByBooking, galleriesById, payments] = await Promise.all([
+  const [docs, galleriesByBooking, galleriesById, payments, requests] = await Promise.all([
     supabase.from("photo_documents").select("id,booking_id,kind,title,status,signed_at,sent_at,expires_at,created_at").in("booking_id", ids).neq("status", "draft").order("created_at", { ascending: false }),
     supabase.from("photo_client_galleries_v").select("*").in("booking_id", ids),
     galleryIds.length ? supabase.from("photo_client_galleries_v").select("*").in("id", galleryIds) : Promise.resolve({ data: [] as ClientGalleryView[] }),
     supabase.from("photo_client_payments_v").select("*").in("booking_id", ids).order("paid_at", { ascending: false }),
+    supabase.from("photo_client_payment_requests_v").select("*").in("booking_id", ids).order("created_at", { ascending: false }),
   ]);
   const galleries = new Map<string, ClientGalleryView>();
   for (const g of galleriesById.data ?? []) galleries.set(g.id, g);
   for (const g of galleriesByBooking.data ?? []) galleries.set(g.id, g);
   const docRows = (docs.data ?? []) as Array<PortalBooking["documents"][number] & { booking_id?: string | null }>;
-  return bookings.map((booking) => ({
-    booking,
-    documents: docRows.filter((d) => d.booking_id === booking.id || docBookingId(d) === booking.id),
-    gallery: (booking.gallery_id ? galleries.get(booking.gallery_id) : null) ?? [...galleries.values()].find((g) => g.booking_id === booking.id) ?? null,
-    payments: (payments.data ?? []).filter((p) => p.booking_id === booking.id),
-  }));
+  return bookings.map((booking) => {
+    const mine = (requests.data ?? []).filter((r) => r.booking_id === booking.id);
+    return {
+      booking,
+      documents: docRows.filter((d) => d.booking_id === booking.id || docBookingId(d) === booking.id),
+      gallery: (booking.gallery_id ? galleries.get(booking.gallery_id) : null) ?? [...galleries.values()].find((g) => g.booking_id === booking.id) ?? null,
+      payments: (payments.data ?? []).filter((p) => p.booking_id === booking.id),
+      requests: mine,
+      summary: clientBookingSummary(booking, mine),
+    };
+  });
 }
 
 function docBookingId(d: { booking_id?: string | null }): string | null {

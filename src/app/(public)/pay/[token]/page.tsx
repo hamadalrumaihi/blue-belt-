@@ -2,11 +2,11 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { headers } from "next/headers";
 import { CheckIcon, ClockIcon, ShieldIcon } from "@/components/icons";
-import { BOOKING_TYPE_LABEL, formatQr } from "@/lib/bookings/state";
+import { BOOKING_TYPE_LABEL, formatMoney } from "@/lib/bookings/state";
 import { createLogger } from "@/lib/log";
 import { cardViewScriptUrl, getPaymentsConfig, isPaymentsEnabled } from "@/lib/payments/config";
 import { createMyFatoorahClient } from "@/lib/payments/myfatoorah/client";
-import { loadPayBooking, verifyReturnedPayment, type PayPageDeps, type VerifyResult } from "@/lib/payments/pay-page";
+import { loadPayBooking, verifyReturnedPayment, type PayBookingView, type PayPageDeps, type VerifyResult } from "@/lib/payments/pay-page";
 import { isPayTokenShape } from "@/lib/payments/pay-token";
 import { rateLimit, RULES } from "@/lib/rate-limit";
 import { siteUrl } from "@/lib/studio/queries";
@@ -18,10 +18,11 @@ export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Pay online", robots: { index: false, follow: false } };
 
 /**
- * The page a client opens from the "Pay online" link after the shoot. No
- * account needed: the token is the credential. The amount and the payment
- * state come from the booking row; the query string is only used to decide
- * whether to ask MyFatoorah about a returned payment, never to trust it.
+ * The page a client opens from a payment link: the 50% deposit once the
+ * agreement is signed, or the remaining balance after delivery. No account
+ * needed: the token is the credential. The amount and the payment state come
+ * from the payment request row; the query string only decides whether to ask
+ * the provider about a returned payment, never what to trust.
  */
 export default async function PayPage({ params, searchParams }: PageProps<"/pay/[token]">) {
   const [{ token }, query, h] = await Promise.all([params, searchParams, headers()]);
@@ -42,8 +43,8 @@ export default async function PayPage({ params, searchParams }: PageProps<"/pay/
     scriptUrl: cardViewScriptUrl(config.baseUrl),
   };
 
-  // A return from MyFatoorah: verify with the provider BEFORE rendering, so the
-  // page below shows the database state, not the query string.
+  // A return from the payment provider: verify BEFORE rendering, so the page
+  // below shows the database state, not the query string.
   const result = one(query.result);
   const paymentId = one(query.paymentId);
   let verified: VerifyResult | null = null;
@@ -55,22 +56,22 @@ export default async function PayPage({ params, searchParams }: PageProps<"/pay/
     return <Notice title="This payment link is not valid" text="Check that the whole link was copied, or ask the studio to send it again." />;
   }
   const { view, studioName } = loaded;
-  const paid = view.payment.state === "paid";
-  const refunded = view.payment.state === "refunded";
+  const paid = view.state === "paid";
+  const amountLabel = formatMoney(view.amountQr, view.currency);
 
   return (
     <main className="bg-page">
       <div className="mx-auto w-full max-w-xl px-4 py-8 sm:py-12">
         <header className="mb-5">
           <p className="eyebrow">{studioName}</p>
-          <h1 className="mt-2 text-2xl font-extrabold tracking-tight text-navy sm:text-3xl">{paid ? "Paid, thank you" : "Pay online"}</h1>
+          <h1 className="mt-2 text-2xl font-extrabold tracking-tight text-navy sm:text-3xl">{paid ? "Payment confirmed" : "Pay online"}</h1>
           <p className="mt-1 text-sm text-muted">Hi {view.customerFirstName}. This page is for booking {view.publicRef ?? view.id.slice(0, 8)}.</p>
         </header>
 
         {verified && <ReturnNotice verified={verified} />}
         {result === "error" && !paid && (
           <div className="mb-5 rounded-2xl border border-warning/30 bg-warning-soft p-4 text-sm text-ink" role="status">
-            <p className="font-bold text-warning">Payment not completed</p>
+            <p className="font-bold text-warning">Payment not completed.</p>
             <p className="mt-1">The payment was cancelled or declined. Nothing has been charged. You can try again below.</p>
           </div>
         )}
@@ -82,11 +83,11 @@ export default async function PayPage({ params, searchParams }: PageProps<"/pay/
             <Row label="Service" value={view.packageName || BOOKING_TYPE_LABEL[view.bookingType]} />
             {view.athleteName && <Row label="Athlete" value={view.athleteName} />}
             {view.eventName && <Row label="Event" value={view.eventName} />}
-            <Row label="Amount" value={<span className="text-xl font-black text-navy">{formatQr(view.amountQr)}</span>} />
-            {view.payment.state === "partial" && <Row label="Already received" value={formatQr(view.payment.paidQr)} />}
-            {view.payment.state === "partial" && <Row label="To pay now" value={<span className="font-bold">{formatQr(view.dueQr)}</span>} />}
-            <Row label="Currency" value={view.currency} />
-            <Row label="Status" value={paid ? `Paid${view.paidAt ? ` on ${formatDateTime(view.paidAt)} Qatar time` : ""}` : refunded ? "Refunded" : view.payment.state === "partial" ? "Partly paid" : "Not paid yet"} />
+            {view.stage && <Row label="Payment" value={stageTitle(view)} />}
+            {view.stage && view.totalQr > 0 && <Row label="Booking total" value={formatMoney(view.totalQr, view.currency)} />}
+            <Row label={view.stage ? "Amount to pay" : "Amount"} value={<span className="text-xl font-black text-navy">{amountLabel}</span>} />
+            {!view.stage && view.payment.state === "partial" && <Row label="Already received" value={formatMoney(view.payment.paidQr, view.currency)} />}
+            <Row label="Status" value={statusText(view)} />
           </dl>
 
           <div className="mt-6">
@@ -94,30 +95,55 @@ export default async function PayPage({ params, searchParams }: PageProps<"/pay/
               <div className="flex items-start gap-3 rounded-2xl border border-success/30 bg-success-soft p-4 text-sm text-ink" role="status">
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-success"><CheckIcon size={20} /></span>
                 <div>
-                  <p className="font-bold text-success">Paid, thank you</p>
-                  <p className="mt-1">We have received your payment{view.paidAt ? ` on ${formatDateTime(view.paidAt)} Qatar time` : ""}. A receipt e-mail follows.</p>
+                  <p className="font-bold text-success">Payment confirmed.</p>
+                  <p className="mt-1">We have received your payment{view.paidAt ? ` on ${formatDateTime(view.paidAt)} Qatar time` : ""}. Thank you.</p>
                 </div>
               </div>
-            ) : refunded ? (
+            ) : view.state === "refunded" ? (
               <p className="rounded-2xl border border-line bg-page p-4 text-sm text-ink">This payment was refunded. Contact {studioName} if you expected something else.</p>
-            ) : view.paymentsOff ? (
+            ) : view.state === "cancelled" ? (
+              <p className="rounded-2xl border border-line bg-page p-4 text-sm text-ink">This payment link is no longer active. If you still have something to pay, {studioName} will send you a new link.</p>
+            ) : view.state === "expired" ? (
+              <p className="rounded-2xl border border-line bg-page p-4 text-sm text-ink">This payment link has expired. Ask {studioName} for a new link. Nothing has been charged.</p>
+            ) : view.state === "payments_off" ? (
               <div className="flex items-start gap-3 rounded-2xl border border-line bg-page p-4 text-sm text-ink" role="status">
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-muted"><ClockIcon size={20} /></span>
                 <p>Online payment is being set up. We will send you the link when it is ready.</p>
               </div>
-            ) : view.payable ? (
-              <PayCard token={token} amountLabel={formatQr(view.dueQr)} businessName={studioName} />
+            ) : view.state === "payable" || view.state === "failed" ? (
+              <PayCard token={token} amountLabel={amountLabel} businessName={studioName} />
             ) : (
               <p className="rounded-2xl border border-line bg-page p-4 text-sm text-ink">This booking is not ready for payment yet. {studioName} will send you a link when it is.</p>
             )}
           </div>
         </section>
 
-        <p className="mt-6 flex items-start gap-2 text-xs text-muted"><ShieldIcon size={14} className="mt-0.5 shrink-0" /> Payments are processed by MyFatoorah. Your booking is marked paid only after MyFatoorah confirms the payment to us.</p>
+        <p className="mt-6 flex items-start gap-2 text-xs text-muted"><ShieldIcon size={14} className="mt-0.5 shrink-0" /> Secure online payment. Your booking is updated only after the payment is confirmed to us.</p>
         <p className="mt-2 text-xs text-muted">Questions? Contact {studioName} before paying. <Link href="/client" className="font-semibold text-primary hover:underline">Open the client portal</Link></p>
       </div>
     </main>
   );
+}
+
+function stageTitle(view: PayBookingView): string {
+  return view.stage === "deposit" ? "Deposit (50%) to secure the booking" : "Remaining balance (50%) after delivery";
+}
+
+function statusText(view: PayBookingView): string {
+  switch (view.state) {
+    case "paid":
+      return `Paid${view.paidAt ? ` on ${formatDateTime(view.paidAt)} Qatar time` : ""}`;
+    case "refunded":
+      return "Refunded";
+    case "cancelled":
+      return "Link no longer active";
+    case "expired":
+      return "Link expired";
+    case "failed":
+      return "Not paid yet. The last attempt did not complete.";
+    default:
+      return !view.stage && view.payment.state === "partial" ? "Partly paid" : "Not paid yet";
+  }
 }
 
 function one(v: string | string[] | undefined): string | null {
@@ -132,21 +158,21 @@ function ReturnNotice({ verified }: { verified: VerifyResult }) {
     case "pending":
       return (
         <div className="mb-5 rounded-2xl border border-primary/20 bg-lightblue p-4 text-sm text-ink" role="status">
-          <p className="font-bold text-primary">We are confirming your payment</p>
-          <p className="mt-1">MyFatoorah has not confirmed it yet. This page updates when MyFatoorah confirms; you will also get an e-mail. Do not pay again.</p>
+          <p className="font-bold text-primary">Your payment is being confirmed.</p>
+          <p className="mt-1">This page updates as soon as confirmation is received; you will also get an e-mail. Do not pay again.</p>
         </div>
       );
     case "failed":
       return (
         <div className="mb-5 rounded-2xl border border-warning/30 bg-warning-soft p-4 text-sm text-ink" role="status">
-          <p className="font-bold text-warning">Payment did not go through</p>
+          <p className="font-bold text-warning">Payment not completed.</p>
           <p className="mt-1">Your bank or card declined the payment. Nothing has been charged. You can try again below.</p>
         </div>
       );
     case "mismatch":
       return (
         <div className="mb-5 rounded-2xl border border-danger/30 bg-danger-soft p-4 text-sm text-ink" role="alert">
-          <p className="font-bold text-danger">We could not match this payment to your booking</p>
+          <p className="font-bold text-danger">We could not match this payment to your booking.</p>
           <p className="mt-1">The studio has been told and will check it. Do not pay again; contact the studio if you are unsure.</p>
         </div>
       );
@@ -154,8 +180,8 @@ function ReturnNotice({ verified }: { verified: VerifyResult }) {
     case "unavailable":
       return (
         <div className="mb-5 rounded-2xl border border-line bg-page p-4 text-sm text-ink" role="status">
-          <p className="font-bold">We could not check your payment just now</p>
-          <p className="mt-1">If you completed the payment, your booking is marked paid as soon as MyFatoorah confirms it. Reload this page in a minute.</p>
+          <p className="font-bold">We could not check your payment just now.</p>
+          <p className="mt-1">If you completed the payment, your booking will be marked paid as soon as confirmation is received. Reload this page in a minute.</p>
         </div>
       );
     default:

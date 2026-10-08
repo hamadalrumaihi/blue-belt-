@@ -1,29 +1,56 @@
 /**
  * Client e-mails about one booking. Pure: builds drafts from a booking row
- * and a few facts, so the server actions, the MyFatoorah webhook and tests
- * all produce the same wording. Nothing here sends anything.
+ * and a few facts, so the server actions, the payment webhook and tests all
+ * produce the same wording. Nothing here sends anything.
+ *
+ * Customer copy rules: no vendor names, no em dashes, short direct sentences.
+ * The payment story is "secure online payment": a 50% deposit online once
+ * the agreement is signed, the remaining 50% after delivery.
  */
-import { BOOKING_STATUS_CLIENT_LABEL, BOOKING_TYPE_LABEL, effectivePayment, formatQr } from "@/lib/bookings/state";
+import { BOOKING_STATUS_CLIENT_LABEL, BOOKING_TYPE_LABEL, effectivePayment, formatMoney, formatQr, stageWords } from "@/lib/bookings/state";
 import type { ClientNotificationKind } from "@/lib/notifications/email/kinds";
 import { buildEmail, type EmailContent, type EmailDraft } from "@/lib/notifications/email/templates";
 import { isWebsitePayUrl } from "@/lib/payments/pay-token";
-import type { PhotoBookingRow } from "@/lib/supabase/database.types";
+import type { PaymentStage, PhotoBookingRow } from "@/lib/supabase/database.types";
 import { formatDateTime, zoneLabel } from "@/lib/time";
 
 export type BookingEmailBooking = Pick<
   PhotoBookingRow,
-  "id" | "public_ref" | "booking_type" | "booking_status" | "customer_name" | "customer_email" | "amount_qr" | "session_at" | "location" | "package_name" | "athlete_name" | "payment_url" | "cancel_reason" | "status" | "amount_paid_qr" | "manual_paid_at"
+  | "id"
+  | "public_ref"
+  | "booking_type"
+  | "booking_status"
+  | "customer_name"
+  | "customer_email"
+  | "amount_qr"
+  | "currency"
+  | "session_at"
+  | "location"
+  | "package_name"
+  | "athlete_name"
+  | "payment_url"
+  | "cancel_reason"
+  | "status"
+  | "amount_paid_qr"
+  | "manual_paid_at"
+  | "deposit_percent"
+  | "deposit_qr"
+  | "balance_qr"
+  | "deposit_state"
+  | "balance_state"
 >;
 
-/** House wording for every booking mail that mentions money. No em dashes anywhere in customer text. */
-export const NO_PAYMENT_NEEDED_NOW = "No payment is needed now. After the shoot you pay online through MyFatoorah.";
+/** House wording for the payment story in every booking mail that mentions money. */
+export const SECURE_PAYMENT_STORY = "Once we confirm availability and price, you sign the agreement and secure the booking with a 50% deposit paid online. The remaining 50% is due after delivery.";
 
 export type BookingEmailOptions = {
   businessName: string;
   /** Absolute link to the client's booking page in the portal. */
   portalUrl: string;
   /** PAYMENT_RECEIVED: what arrived and how. */
-  payment?: { amountQr: number; methodLabel: string; dueQr: number } | null;
+  payment?: { amountQr: number; methodLabel: string; dueQr: number; stage?: PaymentStage | null } | null;
+  /** PAYMENT_REQUESTED: the stage request being sent (our pay page or a pasted provider link). */
+  request?: { stage: PaymentStage; amountQr: number; currency: string; payUrl: string } | null;
   /** BOOKING_CHANGED: what the previous schedule was. */
   previous?: { session_at: string | null; location: string | null } | null;
   now?: Date;
@@ -61,40 +88,56 @@ export function bookingEmailContent(kind: BookingEmailKind, b: BookingEmailBooki
   const base = { kind, greeting, businessName: o.businessName, facts: bookingFacts(b) };
   const payment = effectivePayment(b);
   const priced = Number(b.amount_qr) > 0;
+  const balanceLeft = Number(b.balance_qr) > 0 && b.balance_state !== "paid" && b.balance_state !== "waived";
   switch (kind) {
     case "BOOKING_RECEIVED":
       return {
         ...base,
         subject: `We received your booking request${ref}`,
-        paragraphs: [`Thank you. Your request for ${b.package_name || BOOKING_TYPE_LABEL[b.booking_type].toLowerCase()} is with us.`, `We will confirm the details shortly. Current status: ${BOOKING_STATUS_CLIENT_LABEL[b.booking_status]}.`, NO_PAYMENT_NEEDED_NOW],
+        paragraphs: [`Thank you. Your request for ${b.package_name || BOOKING_TYPE_LABEL[b.booking_type].toLowerCase()} is with us.`, `We will confirm availability and price shortly. Current status: ${BOOKING_STATUS_CLIENT_LABEL[b.booking_status]}.`, SECURE_PAYMENT_STORY],
         cta: portal,
       };
     case "BOOKING_CONFIRMED":
       return {
         ...base,
         subject: `Your booking is confirmed${ref}`,
-        paragraphs: ["Your booking is confirmed. The details are below; reply to this e-mail if anything needs to change.", priced && payment.state !== "paid" ? NO_PAYMENT_NEEDED_NOW : priced ? "Your payment has been received. Thank you." : "There is nothing to pay for this booking.", "See you there."],
+        paragraphs: [
+          "Your booking is confirmed. The details are below; reply to this e-mail if anything needs to change.",
+          !priced ? "There is nothing to pay for this booking." : balanceLeft ? `Your deposit is paid. The remaining balance of ${formatMoney(b.balance_qr, b.currency)} is due after delivery. We will send you a payment link then.` : payment.state === "paid" ? "Your booking is fully paid. Thank you." : "Your deposit has been received.",
+          "See you there.",
+        ],
         cta: portal,
       };
     case "PAYMENT_REQUESTED": {
+      const r = o.request;
+      if (r) {
+        return {
+          ...base,
+          subject: `Complete your online payment${ref}`,
+          paragraphs: [
+            `The ${stageWords(b, r.stage)} for your booking is ${formatMoney(r.amountQr, r.currency)}.`,
+            "Open your payment link below to pay online. The page shows the amount and your booking reference before you pay.",
+            r.stage === "deposit" ? "Your booking is confirmed as soon as the payment is confirmed." : "Your booking is marked paid in full as soon as the payment is confirmed.",
+            "If anything looks wrong, reply to this e-mail before paying.",
+          ],
+          cta: { label: "Open your payment link", url: r.payUrl },
+        };
+      }
       const due = payment.state === "partial" ? payment.dueQr : Number(b.amount_qr);
       const website = isWebsitePayUrl(b.payment_url);
       return {
         ...base,
-        subject: `Pay online for your booking${ref}`,
-        paragraphs: [
-          `Your shoot is done and the final amount is ${formatQr(due)}.`,
-          `You pay online through MyFatoorah on the ${o.businessName} website. Open the link below, enter your card details and confirm. The page shows the amount and your booking reference before you pay.`,
-          "Your booking is marked paid as soon as MyFatoorah confirms the payment. If anything looks wrong, reply to this e-mail before paying.",
-        ],
-        cta: website && b.payment_url ? { label: "Pay online", url: b.payment_url } : portal,
+        subject: `Complete your online payment${ref}`,
+        paragraphs: [`The amount due for your booking is ${formatMoney(due, b.currency)}.`, "Open your payment link below to pay online. The page shows the amount and your booking reference before you pay.", "Your booking is updated as soon as the payment is confirmed. If anything looks wrong, reply to this e-mail before paying."],
+        cta: website && b.payment_url ? { label: "Open your payment link", url: b.payment_url } : portal,
       };
     }
     case "PAYMENT_RECEIVED": {
       const p = o.payment;
-      const line = p ? `We received ${formatQr(p.amountQr)} by ${p.methodLabel.toLowerCase()}.` : "We received your payment.";
-      const balance = p && p.dueQr > 0 ? `Remaining balance: ${formatQr(p.dueQr)}.` : "Your booking is fully paid. Thank you.";
-      return { ...base, subject: `Payment received${ref}`, paragraphs: [line, balance], cta: portal };
+      const what = p?.stage ? ` for the ${stageWords(b, p.stage)}` : "";
+      const line = p ? `We received ${formatMoney(p.amountQr, b.currency)}${what}${p.methodLabel ? ` by ${p.methodLabel.toLowerCase()}` : ""}.` : "We received your payment.";
+      const balance = p && p.dueQr > 0 ? `Remaining balance: ${formatMoney(p.dueQr, b.currency)}, due after delivery.` : "Your booking is fully paid. Thank you.";
+      return { ...base, subject: `Your payment was received${ref}`, paragraphs: [line, balance], cta: portal };
     }
     case "BOOKING_CHANGED": {
       const prev = o.previous;
@@ -117,7 +160,11 @@ export function bookingEmailContent(kind: BookingEmailKind, b: BookingEmailBooki
       return {
         ...base,
         subject: `Your photos and videos are delivered${ref}`,
-        paragraphs: ["Everything from your session has been delivered. Open your booking to find the gallery link.", "Thank you for shooting with us. Tag us when you share them."],
+        paragraphs: [
+          "Everything from your session has been delivered. Open your booking to find your private gallery link.",
+          ...(b.balance_state === "due" && Number(b.balance_qr) > 0 ? [`The remaining balance of ${formatMoney(b.balance_qr, b.currency)} is now due. You will receive a payment link for it.`] : []),
+          "Thank you for shooting with us. Tag us when you share them.",
+        ],
         cta: portal,
       };
   }

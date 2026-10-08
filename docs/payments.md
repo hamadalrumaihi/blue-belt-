@@ -314,6 +314,160 @@ outward, customer-facing action that needs the owner's explicit sign-off on
 wording and channel. The owner sees the link on the order page and sends it
 themselves. A paid booking still never creates a tracked athlete.
 
+## Deposit and balance (round 3): 50% before confirmation, 50% after delivery
+
+**Sandbox only. Live activation is pending** (see "Activation procedure").
+Nothing in this section makes the app claim that payments are live.
+
+### Policy
+
+- A booking is **confirmed only when** the required agreement(s) are signed
+  **and** the 50% deposit is paid. `recomputeBookingGates`
+  (`src/lib/bookings/gates.ts`) is the only thing that moves a booking into
+  `confirmed`; the owner's "Confirm booking" button refuses while a blocker
+  remains ("Blocked because the agreement has not been signed." / "Blocked
+  because the 50% deposit has not been paid.").
+- The remaining 50% **never blocks confirmation**, becomes due only when the
+  owner presses **Deliver gallery**, and is never auto-charged or auto-sent.
+- Every amount is computed on the server: `setBookingPrice` (and the booking
+  edit form) splits the total with `depositColumnsFor` from
+  `src/lib/bookings/policy.ts` (`BOOKINGS_DEPOSIT_REQUIRED=1`,
+  `BOOKINGS_DEPOSIT_PERCENT=50`, `BOOKINGS_BALANCE_TIMING=after_delivery`,
+  documented in `.env.example`). Once the deposit is paid it never changes; a
+  later price change only moves `balance_qr = total - deposit_qr`.
+
+### Stage payment requests (`photo_booking_payment_requests`)
+
+`src/lib/payments/requests.ts`, one row per booking stage (`deposit` |
+`balance`), at most one `pending` per (booking, stage) (partial unique index):
+
+| Column | Meaning |
+| --- | --- |
+| `amount_qr`, `currency` | Copied from the booking row (`deposit_qr` / `balance_qr`) at creation. The webhook and the pay page check against THIS, never the booking total. |
+| `provider` | `WEBSITE` (our `/pay/<token>` page, default), `MANUAL_LINK` (a link the owner pasted from the MyFatoorah dashboard when the API keys are not set), `MYFATOORAH` (reserved). |
+| `pay_token_hash` | sha256 of the `bbp_…` token in `payment_url`; the pay page looks the token up here (legacy links on `photo_bookings.metadata.pay_token_hash` still work). |
+| `provider_invoice_id`, `provider_reference`, `metadata.pay_session`, `metadata.superseded_invoices` | Set by each checkout attempt on the pay page; the booking's own `provider_invoice_id` is kept in sync for the legacy lookup and reconciliation. |
+| `status` | `pending` → `paid` \| `failed` \| `cancelled` \| `expired`; `failed` → `paid` (retry). **Paid never regresses.** |
+| `generation` | 1, 2, 3… one per regeneration; `payment_request.regenerated` is audited. |
+| `error_code`, `error_message` | Safe admin text (provider decline, `mismatch`). |
+
+`createStagePaymentRequest(supabase, { booking, stage, actor, idempotencyKey? , paymentsEnabled, siteUrl, manualUrl? })`:
+
+- gating: deposit only while `deposit_state = pending`, the booking is live
+  and the agreement gate is clear (`contract_state = signed`, or no agreement
+  required); balance only while `balance_state = due` (set by delivery);
+- idempotent: an existing `pending` request is returned as is (same link, no
+  new row); a `paid` stage refuses; after `failed` / `cancelled` / `expired`
+  a new row is created with `generation + 1`;
+- with MyFatoorah not configured (`isPaymentsEnabled()` false) nothing is
+  faked: the owner sees "Online card payments are not configured. Paste a
+  payment link from your payment provider dashboard, or set the keys." and
+  may paste an https link (`provider = MANUAL_LINK`, audit
+  `payment_request.manual_link`);
+- **creating never messages the customer.** `sendStagePaymentLink` is the
+  separate, explicit owner action: e-mail `PAYMENT_REQUESTED` ("Complete your
+  online payment", button "Open your payment link", amount + currency, stage
+  in plain words "deposit (50%)" / "remaining balance (50%)") plus the owner's
+  Telegram `BOOKING_PAYMENT_REQUESTED`; `sent_at` is stamped.
+
+Audit actions: `booking.price_set`, `booking.quote_approved`,
+`payment_request.created`, `payment_request.regenerated`,
+`payment_request.manual_link`, `payment_request.sent`,
+`payment_request.cancelled`, `deposit.paid`, `balance.due`, `balance.paid`,
+`gallery.url_added`, `gallery.delivered`, `booking.completed`.
+
+### Owner flow
+
+1. **Request** arrives (website or by hand). `createBooking` already writes
+   the deposit columns for a priced service.
+2. **Set the price** (booking page → Payment → Set the price) or apply a
+   quote. Audit `booking.price_set`. **Approve quote** moves an inquiry to
+   `quoted`; the gates then put it in `awaiting_contract`.
+3. **Agreement** sent and signed (the e-sign slice writes `contract_state`
+   and calls `recomputeBookingGates`, which moves the booking to
+   `awaiting_payment` = "Awaiting deposit").
+4. **Create payment link** (Deposit 50% block): a `WEBSITE` request with our
+   `/pay/<token>` link. **Copy payment link** / **Send payment link** /
+   **Regenerate** are separate buttons. Nothing is sent until "Send".
+5. Customer pays on `/pay/<token>` (embedded card view or the hosted page).
+   The webhook (or the return-visit verification, or reconciliation) applies
+   the SAME atomic transition: request `paid`, `deposit_state = paid`,
+   `deposit_paid_at`, audit `deposit.paid`, `recomputeBookingGates`
+   (confirmed only if the agreement gate is also clear), client e-mails
+   `PAYMENT_RECEIVED` ("Your payment was received") and `BOOKING_CONFIRMED`
+   when it just confirmed, owner Telegram `BOOKING_PAID`.
+6. **Mark shoot complete** → `in_progress` ("Editing" for the client).
+7. **Add gallery link** (audit `gallery.url_added`; never sends, never makes
+   the balance due). **Deliver gallery** (explicit): gallery `delivered`,
+   `gallery_delivered_at`, `delivered_at`, `booking_status = delivered`,
+   `balance_state = due` + `balance_due_at` (only when `balance_qr > 0`,
+   otherwise `waived`), audit `gallery.delivered` + `balance.due`. The
+   "Notify the client" tick is OFF by default (e-mail "Your private gallery
+   is ready"). **No balance request is created and nothing is sent by
+   delivery.**
+8. **Create payment link** (Remaining 50% block, enabled only now) → Send →
+   paid → request `paid`, `balance_state = paid`, `balance_paid_at`, audit
+   `balance.paid`, deposit columns untouched; a delivered booking with both
+   stages settled becomes `completed` (audit `booking.completed`).
+
+Manual payments (cash / bank / Fawran, `recordManualPayment`) now say which
+stage they settle, mark that stage paid, cancel the stage's pending link so
+the client cannot pay twice, and never override a request the provider
+verified. Bookings list filters: "Awaiting deposit", "Balance due".
+
+### Verification rules (webhook, reconcile, return visit)
+
+`applyStatusToBooking(booking, mapping, ctx, deps, request)` resolves the
+request by `provider_invoice_id` (fallback: the booking by invoice as before,
+then a request whose `metadata.superseded_invoices` lists the invoice):
+
+- a verified SUCCESS must match the **request** amount and currency
+  (tolerance 0.01) and, when `Invoice.ExternalIdentifier` is present, our
+  CustomerReference (the booking id); otherwise `amount_mismatch` with the
+  evidence on the booking **and** the request (`error_code = mismatch`), one
+  owner `INTEGRATION_FAILED` per event, nothing marked paid;
+- duplicates are harmless (`photo_payment_events`), a second SUCCESS for the
+  same request is `unchanged`, a late FAILED after paid is
+  `ignored_transition:request:paid->failed`; FAILED / CANCELED mark the
+  request (never the stage) failed / cancelled;
+- the booking's `status` stays "the latest provider result" (so a balance
+  payment is accepted even though the deposit already set it to `paid`);
+  `photo_payment_records` keeps one `provider` row per payment id with the
+  stage in `note`;
+- `reconcilePendingBookings` also scans pending requests that carry an
+  invoice, so a balance request on a `paid` booking is not forgotten.
+
+### Client surfaces (vendor-free)
+
+Pay page: "Pay online", "Secure online payment", "Card details are entered on
+a secure payment form.", "Open secure payment page", "Preparing secure
+payment", "Opening secure payment", "Your payment is being confirmed.",
+"Payment confirmed.", "Payment not completed.", "If you completed the
+payment, your booking will be marked paid as soon as confirmation is
+received." The card-view script URL stays (a script src, not visible text).
+`robots: noindex` stays. A paid / cancelled / expired request shows its state
+and never starts a session.
+
+Client portal (`photo_client_bookings_v` + `photo_client_payment_requests_v`):
+"Agreement to sign" / "Agreement signed", "Deposit due" / "Deposit paid",
+"Not due yet" / "Remaining balance due" / "Paid in full", "Editing",
+"Gallery ready" / "Gallery delivered". The online payment button links only
+to our `/pay/<token>` URL of the pending request for the open stage. No
+provider names, invoice ids, internal states or database ids are shown.
+
+### Tests
+
+`tests/payments/requests.test.ts` (gating, idempotency, regeneration,
+manual link, send), `tests/payments/stage-webhook.test.ts` (deposit vs
+balance webhooks, wrong amount / reference, duplicates, out of order, gates,
+completion), `tests/payments/pay-page-requests.test.ts` (token on the request
+row, states, request amount, verification), `tests/bookings-actions.test.ts`
+(QAR 1000 → 500/500, deposit locked after paid, gated confirmation, delivery
+makes the balance due, stage requests, manual payments per stage),
+`tests/galleries-actions.test.ts` (url added never sends, deliver gallery),
+`tests/client-portal.test.ts`, `tests/bookings-state.test.ts` (e-mails, stage
+helpers, next action).
+
 ## Website checkout (embedded card view)
 
 **Live activation is pending.** Everything below works against the MyFatoorah

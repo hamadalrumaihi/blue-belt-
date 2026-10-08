@@ -126,7 +126,8 @@ describe("loadPayBooking", () => {
   it("is not payable before the shoot is marked complete or once paid", async () => {
     const early = setup({ booking: { coverage_done_at: null } });
     expect((await loadPayBooking(early.token, early.deps)) as { view: { payable: boolean } }).toMatchObject({ view: { payable: false, paymentsOff: false } });
-    const paid = setup({ booking: { status: "paid", paid_at: "2026-10-06T10:00:00.000Z" } });
+    // Provider-paid in full: both stages settled (what the migration backfills for status=paid).
+    const paid = setup({ booking: { status: "paid", paid_at: "2026-10-06T10:00:00.000Z", deposit_state: "paid", balance_state: "paid" } });
     expect((await loadPayBooking(paid.token, paid.deps)) as { view: unknown }).toMatchObject({ view: { payable: false, payment: { state: "paid" }, paidAt: "2026-10-06T10:00:00.000Z" } });
   });
 });
@@ -186,7 +187,7 @@ describe("executeCardPayment", () => {
     const off = setup({ enabled: false });
     expect(await executeCardPayment(off.token, "sess-123456", off.deps)).toEqual({ ok: false, error: "payments_off" });
     expect(off.provider.executePayment).not.toHaveBeenCalled();
-    const paid = setup({ booking: { status: "paid", paid_at: DONE } });
+    const paid = setup({ booking: { status: "paid", paid_at: DONE, deposit_state: "paid", balance_state: "paid" } });
     expect(await executeCardPayment(paid.token, "sess-123456", paid.deps)).toEqual({ ok: false, error: "not_payable" });
     expect(paid.provider.executePayment).not.toHaveBeenCalled();
   });

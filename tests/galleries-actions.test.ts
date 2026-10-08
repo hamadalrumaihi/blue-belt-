@@ -23,13 +23,16 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/lib/supabase/service", () => ({ createServiceClient: vi.fn(), isServiceClientConfigured: () => false }));
 // No extra hosts configured in Settings: the custom domain must work on its own.
 vi.mock("@/lib/studio/queries", () => ({ loadStudio: vi.fn(async () => ({ settings: {} })), siteUrl: () => "https://site.test" }));
-vi.mock("@/lib/audit", () => ({ writeAudit: vi.fn(async () => ({ ok: true })) }));
+const writeAudit = vi.fn(async () => ({ ok: true }));
+vi.mock("@/lib/audit", () => ({ writeAudit: (...args: unknown[]) => writeAudit(...(args as [])) }));
 const enqueueOwnerTelegram = vi.fn(async () => ({ ok: true }));
 vi.mock("@/lib/notifications/owner", () => ({ enqueueOwnerTelegram: (...args: unknown[]) => enqueueOwnerTelegram(...(args as [])) }));
-vi.mock("@/lib/notifications/email/outbox", () => ({ enqueueClientEmail: vi.fn(async () => ({ ok: true, queued: true })) }));
+const enqueueClientEmail = vi.fn(async () => ({ ok: true, queued: true }));
+vi.mock("@/lib/notifications/email/outbox", () => ({ enqueueClientEmail: (...args: unknown[]) => enqueueClientEmail(...(args as [])) }));
 
 const OWNER = "11111111-1111-4111-8111-111111111111";
 const GALLERY = "22222222-2222-4222-8222-222222222222";
+const BOOKING = "33333333-3333-4333-8333-333333333333";
 const CUSTOM = "https://galleries.bluebelt.media/client/dalob";
 
 type Result = { data: unknown; error: { code?: string; message: string } | null; count?: number | null };
@@ -56,7 +59,7 @@ function chain(table: string) {
 const getUser = vi.fn(async () => ({ data: { user: { id: OWNER, email: "owner@example.com" } } }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn(async () => ({ auth: { getUser }, from: (table: string) => chain(table) })) }));
 
-import { createGallery, updateGallery } from "@/lib/actions/galleries";
+import { createGallery, deliverGallery, markGalleryReady, updateGallery } from "@/lib/actions/galleries";
 
 function form(entries: Record<string, string>) {
   const fd = new FormData();
@@ -64,19 +67,29 @@ function form(entries: Record<string, string>) {
   return fd;
 }
 
+const auditActions = () => writeAudit.mock.calls.map((c) => (c as unknown as [unknown, { action: string }])[1].action);
+const gallery = (overrides: Record<string, unknown> = {}) => ({ id: GALLERY, owner_id: OWNER, name: "Dalob finals", status: "ready", pictime_url: CUSTOM, pictime_project_id: null, booking_id: BOOKING, client_id: null, event_id: null, notes: null, created_in_pictime_at: "2026-10-01T00:00:00.000Z", ready_at: "2026-10-02T00:00:00.000Z", delivered_at: null, notified_at: null, visitor_count: 0, last_visitor_at: null, ...overrides });
+const bookingLite = (overrides: Record<string, unknown> = {}) => ({ id: BOOKING, owner_id: OWNER, client_id: null, customer_name: "Test Customer", customer_email: "customer@example.com", athlete_name: "Test Athlete", public_ref: "BB-7K3PQ2", booking_status: "in_progress", event_id: null, quoted_at: null, confirmed_at: "2026-09-01T00:00:00.000Z", delivered_at: null, completed_at: null, cancelled_at: null, gallery_delivered_at: null, balance_state: "not_due", balance_qr: 500, balance_due_at: null, currency: "QAR", ...overrides });
+
 beforeEach(() => {
   for (const k of Object.keys(results)) delete results[k];
   writes.length = 0;
+  writeAudit.mockClear();
   enqueueOwnerTelegram.mockClear();
+  enqueueClientEmail.mockClear();
 });
 
 describe("createGallery with the studio's Pic-Time custom domain", () => {
-  it("saves the custom-domain link as given, as status created, and redirects to the gallery", async () => {
+  it("saves the custom-domain link as given, as status created, audits gallery.url_added, tells only the owner and never e-mails the client", async () => {
     results.photo_galleries = { data: { id: GALLERY }, error: null };
     await expect(createGallery(null, form({ name: "Dalob finals", pictime_url: CUSTOM }))).rejects.toThrow(`NEXT_REDIRECT:/galleries/${GALLERY}`);
     const insert = writes.find((w) => w.table === "photo_galleries" && w.op === "insert");
     expect(insert?.payload).toMatchObject({ owner_id: OWNER, name: "Dalob finals", pictime_url: CUSTOM, status: "created" });
     expect(enqueueOwnerTelegram).toHaveBeenCalledTimes(1);
+    expect(enqueueClientEmail).not.toHaveBeenCalled();
+    expect(auditActions()).toEqual(["gallery.created", "gallery.url_added"]);
+    // Saving a link never touches the booking's balance.
+    expect(writes.filter((w) => w.table === "photo_bookings").map((w) => w.payload as Record<string, unknown>).some((p) => "balance_state" in p || "booking_status" in p)).toBe(false);
   });
 
   it("rejects an http or look-alike link with a message naming both allowed domains and writes nothing", async () => {
@@ -111,5 +124,68 @@ describe("updateGallery with the studio's Pic-Time custom domain", () => {
     const out = await updateGallery(GALLERY, null, form({ name: "Dalob finals", pictime_url: "https://galleries.bluebelt.media.evil.example/client/dalob" }));
     expect(out?.fieldErrors?.pictime_url).toBeDefined();
     expect(writes.filter((w) => w.op === "update")).toHaveLength(0);
+  });
+});
+
+describe("markGalleryReady", () => {
+  it("marks the gallery ready and (opt-in) e-mails the client, but never delivers the booking or makes the balance due", async () => {
+    results.photo_galleries = [{ data: gallery({ status: "created", ready_at: null }), error: null }, { data: null, error: null, count: 1 }];
+    results.photo_bookings = { data: bookingLite(), error: null };
+    const out = await markGalleryReady(GALLERY, { notifyClient: true });
+    expect(out).toMatchObject({ ok: true, status: "ready", notified: true });
+    expect(writes.filter((w) => w.table === "photo_bookings" && w.op === "update")).toEqual([]);
+    const mail = enqueueClientEmail.mock.calls.map((c) => (c as unknown as [unknown, { kind: string; draft: { subject: string; text: string } }])[1])[0];
+    expect(mail.kind).toBe("GALLERY_READY");
+    expect(mail.draft.subject).toBe("Your private gallery is ready (BB-7K3PQ2)");
+    expect(mail.draft.text.toLowerCase()).not.toMatch(/pic-time|pictime|fatoorah/);
+    expect(mail.draft.text).not.toContain("—");
+    expect(auditActions()).not.toContain("balance.due");
+    expect(auditActions()).not.toContain("gallery.delivered");
+  });
+});
+
+describe("deliverGallery", () => {
+  it("is the explicit delivery step: gallery delivered, booking delivered, balance due; no link created, nothing sent by default", async () => {
+    results.photo_galleries = [{ data: gallery(), error: null }, { data: null, error: null, count: 1 }];
+    results.photo_bookings = [{ data: bookingLite(), error: null }, { data: bookingLite({ booking_status: "delivered", balance_state: "due" }), error: null }];
+    const out = await deliverGallery(GALLERY);
+    expect(out).toMatchObject({ ok: true, status: "delivered", notified: false, balanceDue: true });
+    expect(writes.find((w) => w.table === "photo_galleries" && w.op === "update")?.payload).toMatchObject({ status: "delivered", delivered_at: expect.any(String) });
+    const bookingUpdate = writes.find((w) => w.table === "photo_bookings" && w.op === "update")?.payload as Record<string, unknown>;
+    expect(bookingUpdate).toMatchObject({ booking_status: "delivered", delivered_at: expect.any(String), gallery_delivered_at: expect.any(String), balance_state: "due", balance_due_at: expect.any(String) });
+    expect("deposit_state" in bookingUpdate || "status" in bookingUpdate).toBe(false);
+    expect(auditActions()).toEqual(["booking.status", "balance.due", "gallery.delivered", "gallery.delivered"]);
+    // The final payment link is never created or sent by delivery.
+    expect(writes.some((w) => w.table === "photo_booking_payment_requests")).toBe(false);
+    expect(enqueueClientEmail).not.toHaveBeenCalled();
+    expect(enqueueOwnerTelegram).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ kind: "DELIVERY_SENT", lines: expect.arrayContaining([expect.stringMatching(/Final balance due: 500 QAR/)]) }));
+  });
+
+  it("e-mails the client only when asked, and refuses without a link, before confirmation, or twice", async () => {
+    results.photo_galleries = [{ data: gallery(), error: null }, { data: null, error: null, count: 1 }];
+    results.photo_bookings = [{ data: bookingLite(), error: null }, { data: bookingLite({ booking_status: "delivered", balance_state: "due" }), error: null }];
+    expect(await deliverGallery(GALLERY, { notifyClient: true })).toMatchObject({ ok: true, notified: true });
+    const mail = enqueueClientEmail.mock.calls.map((c) => (c as unknown as [unknown, { kind: string; draft: { text: string } }])[1])[0];
+    expect(mail.kind).toBe("GALLERY_READY");
+    expect(mail.draft.text).toMatch(/remaining balance of 500 QAR is now due/);
+    expect(mail.draft.text.toLowerCase()).not.toMatch(/pic-time|pictime/);
+
+    writes.length = 0;
+    results.photo_galleries = { data: gallery({ pictime_url: null }), error: null };
+    expect(await deliverGallery(GALLERY)).toMatchObject({ ok: false, error: expect.stringMatching(/gallery link/i) });
+    results.photo_galleries = { data: gallery(), error: null };
+    results.photo_bookings = { data: bookingLite({ booking_status: "awaiting_payment" }), error: null };
+    expect(await deliverGallery(GALLERY)).toMatchObject({ ok: false, error: expect.stringMatching(/confirm the booking/i) });
+    results.photo_galleries = { data: gallery({ status: "delivered", delivered_at: "2026-10-03T00:00:00.000Z" }), error: null };
+    expect(await deliverGallery(GALLERY)).toMatchObject({ ok: false, error: expect.stringMatching(/already delivered/i) });
+    expect(writes.filter((w) => w.op === "update")).toEqual([]);
+  });
+
+  it("a booking without a remaining balance is delivered with nothing owed", async () => {
+    results.photo_galleries = [{ data: gallery(), error: null }, { data: null, error: null, count: 1 }];
+    results.photo_bookings = [{ data: bookingLite({ balance_qr: 0 }), error: null }, { data: bookingLite({ booking_status: "delivered", balance_state: "waived", balance_qr: 0 }), error: null }];
+    expect(await deliverGallery(GALLERY)).toMatchObject({ ok: true, balanceDue: false });
+    expect(writes.find((w) => w.table === "photo_bookings" && w.op === "update")?.payload).toMatchObject({ balance_state: "waived" });
+    expect(auditActions()).not.toContain("balance.due");
   });
 });

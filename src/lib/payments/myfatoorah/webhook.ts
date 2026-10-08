@@ -17,12 +17,16 @@
 import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Logger } from "@/lib/log";
-import type { Database, Json, PhotoBookingRow, PhotoOrderRow } from "@/lib/supabase/database.types";
+import type { Database, Json, PaymentStage, PhotoBookingPaymentRequestRow, PhotoBookingRow, PhotoOrderRow } from "@/lib/supabase/database.types";
+import { writeAudit } from "@/lib/audit";
 import { bookingEmailAlertKey, bookingEmailDraft, type BookingEmailKind } from "@/lib/bookings/emails";
+import { recomputeBookingGates } from "@/lib/bookings/gates";
+import { BOOKING_STATUS_LABEL, formatMoney, isCompletionReady, stageWords } from "@/lib/bookings/state";
 import { deliveryInsert } from "@/lib/notifications/delivery-runner";
 import { enqueueClientEmail } from "@/lib/notifications/email/outbox";
 import { enqueueOwnerTelegram } from "@/lib/notifications/owner";
 import { fulfillmentPlan } from "@/lib/payments/fulfillment";
+import { applyProviderResultToRequest, findRequestByInvoice, listStageRequests, requestSupersededInvoices } from "@/lib/payments/requests";
 import { applyTransition, isPaymentStatus, type PaymentStatus } from "@/lib/payments/types";
 import { isUuid } from "@/lib/validation";
 import { MYFATOORAH_PROVIDER, type PaymentProvider, type PaymentStatusOutput } from "./client";
@@ -238,13 +242,34 @@ export function expectedChargeQr(booking: Pick<PhotoBookingRow, "amount_qr" | "a
  * Null when the provider's amount and currency match what the booking
  * expects (or the event carries no amount at all); otherwise a short reason.
  * A verified "paid" with the wrong amount must never mark the booking paid.
+ * With a stage request the expected charge is THAT request's amount (the
+ * 50% deposit or the balance), never the booking total.
  */
-export function amountMismatch(booking: Pick<PhotoBookingRow, "amount_qr" | "amount_paid_qr" | "metadata" | "currency">, mapping: Pick<Extract<StatusMapping, { kind: "apply" }>, "amount" | "currency" | "invoiceId">): string | null {
+export function amountMismatch(
+  booking: Pick<PhotoBookingRow, "amount_qr" | "amount_paid_qr" | "metadata" | "currency">,
+  mapping: Pick<Extract<StatusMapping, { kind: "apply" }>, "amount" | "currency" | "invoiceId">,
+  request: Pick<PhotoBookingPaymentRequestRow, "amount_qr" | "currency"> | null = null,
+): string | null {
   if (mapping.amount === null) return null;
-  const expected = expectedChargeQr(booking, mapping.invoiceId);
+  const expected = request ? Math.round(Number(request.amount_qr) * 100) / 100 : expectedChargeQr(booking, mapping.invoiceId);
+  const currency = request ? request.currency : booking.currency;
   if (Math.abs(mapping.amount - expected) > AMOUNT_TOLERANCE_QR) return `amount ${mapping.amount} expected ${expected}`;
-  if (mapping.currency && booking.currency && mapping.currency.trim().toUpperCase() !== booking.currency.trim().toUpperCase()) return `currency ${mapping.currency} expected ${booking.currency}`;
+  if (mapping.currency && currency && mapping.currency.trim().toUpperCase() !== currency.trim().toUpperCase()) return `currency ${mapping.currency} expected ${currency}`;
   return null;
+}
+
+/**
+ * Request-level legality of a provider verdict (the booking's provider
+ * status is only "the latest result" once there are two stages):
+ *   pending → paid | failed | cancelled;  failed → paid | cancelled;
+ *   paid never regresses; cancelled / expired take nothing.
+ * Refunds and disputes stay booking-level (applyTransition) on a paid request.
+ */
+export function requestTransition(from: PhotoBookingPaymentRequestRow["status"], to: PaymentStatus): "ok" | "same" | "illegal" {
+  if (to === "paid") return from === "paid" ? "same" : from === "pending" || from === "failed" ? "ok" : "illegal";
+  if (to === "failed") return from === "failed" ? "same" : from === "pending" ? "ok" : "illegal";
+  if (to === "cancelled") return from === "cancelled" ? "same" : from === "pending" || from === "failed" ? "ok" : "illegal";
+  return from === "paid" ? "ok" : "illegal";
 }
 
 /**
@@ -274,28 +299,47 @@ export type ApplyContext = { source: string; eventRowId?: number | null; /** Pro
  * transition instead of clobbering it. Shared by the webhook, the replay and
  * reconcile jobs and the website pay page's return-visit verification.
  */
-export async function applyStatusToBooking(booking: PhotoBookingRow, mapping: Extract<StatusMapping, { kind: "apply" }>, ctx: ApplyContext, deps: WebhookDeps): Promise<ApplyOutcome> {
+export async function applyStatusToBooking(booking: PhotoBookingRow, mapping: Extract<StatusMapping, { kind: "apply" }>, ctx: ApplyContext, deps: WebhookDeps, request: PhotoBookingPaymentRequestRow | null = null): Promise<ApplyOutcome> {
   const now = deps.now();
-  const transition = applyTransition(booking.status, mapping.status, now, booking);
-  if (!transition.ok) {
-    if (transition.reason === "same_status") return { result: "unchanged", status: booking.status };
-    deps.log.warn("payments.illegal_transition", { bookingId: booking.id, from: booking.status, to: mapping.status, source: ctx.source });
-    return { result: "ignored_transition", status: booking.status, detail: `${booking.status}->${mapping.status}` };
+  let columns: Record<string, Json>;
+  if (request && (mapping.status === "paid" || mapping.status === "failed" || mapping.status === "cancelled")) {
+    // Stage request: legality is per request (paid never regresses), the
+    // booking's provider status just follows as "the latest provider result".
+    const legal = requestTransition(request.status, mapping.status);
+    if (legal === "same") return { result: "unchanged", status: booking.status };
+    if (legal === "illegal") {
+      deps.log.warn("payments.illegal_request_transition", { bookingId: booking.id, requestId: request.id, from: request.status, to: mapping.status, source: ctx.source });
+      return { result: "ignored_transition", status: booking.status, detail: `request:${request.status}->${mapping.status}` };
+    }
+    columns = { status: mapping.status, payment_status_updated_at: now.toISOString() };
+    if (mapping.status === "paid") columns.paid_at = booking.paid_at ?? now.toISOString();
+  } else {
+    if (request && requestTransition(request.status, mapping.status) === "illegal") {
+      deps.log.warn("payments.illegal_request_transition", { bookingId: booking.id, requestId: request.id, from: request.status, to: mapping.status, source: ctx.source });
+      return { result: "ignored_transition", status: booking.status, detail: `request:${request.status}->${mapping.status}` };
+    }
+    const transition = applyTransition(booking.status, mapping.status, now, booking);
+    if (!transition.ok) {
+      if (transition.reason === "same_status") return { result: "unchanged", status: booking.status };
+      deps.log.warn("payments.illegal_transition", { bookingId: booking.id, from: booking.status, to: mapping.status, source: ctx.source });
+      return { result: "ignored_transition", status: booking.status, detail: `${booking.status}->${mapping.status}` };
+    }
+    columns = { ...(transition.columns as unknown as Record<string, Json>) };
   }
 
-  // A verified SUCCESS for the wrong amount or currency is still not a payment
-  // of THIS booking: keep the status, keep the evidence, tell the owner.
+  // A verified SUCCESS for the wrong amount, currency or reference is still
+  // not a payment of THIS stage: keep the status, keep the evidence, tell the owner.
   if (mapping.status === "paid") {
-    const mismatch = amountMismatch(booking, mapping);
+    const reference = request && mapping.externalIdentifier && mapping.externalIdentifier !== booking.id ? `reference ${mapping.externalIdentifier} expected ${booking.id}` : null;
+    const mismatch = reference ?? amountMismatch(booking, mapping, request);
     if (mismatch) {
-      await recordAmountMismatch(booking, mapping, mismatch, ctx, deps);
+      await recordAmountMismatch(booking, mapping, mismatch, ctx, deps, request);
       return { result: "amount_mismatch", status: booking.status, detail: mismatch };
     }
   }
 
   // Signature validity is not payment: only Transaction.Status SUCCESS reaches
   // "paid" (mapWebhookEvent), and only then is fulfilment / confirmation planned.
-  const columns: Record<string, Json> = { ...(transition.columns as unknown as Record<string, Json>) };
   let delivery: Json | null = null;
   if (mapping.status === "paid") {
     const plan = fulfillmentPlan(booking);
@@ -303,11 +347,13 @@ export async function applyStatusToBooking(booking: PhotoBookingRow, mapping: Ex
     const relink = booking.provider_invoice_id && booking.provider_invoice_id !== mapping.invoiceId ? { provider_invoice_id: mapping.invoiceId, superseded_invoices: supersededInvoices(metadata, booking.provider_invoice_id) } : {};
     columns.metadata = { ...metadata, ...plan.metadata, pending_athlete_link: true, ...(relink.superseded_invoices ? { superseded_invoices: relink.superseded_invoices as Json } : {}) } as Json;
     if (relink.provider_invoice_id) columns.provider_invoice_id = relink.provider_invoice_id;
-    const amount = `${Number(mapping.amount ?? booking.amount_qr).toFixed(2)} ${mapping.currency ?? booking.currency}`;
+    const expectedQr = request ? Number(request.amount_qr) : booking.amount_qr;
+    const amount = `${Number(mapping.amount ?? expectedQr).toFixed(2)} ${mapping.currency ?? (request?.currency ?? booking.currency)}`;
+    const stageNote = request ? ` · ${stageWords(booking, request.stage)}` : "";
     delivery = {
-      alert_key: `payment:${booking.id}:paid`,
+      alert_key: request ? `payment:${booking.id}:paid:${request.stage}` : `payment:${booking.id}:paid`,
       kind: "PAYMENT_CONFIRMED",
-      payload: { text: `<b>Payment confirmed — ${escapeHtml(booking.customer_name)}</b>\n${escapeHtml(amount)} · ${escapeHtml(booking.package_name)}${booking.athlete_name ? ` · ${escapeHtml(booking.athlete_name)}` : ""}\n${escapeHtml(plan.ownerText)}`, category: "orders" },
+      payload: { text: `<b>Payment confirmed — ${escapeHtml(booking.customer_name)}</b>\n${escapeHtml(amount)}${escapeHtml(stageNote)} · ${escapeHtml(booking.package_name)}${booking.athlete_name ? ` · ${escapeHtml(booking.athlete_name)}` : ""}\n${escapeHtml(plan.ownerText)}`, category: "orders" },
     } as Json;
   }
 
@@ -320,9 +366,9 @@ export async function applyStatusToBooking(booking: PhotoBookingRow, mapping: Ex
       provider_invoice_id: mapping.invoiceId,
       provider_payment_id: mapping.paymentId,
       status: mapping.status,
-      amount: mapping.amount ?? booking.amount_qr,
-      currency: mapping.currency ?? booking.currency,
-      raw: { source: ctx.source, transaction: mapping.transaction, recorded_at: now.toISOString() },
+      amount: mapping.amount ?? (request ? Number(request.amount_qr) : booking.amount_qr),
+      currency: mapping.currency ?? (request?.currency ?? booking.currency),
+      raw: { source: ctx.source, transaction: mapping.transaction, recorded_at: now.toISOString(), request_id: request?.id ?? null, stage: request?.stage ?? null },
     } as Json,
     p_event_row_id: ctx.eventRowId ?? null,
     p_processing_result: "processed",
@@ -334,7 +380,12 @@ export async function applyStatusToBooking(booking: PhotoBookingRow, mapping: Ex
   }
   const out = isRecord(data) ? data : {};
   if (out.applied !== true) return { result: "ignored_transition", status: booking.status, detail: out.reason === "booking_not_found" ? "booking_not_found" : "concurrent_update" };
-  if (mapping.status === "paid") await afterProviderPaid(booking, mapping, now, deps);
+  if (mapping.status === "paid") await afterProviderPaid(booking, mapping, now, deps, request);
+  else if (request && (mapping.status === "failed" || mapping.status === "cancelled")) {
+    const tx = isRecord(mapping.transaction) ? mapping.transaction : {};
+    const err = isRecord(tx.Error) ? tx.Error : {};
+    await applyProviderResultToRequest(deps.supabase, { request, status: mapping.status, invoiceId: mapping.invoiceId, providerPaymentId: mapping.paymentId, errorCode: text(err.Code), errorMessage: text(err.Message), now });
+  }
   return { result: "processed", status: mapping.status };
 }
 
@@ -350,17 +401,21 @@ export function supersededInvoices(metadata: Record<string, unknown>, invoiceId:
  * the provider status is untouched) and alerts the owner once per event.
  * Best effort: a failure here never changes the outcome.
  */
-async function recordAmountMismatch(booking: PhotoBookingRow, mapping: Extract<StatusMapping, { kind: "apply" }>, reason: string, ctx: ApplyContext, deps: WebhookDeps): Promise<void> {
+async function recordAmountMismatch(booking: PhotoBookingRow, mapping: Extract<StatusMapping, { kind: "apply" }>, reason: string, ctx: ApplyContext, deps: WebhookDeps, request: PhotoBookingPaymentRequestRow | null = null): Promise<void> {
   const now = deps.now();
   const eventKey = ctx.eventId ?? mapping.paymentId ?? mapping.invoiceId;
-  deps.log.warn("payments.amount_mismatch", { bookingId: booking.id, invoiceId: mapping.invoiceId, reason, source: ctx.source });
+  const expected = request ? Number(request.amount_qr) : expectedChargeQr(booking, mapping.invoiceId);
+  const expectedCurrency = request ? request.currency : booking.currency;
+  deps.log.warn("payments.amount_mismatch", { bookingId: booking.id, requestId: request?.id ?? null, invoiceId: mapping.invoiceId, reason, source: ctx.source });
   try {
     const metadata = isRecord(booking.metadata) ? booking.metadata : {};
-    const { error } = await deps.supabase
-      .from("photo_bookings")
-      .update({ metadata: { ...metadata, payment_mismatch: { invoice_id: mapping.invoiceId, payment_id: mapping.paymentId, amount: mapping.amount, currency: mapping.currency, expected: expectedChargeQr(booking, mapping.invoiceId), reason, source: ctx.source, at: now.toISOString() } } as Json })
-      .eq("id", booking.id);
+    const evidence = { invoice_id: mapping.invoiceId, payment_id: mapping.paymentId, amount: mapping.amount, currency: mapping.currency, expected, reason, source: ctx.source, at: now.toISOString(), request_id: request?.id ?? null, stage: request?.stage ?? null };
+    const { error } = await deps.supabase.from("photo_bookings").update({ metadata: { ...metadata, payment_mismatch: evidence } as Json }).eq("id", booking.id);
     if (error) deps.log.warn("payments.mismatch_record_failed", { bookingId: booking.id, error: error.message });
+    if (request) {
+      const rm = request.metadata && typeof request.metadata === "object" && !Array.isArray(request.metadata) ? (request.metadata as Record<string, unknown>) : {};
+      await deps.supabase.from("photo_booking_payment_requests").update({ error_code: "mismatch", error_message: reason.slice(0, 300), metadata: { ...rm, payment_mismatch: evidence } as Json }).eq("id", request.id);
+    }
   } catch (err) {
     deps.log.warn("payments.mismatch_record_failed", { bookingId: booking.id, error: err instanceof Error ? err.message : "unknown" });
   }
@@ -371,8 +426,8 @@ async function recordAmountMismatch(booking: PhotoBookingRow, mapping: Extract<S
       alertKey: `payment:${booking.id}:mismatch:${eventKey}`,
       title: `Payment amount mismatch: ${booking.customer_name}`,
       lines: [
-        `${booking.public_ref ?? booking.id.slice(0, 8)} · ${booking.package_name}`,
-        `MyFatoorah reports ${Number(mapping.amount).toFixed(2)} ${mapping.currency ?? ""}; the booking expects ${expectedChargeQr(booking, mapping.invoiceId).toFixed(2)} ${booking.currency}.`,
+        `${booking.public_ref ?? booking.id.slice(0, 8)} · ${booking.package_name}${request ? ` · ${stageWords(booking, request.stage)}` : ""}`,
+        `MyFatoorah reports ${Number(mapping.amount).toFixed(2)} ${mapping.currency ?? ""}; ${request ? "the payment request" : "the booking"} expects ${expected.toFixed(2)} ${expectedCurrency}.`,
         `Invoice ${mapping.invoiceId}. The booking was NOT marked paid. Check the MyFatoorah portal and record the payment by hand if it is genuine.`,
       ],
       url: `${portalBase()}/bookings/${booking.id}`,
@@ -383,30 +438,76 @@ async function recordAmountMismatch(booking: PhotoBookingRow, mapping: Extract<S
   }
 }
 
-/** Lifecycle stages a verified payment confirms. Later stages (confirmed, in progress…) are left alone. */
-const PRE_CONFIRMATION_STATUSES = ["inquiry", "quoted", "awaiting_contract", "awaiting_payment"] as const;
+/**
+ * Which stage a verified payment settles when no request row exists (a
+ * legacy link, or a hosted invoice created before stage requests): the
+ * pending deposit first, and the balance too when the amount covers the
+ * whole booking.
+ */
+function legacyStagesFor(booking: PhotoBookingRow, amount: number | null): PaymentStage[] {
+  const out: PaymentStage[] = [];
+  if (booking.deposit_state === "pending") out.push("deposit");
+  const paid = amount ?? Number(booking.amount_qr);
+  const coversAll = paid + AMOUNT_TOLERANCE_QR >= Number(booking.amount_qr);
+  if (booking.balance_state !== "paid" && booking.balance_state !== "waived" && Number(booking.balance_qr) > 0 && (coversAll || booking.deposit_state !== "pending")) out.push("balance");
+  return out;
+}
 
 /**
- * Studio bookkeeping after a verified "paid" transition — all best effort,
- * so a failure here never fails the webhook (the payment state itself was
- * committed atomically above): the lifecycle moves to Confirmed, the payment
- * is mirrored into photo_payment_records (kind 'provider'), and the client's
- * "payment received" + "booking confirmed" e-mails are queued. It never
- * creates or links a tracked athlete.
+ * Studio bookkeeping after a verified "paid" transition. All best effort,
+ * so a failure here never fails the webhook (the provider status itself was
+ * committed atomically above):
+ *   - the stage request becomes paid and the booking's stage columns follow
+ *     (deposit_state / balance_state, never the other stage);
+ *   - the lifecycle is recomputed through the confirmation gates: a deposit
+ *     confirms the booking only when the agreement gate is clear too; a
+ *     balance on a delivered booking completes it;
+ *   - the payment is mirrored into photo_payment_records (kind 'provider');
+ *   - the client's "payment received" (+ "booking confirmed") e-mails and the
+ *     owner's Telegram notice are queued.
+ * It never creates or links a tracked athlete.
  */
-async function afterProviderPaid(booking: PhotoBookingRow, mapping: Extract<StatusMapping, { kind: "apply" }>, now: Date, deps: WebhookDeps): Promise<void> {
+async function afterProviderPaid(booking: PhotoBookingRow, mapping: Extract<StatusMapping, { kind: "apply" }>, now: Date, deps: WebhookDeps, request: PhotoBookingPaymentRequestRow | null): Promise<void> {
   const nowIso = now.toISOString();
+  const amountQr = Number(mapping.amount ?? (request ? request.amount_qr : booking.amount_qr));
+  const stages: PaymentStage[] = request ? [request.stage] : legacyStagesFor(booking, mapping.amount);
+  const audit = (action: string, data: Record<string, Json | undefined>) => writeAudit(deps.supabase, { ownerId: booking.owner_id, actorKind: "system", entity: "booking", entityId: booking.id, action, data }).catch(() => ({ ok: false }));
+
+  if (request) {
+    try {
+      await applyProviderResultToRequest(deps.supabase, { request, status: "paid", invoiceId: mapping.invoiceId, providerPaymentId: mapping.paymentId, now });
+    } catch (err) {
+      deps.log.warn("payments.request_paid_update_failed", { bookingId: booking.id, requestId: request.id, error: err instanceof Error ? err.message : "unknown" });
+    }
+  }
+
   let confirmedNow = false;
+  let completedNow = false;
+  let current: PhotoBookingRow = booking;
   try {
-    if ((PRE_CONFIRMATION_STATUSES as readonly string[]).includes(booking.booking_status)) {
-      const cols: Partial<PhotoBookingRow> = { booking_status: "confirmed" };
-      if (!booking.confirmed_at) cols.confirmed_at = nowIso;
-      const { data, error } = await deps.supabase.from("photo_bookings").update(cols).eq("id", booking.id).in("booking_status", [...PRE_CONFIRMATION_STATUSES]).select("id");
-      if (error) deps.log.warn("payments.lifecycle_confirm_failed", { bookingId: booking.id, error: error.message });
-      else confirmedNow = (data ?? []).length > 0;
+    if (stages.includes("deposit")) {
+      const { data } = await deps.supabase.from("photo_bookings").update({ deposit_state: "paid", deposit_paid_at: nowIso }).eq("id", booking.id).eq("deposit_state", "pending").select("id");
+      if ((data ?? []).length) await audit("deposit.paid", { amount_qr: amountQr, currency: mapping.currency ?? booking.currency, invoice_id: mapping.invoiceId, payment_id: mapping.paymentId, request_id: request?.id ?? null, source: "provider" });
+    }
+    if (stages.includes("balance")) {
+      const { data } = await deps.supabase.from("photo_bookings").update({ balance_state: "paid", balance_paid_at: nowIso }).eq("id", booking.id).in("balance_state", ["due", "not_due"]).select("id");
+      if ((data ?? []).length) await audit("balance.paid", { amount_qr: amountQr, currency: mapping.currency ?? booking.currency, invoice_id: mapping.invoiceId, payment_id: mapping.paymentId, request_id: request?.id ?? null, source: "provider" });
+    }
+    const gates = await recomputeBookingGates(deps.supabase, booking.id, now);
+    if (gates.moved && gates.to) await audit("booking.status", { from: booking.booking_status, to: gates.to, reason: stages.includes("deposit") ? "deposit paid" : "payment received" });
+    confirmedNow = gates.moved && gates.confirmed;
+    const { data: fresh } = await deps.supabase.from("photo_bookings").select("*").eq("id", booking.id).maybeSingle();
+    if (fresh) current = fresh;
+    if (isCompletionReady(current)) {
+      const { data } = await deps.supabase.from("photo_bookings").update({ booking_status: "completed", completed_at: current.completed_at ?? nowIso }).eq("id", booking.id).eq("booking_status", "delivered").select("id");
+      if ((data ?? []).length) {
+        completedNow = true;
+        current = { ...current, booking_status: "completed", completed_at: current.completed_at ?? nowIso };
+        await audit("booking.completed", { reason: "final balance paid" });
+      }
     }
   } catch (err) {
-    deps.log.warn("payments.lifecycle_confirm_failed", { bookingId: booking.id, error: err instanceof Error ? err.message : "unknown" });
+    deps.log.warn("payments.lifecycle_update_failed", { bookingId: booking.id, error: err instanceof Error ? err.message : "unknown" });
   }
 
   try {
@@ -417,11 +518,12 @@ async function afterProviderPaid(booking: PhotoBookingRow, mapping: Extract<Stat
         booking_id: booking.id,
         kind: "provider",
         method: "myfatoorah",
-        amount_qr: Number(mapping.amount ?? booking.amount_qr),
-        currency: mapping.currency ?? booking.currency,
+        amount_qr: amountQr,
+        currency: mapping.currency ?? (request?.currency ?? booking.currency),
         paid_at: nowIso,
         provider: MYFATOORAH_PROVIDER,
         provider_payment_id: mapping.paymentId,
+        note: request ? stageWords(booking, request.stage) : null,
       });
       if (error && error.code !== PG_UNIQUE_VIOLATION) deps.log.warn("payments.record_insert_failed", { bookingId: booking.id, error: error.message });
     }
@@ -429,18 +531,35 @@ async function afterProviderPaid(booking: PhotoBookingRow, mapping: Extract<Stat
     deps.log.warn("payments.record_insert_failed", { bookingId: booking.id, error: err instanceof Error ? err.message : "unknown" });
   }
 
+  if (request) {
+    try {
+      await enqueueOwnerTelegram(deps.supabase, {
+        ownerId: booking.owner_id,
+        kind: "BOOKING_PAID",
+        alertKey: `booking:${booking.id}:paid:${request.stage}:${request.id}`,
+        title: `${request.stage === "deposit" ? "Deposit paid" : "Final balance paid"}: ${booking.customer_name}`,
+        lines: [`${booking.public_ref ?? booking.id.slice(0, 8)} · ${booking.package_name}`, `${formatMoney(amountQr, mapping.currency ?? request.currency)} ${stageWords(booking, request.stage)} verified by MyFatoorah`, confirmedNow ? "Booking confirmed." : completedNow ? "Booking completed." : `Booking: ${BOOKING_STATUS_LABEL[current.booking_status]}`],
+        url: `${portalBase()}/bookings/${booking.id}`,
+        now,
+      });
+    } catch (err) {
+      deps.log.warn("payments.owner_notice_failed", { bookingId: booking.id, error: err instanceof Error ? err.message : "unknown" });
+    }
+  }
+
   if (!booking.customer_email) return;
   try {
     let businessName = "Blue Belt Media";
     const { data: studio } = await deps.supabase.from("photo_studio").select("business_name").eq("owner_id", booking.owner_id).maybeSingle();
     if (studio?.business_name) businessName = studio.business_name;
-    const paidBooking: PhotoBookingRow = { ...booking, status: "paid", booking_status: confirmedNow ? "confirmed" : booking.booking_status };
-    const options = { businessName, portalUrl: `${portalBase()}/client/bookings/${booking.id}`, payment: { amountQr: Number(mapping.amount ?? booking.amount_qr), methodLabel: "MyFatoorah", dueQr: 0 } };
+    const paidBooking: PhotoBookingRow = { ...current, status: "paid" };
+    const stillDue = Math.max(0, Math.round((Number(current.amount_qr) - (current.deposit_state === "paid" || current.deposit_state === "waived" ? Number(current.deposit_qr) : 0) - (current.balance_state === "paid" || current.balance_state === "waived" ? Number(current.balance_qr) : 0)) * 100) / 100);
+    const options = { businessName, portalUrl: `${portalBase()}/client/bookings/${booking.id}`, payment: { amountQr, methodLabel: "card", dueQr: request ? stillDue : 0, stage: request?.stage ?? null } };
     const kinds: BookingEmailKind[] = confirmedNow ? ["PAYMENT_RECEIVED", "BOOKING_CONFIRMED"] : ["PAYMENT_RECEIVED"];
     for (const kind of kinds) {
       const draft = bookingEmailDraft(kind, paidBooking, options);
       if (!draft) continue;
-      await enqueueClientEmail(deps.supabase, { ownerId: booking.owner_id, kind, alertKey: bookingEmailAlertKey(kind, booking.id), draft, personId: booking.client_id, bookingId: booking.id, now });
+      await enqueueClientEmail(deps.supabase, { ownerId: booking.owner_id, kind, alertKey: bookingEmailAlertKey(kind, booking.id, kind === "PAYMENT_RECEIVED" && request ? request.stage : null), draft, personId: booking.client_id, bookingId: booking.id, now });
     }
   } catch (err) {
     deps.log.warn("payments.client_email_failed", { bookingId: booking.id, error: err instanceof Error ? err.message : "unknown" });
@@ -481,6 +600,31 @@ async function findBookingForMapping(mapping: Extract<StatusMapping, { kind: "ap
   if (!data) return null;
   const metadata = isRecord(data.metadata) ? data.metadata : {};
   return supersededInvoices(metadata, null).includes(mapping.invoiceId) ? data : null;
+}
+
+export type ResolvedTarget = { booking: PhotoBookingRow; request: PhotoBookingPaymentRequestRow | null };
+
+/**
+ * The stage request and booking an event belongs to. The request row is
+ * found by its provider invoice id (each checkout attempt stores the
+ * invoice on the request); a paid event for an invoice the request
+ * superseded still matches through its metadata. Without a request row the
+ * booking is resolved the legacy way (by invoice, then by CustomerReference).
+ */
+async function resolveMapping(mapping: Extract<StatusMapping, { kind: "apply" }>, deps: WebhookDeps): Promise<ResolvedTarget | null> {
+  const request = await findRequestByInvoice(deps.supabase, mapping.invoiceId);
+  if (request) {
+    const { data: booking } = await deps.supabase.from("photo_bookings").select("*").eq("id", request.booking_id).maybeSingle();
+    return booking ? { booking, request } : null;
+  }
+  const booking = await findBookingForMapping(mapping, deps);
+  if (!booking) return null;
+  let viaSuperseded: PhotoBookingPaymentRequestRow | null = null;
+  if (mapping.status === "paid") {
+    const rows = await listStageRequests(deps.supabase, booking.id);
+    viaSuperseded = rows.find((r) => requestSupersededInvoices(r).includes(mapping.invoiceId)) ?? null;
+  }
+  return { booking, request: viaSuperseded };
 }
 
 // ---------------------------------------------------------------------------
@@ -665,8 +809,8 @@ export async function processWebhook(event: WebhookEvent, deps: WebhookDeps): Pr
   const mapping = mapWebhookEvent(eventName, isRecord(body.Data) ? body.Data : {});
   if (mapping.kind === "ignore") return finish("ignored_event", null, undefined, mapping.reason);
 
-  const booking = await findBookingForMapping(mapping, deps);
-  if (!booking) {
+  const target = await resolveMapping(mapping, deps);
+  if (!target) {
     // Not a standalone booking — the invoice may belong to a Pic-Time order.
     const order = await findOrderByInvoice(mapping.invoiceId, deps);
     if (order) {
@@ -676,8 +820,9 @@ export async function processWebhook(event: WebhookEvent, deps: WebhookDeps): Pr
     deps.log.warn("payments.booking_not_found", { eventId, eventType });
     return finish("booking_not_found", null);
   }
+  const { booking, request } = target;
 
-  const applied = await applyStatusToBooking(booking, mapping, { source: `webhook:${eventId}`, eventRowId: rowId, eventId }, deps);
+  const applied = await applyStatusToBooking(booking, mapping, { source: `webhook:${eventId}`, eventRowId: rowId, eventId }, deps, request);
   // "processed" already marked the delivery row inside the transaction.
   if (applied.result === "processed") return { result: "processed", eventId, eventType, bookingId: booking.id, status: applied.status };
   return finish(applied.result, booking, applied.status, applied.detail);
@@ -724,9 +869,10 @@ export async function replayUnmatchedEvents(deps: WebhookDeps, limit = 50): Prom
     const mapping = mapWebhookEvent(eventNameOf(body), isRecord(body.Data) ? body.Data : {});
     if (mapping.kind === "ignore") continue;
     const source = `replay:${ev.provider_event_id ?? ev.id}`;
-    const booking = await findBookingForMapping(mapping, deps);
-    if (booking) {
-      const out = await applyStatusToBooking(booking, mapping, { source, eventRowId: ev.id, eventId: String(ev.provider_event_id ?? ev.id) }, deps);
+    const target = await resolveMapping(mapping, deps);
+    if (target) {
+      const { booking } = target;
+      const out = await applyStatusToBooking(booking, mapping, { source, eventRowId: ev.id, eventId: String(ev.provider_event_id ?? ev.id) }, deps, target.request);
       if (out.result !== "processed") {
         await deps.supabase.from("photo_payment_events").update({ processing_result: out.detail ? `${out.result}:${out.detail}` : out.result, processed_at: deps.now().toISOString(), booking_id: booking.id, owner_id: booking.owner_id }).eq("id", ev.id);
       } else {
@@ -767,8 +913,20 @@ export async function reconcilePendingBookings(provider: PaymentProvider, deps: 
     .gt("created_at", floor)
     .order("created_at", { ascending: true })
     .limit(opts.limit ?? 25);
+  // Stage requests: a booking whose provider status is already "paid" (the
+  // deposit) can still have a pending balance request with an invoice.
+  const { data: requests } = await deps.supabase
+    .from("photo_booking_payment_requests")
+    .select("booking_id,provider_invoice_id,created_at")
+    .eq("status", "pending")
+    .not("provider_invoice_id", "is", null)
+    .lt("created_at", cutoff)
+    .gt("created_at", floor)
+    .order("created_at", { ascending: true })
+    .limit(opts.limit ?? 25);
+  const ids = [...new Set([...(bookings ?? []).map((b) => b.id), ...(requests ?? []).map((r) => r.booking_id)])].slice(0, opts.limit ?? 25);
   const results: ReconcileResult[] = [];
-  for (const b of bookings ?? []) results.push(await reconcileBooking(b.id, provider, deps));
+  for (const id of ids) results.push(await reconcileBooking(id, provider, deps));
   return { scanned: results.length, changed: results.filter((r) => r.result === "processed").length, results };
 }
 
@@ -802,7 +960,8 @@ export async function reconcileBooking(bookingId: string, provider: PaymentProvi
   if (mapping.kind === "ignore") return { result: "unchanged", bookingId, status: booking.status, detail: mapping.reason };
   if (!isPaymentStatus(mapping.status)) return { result: "error", bookingId, status: booking.status, detail: "bad_status" };
 
-  const applied = await applyStatusToBooking(booking, mapping, { source: "reconcile", eventId: mapping.paymentId ? `reconcile:${mapping.paymentId}` : null }, deps);
-  deps.log.info("payments.reconcile", { bookingId, result: applied.result, from: booking.status, to: applied.status });
+  const request = await findRequestByInvoice(deps.supabase, mapping.invoiceId);
+  const applied = await applyStatusToBooking(booking, mapping, { source: "reconcile", eventId: mapping.paymentId ? `reconcile:${mapping.paymentId}` : null }, deps, request);
+  deps.log.info("payments.reconcile", { bookingId, result: applied.result, from: booking.status, to: applied.status, requestId: request?.id ?? null });
   return { result: applied.result, bookingId, status: applied.status, detail: applied.detail };
 }
