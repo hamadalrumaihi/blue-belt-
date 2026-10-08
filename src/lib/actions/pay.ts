@@ -22,10 +22,10 @@ export type PayRedirectState = { ok: true; redirectUrl: string } | { ok: false; 
 const MESSAGES: Record<PayActionError, string> = {
   not_found: "This payment link is not valid.",
   expired: "This payment link has expired. Ask the studio for a new one.",
-  not_payable: "This booking cannot be paid online right now. The page will show the current state when you reload it.",
+  not_payable: "This payment cannot be taken online right now. The page will show the current state when you reload it.",
   payments_off: "Online payment is being set up. We will send you the link when it is ready.",
-  provider_error: "MyFatoorah did not answer. Please try again in a moment.",
-  conflict: "This booking changed while you were paying. Reload the page and try again.",
+  provider_error: "The payment service did not answer. Please try again in a moment.",
+  conflict: "This payment changed while you were paying. Reload the page and try again.",
   invalid: "Something was missing from the request. Reload the page and try again.",
 };
 
@@ -57,7 +57,7 @@ async function gate(token: unknown): Promise<{ ok: true; deps: PayPageDeps; toke
   };
 }
 
-/** Opens a MyFatoorah card-view session for the booking behind the token. */
+/** Opens a MyFatoorah card-view session for the payment request behind the token. */
 export async function startCardSession(token: string): Promise<PaySessionState> {
   const g = await gate(token);
   if (!g.ok) return g;
@@ -66,7 +66,7 @@ export async function startCardSession(token: string): Promise<PaySessionState> 
   return { ok: true, sessionId: res.sessionId, countryCode: res.countryCode, scriptUrl: res.scriptUrl };
 }
 
-/** Charges the booking's due amount against the card the customer entered; returns the 3-D Secure page to open. */
+/** Charges the payment request's own amount against the card the customer entered; returns the 3-D Secure page to open. */
 export async function executeCardPayment(token: string, sessionId: string): Promise<PayRedirectState> {
   const g = await gate(token);
   if (!g.ok) return g;

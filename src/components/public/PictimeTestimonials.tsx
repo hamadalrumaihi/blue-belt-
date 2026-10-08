@@ -58,7 +58,7 @@ export function PictimeTestimonials({ src = PICTIME_TESTIMONIALS_SRC, fallback }
           <iframe
             id="pictimeIntegration"
             name="pictimeIntegration"
-            title="Client testimonials from Pic-Time"
+            title="Client testimonials from our galleries"
             src={src}
             loading="lazy"
             referrerPolicy="strict-origin-when-cross-origin"
@@ -70,7 +70,7 @@ export function PictimeTestimonials({ src = PICTIME_TESTIMONIALS_SRC, fallback }
           />
         </div>
       )}
-      {state === "loading" && <p className="sr-only">Loading testimonials…</p>}
+      {state === "loading" && <p className="sr-only">Loading testimonials</p>}
     </div>
   );
 }

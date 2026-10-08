@@ -38,7 +38,7 @@ export default async function ServicesPage() {
         <div className="mx-auto max-w-6xl px-4 py-14 lg:px-8 lg:py-20">
           <p className="eyebrow !text-white/60">Services and prices</p>
           <h1 className="mt-3 max-w-2xl text-4xl font-extrabold tracking-tight sm:text-5xl">Photography and video for jiu-jitsu and martial arts in Doha</h1>
-          <p className="mt-4 max-w-xl text-base text-white/75">Prices are in Qatari riyal and confirmed with you before you pay. Team days and unusual requests are quoted individually.</p>
+          <p className="mt-4 max-w-xl text-base text-white/75">Prices are in Qatari riyal and confirmed with you before you sign and pay. Team days and unusual requests are quoted individually.</p>
         </div>
       </section>
 
@@ -93,12 +93,12 @@ export default async function ServicesPage() {
         <section className="rounded-card bg-page p-6 md:p-10" aria-labelledby="good-to-know">
           <h2 id="good-to-know" className="text-xl font-extrabold text-navy">Good to know</h2>
           <ul className="mt-4 grid gap-3 text-sm text-ink md:grid-cols-3">
-            <li className="flex gap-3"><CheckIcon size={18} className="mt-0.5 shrink-0 text-primary" /> No payment is needed to book. After the shoot you pay online through MyFatoorah.</li>
-            <li className="flex gap-3"><CheckIcon size={18} className="mt-0.5 shrink-0 text-primary" /> Photos are delivered through Pic-Time: a private link with downloads and print orders in one place.</li>
+            <li className="flex gap-3"><CheckIcon size={18} className="mt-0.5 shrink-0 text-primary" /> Payment is completed securely online. A 50% deposit is paid before the booking is confirmed. The remaining 50% is due after your gallery is delivered.</li>
+            <li className="flex gap-3"><CheckIcon size={18} className="mt-0.5 shrink-0 text-primary" /> Your edited photos are delivered in your private gallery: one link to view, download and buy.</li>
             <li className="flex gap-3"><CheckIcon size={18} className="mt-0.5 shrink-0 text-primary" /> Tournament bookings are matched to your bracket, so we are mat-side when your name is called.</li>
           </ul>
           <p className="mt-6 text-sm text-ink">
-            <span className="font-bold">After the shoot:</span> your edited photos are ready to view, download and buy on Pic-Time.{" "}
+            <span className="font-bold">After the shoot:</span> your edited photos are ready to view, download and buy in your private gallery.{" "}
             <a href={galleryUrl} target="_blank" rel="noopener noreferrer" data-umami-event="gallery-click" className="inline-flex items-center gap-1 font-semibold text-primary">
               View and buy photos <ExternalIcon size={14} />
               <span className="sr-only">(opens in a new tab)</span>

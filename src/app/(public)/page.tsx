@@ -22,9 +22,9 @@ function priceLine(services: PhotoServiceRow[], type: BookingType): string {
 
 const STEPS = [
   { icon: SendIcon, title: "Send the request", body: "Pick the coverage you need and tell us about the day. It takes about two minutes." },
-  { icon: CheckIcon, title: "We confirm", body: "You get a reference straight away. We check the schedule and confirm the price. No payment is needed to book. After the shoot you pay online through MyFatoorah." },
+  { icon: CheckIcon, title: "We confirm", body: "We check availability and confirm the price. Complete your agreement and secure the booking with online payment." },
   { icon: CameraIcon, title: "Shoot day", body: "At a tournament we follow your bracket so no match is missed. At a session we work to the plan you agreed with us." },
-  { icon: ImageIcon, title: "Your photos in Pic-Time", body: "Edited photos and video go into a private online gallery. You can share, download and order prints from there." },
+  { icon: ImageIcon, title: "Your private gallery", body: "Edited photos and video are delivered in a private online gallery. You can view, share and download them there." },
 ];
 
 export default async function HomePage() {
@@ -70,11 +70,11 @@ export default async function HomePage() {
               <a href={galleryUrl} target="_blank" rel="noopener noreferrer" data-umami-event="gallery-click" className="btn min-h-12 border border-white/25 px-6 text-base text-white hover:bg-white/10">
                 View and buy photos
                 <ExternalIcon size={16} />
-                <span className="sr-only">(opens Pic-Time in a new tab)</span>
+                <span className="sr-only">(opens your gallery in a new tab)</span>
               </a>
             </div>
             <ul className="mt-8 flex flex-wrap gap-x-6 gap-y-2 text-sm text-white/60">
-              <li className="inline-flex items-center gap-2"><CheckIcon size={16} className="text-bright" /> No payment is needed to book</li>
+              <li className="inline-flex items-center gap-2"><CheckIcon size={16} className="text-bright" /> Secure online payment</li>
               <li className="inline-flex items-center gap-2"><CheckIcon size={16} className="text-bright" /> <Link href="/services" className="underline-offset-2 hover:underline">Services and prices in QAR</Link></li>
             </ul>
           </div>
@@ -152,7 +152,7 @@ export default async function HomePage() {
             })}
           </ol>
           <p className="mt-8 text-sm text-muted">
-            Already shot with us? <a href={galleryUrl} target="_blank" rel="noopener noreferrer" data-umami-event="gallery-click" className="font-semibold text-primary">View and buy your photos on Pic-Time<span className="sr-only"> (opens in a new tab)</span></a>. Questions first? <Link href="/contact" className="font-semibold text-primary">Contact us</Link>.
+            Already shot with us? <a href={galleryUrl} target="_blank" rel="noopener noreferrer" data-umami-event="gallery-click" className="font-semibold text-primary">View and buy your photos<span className="sr-only"> (opens in a new tab)</span></a>. Questions first? <Link href="/contact" className="font-semibold text-primary">Contact us</Link>.
           </p>
         </div>
       </section>
@@ -176,7 +176,7 @@ export default async function HomePage() {
         ) : (
           <div className="rounded-card border border-dashed border-line p-8 text-center">
             <p className="text-base font-semibold text-ink">Client words are coming.</p>
-            <p className="mx-auto mt-2 max-w-md text-sm text-muted">We only publish what athletes and coaches actually said. Until then, see recent work on Instagram and in the Pic-Time galleries.</p>
+            <p className="mx-auto mt-2 max-w-md text-sm text-muted">We only publish what athletes and coaches actually said. Until then, see recent work on Instagram and in our galleries.</p>
             {studio?.instagram && (
               <a href={`https://instagram.com/${studio.instagram.replace(/^@/, "")}`} target="_blank" rel="noopener noreferrer" data-umami-event="contact-click" className="btn-secondary mt-5">
                 See recent work on Instagram
@@ -193,7 +193,7 @@ export default async function HomePage() {
           <div>
             <p className="eyebrow !text-white/60"><CalendarIcon size={14} className="mr-1 inline" /> Competing soon?</p>
             <h2 className="mt-2 text-2xl font-extrabold tracking-tight sm:text-3xl">Book your tournament photographer before the bracket is out.</h2>
-            <p className="mt-2 max-w-lg text-sm text-white/70">Send the request now. We confirm the date and the price with you. No payment is needed to book.</p>
+            <p className="mt-2 max-w-lg text-sm text-white/70">Send the request now. We confirm the date and the price with you, then you secure the booking with a 50% deposit paid online.</p>
           </div>
           <Link href={primaryHref} data-umami-event={primaryEvent} className="btn-primary min-h-12 shrink-0 px-6 text-base shadow-hero">
             {primaryLabel}

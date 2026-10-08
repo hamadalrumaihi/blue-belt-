@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { writeAudit } from "@/lib/audit";
-import { bookingTransitionColumns, canTransitionBooking } from "@/lib/bookings/state";
+import { deliveryColumns, formatQr } from "@/lib/bookings/state";
 import { galleryHostsOf, parseGalleryForm } from "@/lib/galleries/form";
 import { canTransitionGallery, isGalleryStatus } from "@/lib/galleries/state";
 import { enqueueClientEmail } from "@/lib/notifications/email/outbox";
@@ -20,14 +20,22 @@ import type { ActionState } from "./types";
 /**
  * Gallery lifecycle for the owner. Everything runs on the user client (RLS:
  * owner policies on photo_galleries / photo_bookings / photo_people), with
- * owner_id pinned explicitly on every write. A client is e-mailed only from
- * markGalleryReady with notifyClient=true — never from create/update, never
- * from the Pic-Time webhook.
+ * owner_id pinned explicitly on every write.
+ *
+ * Round 3 rules:
+ *   - saving a gallery link never sends anything to the client and never
+ *     makes the final balance due (audit gallery.url_added);
+ *   - "Deliver gallery" (deliverGallery) is the ONLY action that marks the
+ *     booking delivered and makes the remaining 50% due; the client e-mail
+ *     is an opt-in tick, OFF by default, and the final payment link is never
+ *     created or sent automatically;
+ *   - "Mark ready" (markGalleryReady) tells the client the gallery is up
+ *     (opt-in) but leaves the booking and the balance alone.
  */
-export type GalleryActionResult = { ok: true; status: GalleryStatus; notified?: boolean; notifyReason?: string } | { ok: false; error: string };
+export type GalleryActionResult = { ok: true; status: GalleryStatus; notified?: boolean; notifyReason?: string; balanceDue?: boolean } | { ok: false; error: string };
 
-const BOOKING_COLS = "id,owner_id,client_id,customer_name,customer_email,athlete_name,public_ref,booking_status,event_id,quoted_at,confirmed_at,delivered_at,completed_at,cancelled_at";
-type BookingLite = Pick<PhotoBookingRow, "id" | "owner_id" | "client_id" | "customer_name" | "customer_email" | "athlete_name" | "public_ref" | "booking_status" | "event_id" | "quoted_at" | "confirmed_at" | "delivered_at" | "completed_at" | "cancelled_at">;
+const BOOKING_COLS = "id,owner_id,client_id,customer_name,customer_email,athlete_name,public_ref,booking_status,event_id,quoted_at,confirmed_at,delivered_at,completed_at,cancelled_at,gallery_delivered_at,balance_state,balance_qr,balance_due_at,currency";
+type BookingLite = Pick<PhotoBookingRow, "id" | "owner_id" | "client_id" | "customer_name" | "customer_email" | "athlete_name" | "public_ref" | "booking_status" | "event_id" | "quoted_at" | "confirmed_at" | "delivered_at" | "completed_at" | "cancelled_at" | "gallery_delivered_at" | "balance_state" | "balance_qr" | "balance_due_at" | "currency">;
 
 async function currentUser() {
   const supabase = await createClient();
@@ -60,8 +68,13 @@ function revalidateGalleryPaths(galleryId: string | null, bookingIds: Array<stri
   revalidatePath("/galleries");
   revalidatePath("/studio");
   if (galleryId) revalidatePath(`/galleries/${galleryId}`);
-  for (const b of bookingIds) if (b) revalidatePath(`/bookings/${b}`);
+  for (const b of bookingIds) {
+    if (!b) continue;
+    revalidatePath(`/bookings/${b}`);
+    revalidatePath(`/client/bookings/${b}`);
+  }
   revalidatePath("/bookings");
+  revalidatePath("/client");
 }
 
 export async function createGallery(_prev: ActionState, fd: FormData): Promise<ActionState> {
@@ -97,12 +110,14 @@ export async function createGallery(_prev: ActionState, fd: FormData): Promise<A
   if (booking) await supabase.from("photo_bookings").update({ gallery_id: data.id }).eq("id", booking.id).eq("owner_id", user.id);
   await writeAudit(supabase, { ownerId: user.id, actorId: user.id, entity: "gallery", entityId: data.id, action: "gallery.created", data: { status, bookingId: booking?.id ?? null, hasUrl: Boolean(values.pictime_url) } });
   if (values.pictime_url) {
+    await writeAudit(supabase, { ownerId: user.id, actorId: user.id, entity: "booking", entityId: booking?.id ?? null, action: "gallery.url_added", data: { gallery_id: data.id, host: hostOf(values.pictime_url) } });
+    // Owner-only notice; the client is never messaged by saving a link.
     await enqueueOwnerTelegram(supabase, {
       ownerId: user.id,
       kind: "GALLERY_LINKED",
       alertKey: `gallery:${data.id}:linked`,
-      title: `Gallery linked — ${values.name}`,
-      lines: [booking ? `Booking ${booking.public_ref ?? ""} · ${booking.athlete_name}`.trim() : null, "Mark it ready when the photos are in to tell the client."],
+      title: `Gallery linked: ${values.name}`,
+      lines: [booking ? `Booking ${booking.public_ref ?? ""} · ${booking.athlete_name}`.trim() : null, "Deliver the gallery from the booking page when it is ready; that makes the final balance due."],
       url: `${siteUrl()}/galleries/${data.id}`,
     });
   }
@@ -122,7 +137,7 @@ export async function updateGallery(id: string, _prev: ActionState, fd: FormData
   if (values.booking_id && !booking) return { fieldErrors: { booking_id: "Booking not found or you do not have access to it." } };
 
   // A ready/delivered gallery must keep a link; otherwise a freshly linked pending gallery becomes "created".
-  if ((gallery.status === "ready" || gallery.status === "delivered") && !values.pictime_url) return { fieldErrors: { pictime_url: "A ready gallery needs its Pic-Time link. Step it back to “Created” first to remove the link." } };
+  if ((gallery.status === "ready" || gallery.status === "delivered") && !values.pictime_url) return { fieldErrors: { pictime_url: "A ready gallery needs its gallery link. Step it back to “Created” first to remove the link." } };
   const linkedNow = Boolean(values.pictime_url) && !gallery.pictime_url;
   const status: GalleryStatus = gallery.status === "pending" && values.pictime_url ? "created" : gallery.status === "created" && !values.pictime_url ? "pending" : gallery.status;
   const now = new Date().toISOString();
@@ -155,10 +170,20 @@ export async function updateGallery(id: string, _prev: ActionState, fd: FormData
   if (booking) await supabase.from("photo_bookings").update({ gallery_id: id }).eq("id", booking.id).eq("owner_id", user.id);
   await writeAudit(supabase, { ownerId: user.id, actorId: user.id, entity: "gallery", entityId: id, action: "gallery.updated", data: { status, bookingId: booking?.id ?? null, linkedNow } });
   if (linkedNow) {
-    await enqueueOwnerTelegram(supabase, { ownerId: user.id, kind: "GALLERY_LINKED", alertKey: `gallery:${id}:linked`, title: `Gallery linked — ${values.name}`, lines: [booking ? `Booking ${booking.public_ref ?? ""} · ${booking.athlete_name}`.trim() : null], url: `${siteUrl()}/galleries/${id}` });
+    await writeAudit(supabase, { ownerId: user.id, actorId: user.id, entity: "booking", entityId: booking?.id ?? null, action: "gallery.url_added", data: { gallery_id: id, host: hostOf(values.pictime_url) } });
+    await enqueueOwnerTelegram(supabase, { ownerId: user.id, kind: "GALLERY_LINKED", alertKey: `gallery:${id}:linked`, title: `Gallery linked: ${values.name}`, lines: [booking ? `Booking ${booking.public_ref ?? ""} · ${booking.athlete_name}`.trim() : null, "Deliver the gallery from the booking page when it is ready; that makes the final balance due."], url: `${siteUrl()}/galleries/${id}` });
   }
   revalidateGalleryPaths(id, [gallery.booking_id, booking?.id]);
   redirect(`/galleries/${id}`);
+}
+
+function hostOf(url: string | null): string | null {
+  if (!url) return null;
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return null;
+  }
 }
 
 /** Generic step along the gallery lifecycle (no e-mail, no booking change). */
@@ -170,7 +195,7 @@ export async function transitionGallery(id: string, to: GalleryStatus): Promise<
   const gallery = await ownedGallery(supabase, id, user.id);
   if (!gallery) return { ok: false, error: "Gallery not found or you do not have access to it." };
   if (!canTransitionGallery(gallery.status, to)) return { ok: false, error: `A gallery cannot go from “${gallery.status}” to “${to}”.` };
-  if ((to === "ready" || to === "delivered") && !gallery.pictime_url) return { ok: false, error: "Add the Pic-Time link before marking the gallery ready." };
+  if ((to === "ready" || to === "delivered") && !gallery.pictime_url) return { ok: false, error: "Add the gallery link before marking the gallery ready." };
   const now = new Date().toISOString();
   const patch: Partial<PhotoGalleryRow> = { status: to, updated_at: now };
   if (to === "ready" && !gallery.ready_at) patch.ready_at = now;
@@ -194,23 +219,50 @@ async function clientEmailFor(supabase: Client, gallery: PhotoGalleryRow, bookin
   return { email: null, name: null };
 }
 
-/** Moves the linked booking to "delivered" when it is confirmed / in progress; returns true when it moved. */
-async function deliverBooking(supabase: Client, booking: BookingLite | null, ownerId: string, now: Date): Promise<boolean> {
-  if (!booking) return false;
-  if (booking.booking_status !== "confirmed" && booking.booking_status !== "in_progress") return false;
-  if (!canTransitionBooking(booking.booking_status, "delivered")) return false;
-  const cols = bookingTransitionColumns(booking, "delivered", now);
-  const { error, count } = await supabase.from("photo_bookings").update({ ...cols, updated_at: now.toISOString() }, { count: "exact" }).eq("id", booking.id).eq("owner_id", ownerId).eq("booking_status", booking.booking_status);
-  if (error || !count) return false;
-  await writeAudit(supabase, { ownerId, actorId: ownerId, entity: "booking", entityId: booking.id, action: "booking.status", data: { from: booking.booking_status, to: "delivered", via: "gallery" } });
-  return true;
+/**
+ * Queues the "Your private gallery is ready" e-mail (one per gallery, honours
+ * the owner's "Gallery ready" switch). Vendor-free wording; the button opens
+ * the gallery link. Returns what happened in owner words.
+ */
+async function queueGalleryEmail(supabase: Client, gallery: PhotoGalleryRow, booking: BookingLite | null, ownerId: string, now: Date): Promise<{ notified: boolean; reason?: string }> {
+  const to = await clientEmailFor(supabase, gallery, booking, ownerId);
+  if (!to.email || !isValidEmail(to.email)) return { notified: false, reason: "No e-mail address on file for this client, so nothing was sent." };
+  if (!gallery.pictime_url) return { notified: false, reason: "The gallery has no link, so nothing was sent." };
+  const studio = await loadStudio();
+  const businessName = studio?.business_name ?? "Blue Belt Media";
+  const facts: Array<[string, string]> = [["Gallery", gallery.name]];
+  if (booking?.public_ref) facts.push(["Booking reference", booking.public_ref]);
+  if (booking?.athlete_name) facts.push(["Coverage for", booking.athlete_name]);
+  if (gallery.event_id) {
+    const { data: ev } = await supabase.from("photo_events").select("name").eq("id", gallery.event_id).maybeSingle();
+    if (ev?.name) facts.push(["Event", ev.name]);
+  }
+  const balanceDue = booking && booking.balance_state === "due" && Number(booking.balance_qr) > 0;
+  const draft = buildEmail(to.email, {
+    kind: "GALLERY_READY",
+    subject: `Your private gallery is ready${booking?.public_ref ? ` (${booking.public_ref})` : ""}`,
+    greeting: `Hi ${to.name?.split(/\s+/)[0] || "there"},`,
+    paragraphs: [
+      `Your photos from ${businessName} are ready in your private online gallery.`,
+      "Open the gallery with the button below. You can view and buy photos there.",
+      ...(balanceDue ? [`The remaining balance of ${formatQr(booking.balance_qr)} is now due. You will receive a payment link for it.`] : []),
+    ],
+    cta: { label: "View your gallery", url: gallery.pictime_url },
+    facts,
+    businessName,
+  });
+  const res = await enqueueClientEmail(supabase, { ownerId, kind: "GALLERY_READY", alertKey: `email:gallery:${gallery.id}:ready`, draft, personId: gallery.client_id, bookingId: gallery.booking_id, now });
+  if (!res.ok) return { notified: false, reason: `The e-mail could not be queued: ${res.error}` };
+  if (res.queued) return { notified: true };
+  if (res.reason === "duplicate") return { notified: true, reason: "The client was already e-mailed about this gallery; no second message was sent." };
+  if (res.reason === "disabled_by_owner") return { notified: false, reason: "“Gallery ready” e-mails are switched off under Notifications, so the client was not e-mailed." };
+  return { notified: false, reason: "The client's e-mail address is not valid, so nothing was sent." };
 }
 
 /**
  * Marks a gallery ready for the client. With notifyClient the client gets
- * the Pic-Time link by e-mail (one message per gallery, honours the owner's
- * "Gallery ready" switch); once that is queued the gallery and its booking
- * count as delivered. Without it nothing leaves the studio.
+ * the gallery link by e-mail. The booking is NOT delivered and the balance
+ * does NOT become due here: that is the explicit "Deliver gallery" action.
  */
 export async function markGalleryReady(id: string, opts: { notifyClient: boolean }): Promise<GalleryActionResult> {
   if (!isUuid(id)) return { ok: false, error: "Invalid gallery id." };
@@ -219,7 +271,7 @@ export async function markGalleryReady(id: string, opts: { notifyClient: boolean
   if (!user) return { ok: false, error: "You are signed out." };
   const gallery = await ownedGallery(supabase, id, user.id);
   if (!gallery) return { ok: false, error: "Gallery not found or you do not have access to it." };
-  if (!gallery.pictime_url) return { ok: false, error: "Add the Pic-Time link before marking the gallery ready." };
+  if (!gallery.pictime_url) return { ok: false, error: "Add the gallery link before marking the gallery ready." };
   if (gallery.status === "delivered") return { ok: false, error: "This gallery is already delivered." };
   if (gallery.status !== "ready" && !canTransitionGallery(gallery.status, "ready")) return { ok: false, error: `A gallery cannot go from “${gallery.status}” to “ready”.` };
 
@@ -231,82 +283,100 @@ export async function markGalleryReady(id: string, opts: { notifyClient: boolean
     if (!count) return { ok: false, error: "Gallery not found or you do not have access to it." };
   }
   const booking = await ownedBooking(supabase, gallery.booking_id, user.id);
-  const studio = await loadStudio();
-  const businessName = studio?.business_name ?? "Blue Belt Media";
   const galleryUrl = `${siteUrl()}/galleries/${id}`;
 
   await enqueueOwnerTelegram(supabase, {
     ownerId: user.id,
     kind: "GALLERY_READY",
     alertKey: `gallery:${id}:ready`,
-    title: `Gallery ready — ${gallery.name}`,
-    lines: [booking ? `Booking ${booking.public_ref ?? ""} · ${booking.athlete_name}`.trim() : null, notifyClient ? "Client e-mail requested." : "Client not e-mailed."],
+    title: `Gallery ready: ${gallery.name}`,
+    lines: [booking ? `Booking ${booking.public_ref ?? ""} · ${booking.athlete_name}`.trim() : null, notifyClient ? "Client e-mail requested." : "Client not e-mailed.", "Deliver the gallery from the booking page to make the final balance due."],
     url: galleryUrl,
   });
 
   let notified = false;
   let notifyReason: string | undefined;
-  let status: GalleryStatus = "ready";
   if (notifyClient) {
-    const to = await clientEmailFor(supabase, gallery, booking, user.id);
-    if (!to.email || !isValidEmail(to.email)) {
-      notifyReason = "No e-mail address on file for this client, so nothing was sent.";
-    } else {
-      const facts: Array<[string, string]> = [["Gallery", gallery.name]];
-      if (booking?.public_ref) facts.push(["Booking reference", booking.public_ref]);
-      if (booking?.athlete_name) facts.push(["Coverage for", booking.athlete_name]);
-      if (gallery.event_id) {
-        const { data: ev } = await supabase.from("photo_events").select("name").eq("id", gallery.event_id).maybeSingle();
-        if (ev?.name) facts.push(["Event", ev.name]);
-      }
-      const draft = buildEmail(to.email, {
-        kind: "GALLERY_READY",
-        subject: `Your gallery is ready — ${gallery.name}`,
-        greeting: `Hi ${to.name?.split(/\s+/)[0] || "there"},`,
-        paragraphs: [`Your photos from ${businessName} are ready to view on Pic-Time.`, "Open the gallery with the button below. Favourites, downloads and prints are all handled there."],
-        cta: { label: "View your gallery", url: gallery.pictime_url },
-        facts,
-        businessName,
-      });
-      const res = await enqueueClientEmail(supabase, { ownerId: user.id, kind: "GALLERY_READY", alertKey: `email:gallery:${id}:ready`, draft, personId: gallery.client_id, bookingId: gallery.booking_id, now });
-      if (!res.ok) notifyReason = `The e-mail could not be queued: ${res.error}`;
-      else if (res.queued || res.reason === "duplicate") {
-        notified = true;
-        if (res.reason === "duplicate") notifyReason = "The client was already e-mailed about this gallery; no second message was sent.";
-      } else if (res.reason === "disabled_by_owner") notifyReason = "“Gallery ready” e-mails are switched off under Notifications, so the client was not e-mailed.";
-      else notifyReason = "The client's e-mail address is not valid, so nothing was sent.";
-    }
+    const out = await queueGalleryEmail(supabase, gallery, booking, user.id, now);
+    notified = out.notified;
+    notifyReason = out.reason;
     if (notified) {
-      const movedBooking = await deliverBooking(supabase, booking, user.id, now);
-      const { error } = await supabase.from("photo_galleries").update({ status: "delivered", notified_at: gallery.notified_at ?? iso, delivered_at: gallery.delivered_at ?? iso, updated_at: iso }).eq("id", id).eq("owner_id", user.id);
-      if (!error) status = "delivered";
-      await writeAudit(supabase, { ownerId: user.id, actorId: user.id, entity: "gallery", entityId: id, action: "gallery.notified", data: { bookingDelivered: movedBooking } });
+      await supabase.from("photo_galleries").update({ notified_at: gallery.notified_at ?? iso, updated_at: iso }).eq("id", id).eq("owner_id", user.id);
+      await writeAudit(supabase, { ownerId: user.id, actorId: user.id, entity: "gallery", entityId: id, action: "gallery.notified", data: { via: "ready" } });
     }
   }
   await writeAudit(supabase, { ownerId: user.id, actorId: user.id, entity: "gallery", entityId: id, action: "gallery.ready", data: { from: gallery.status, notifyClient, notified } });
   revalidateGalleryPaths(id, [gallery.booking_id]);
-  return { ok: true, status, notified, notifyReason };
+  return { ok: true, status: "ready", notified, notifyReason };
 }
 
-/** Owner marks a gallery delivered by hand (told the client some other way). No e-mail. */
-export async function markGalleryDelivered(id: string): Promise<GalleryActionResult> {
+/**
+ * EXPLICIT owner action "Deliver gallery": the gallery becomes delivered,
+ * the booking becomes delivered (gallery_delivered_at, delivered_at) and the
+ * remaining balance becomes due (only when there is one). The final payment
+ * link is NOT created and NOT sent here. The client e-mail ("Your private
+ * gallery is ready") is sent only when `notifyClient` is ticked (off by
+ * default).
+ */
+export async function deliverGallery(id: string, opts: { notifyClient?: boolean } = {}): Promise<GalleryActionResult> {
   if (!isUuid(id)) return { ok: false, error: "Invalid gallery id." };
+  const notifyClient = opts.notifyClient === true;
   const { supabase, user } = await currentUser();
   if (!user) return { ok: false, error: "You are signed out." };
   const gallery = await ownedGallery(supabase, id, user.id);
   if (!gallery) return { ok: false, error: "Gallery not found or you do not have access to it." };
-  if (!canTransitionGallery(gallery.status, "delivered")) return { ok: false, error: gallery.status === "delivered" ? "This gallery is already delivered." : "Mark the gallery ready first." };
-  if (!gallery.pictime_url) return { ok: false, error: "Add the Pic-Time link before marking the gallery delivered." };
+  if (!gallery.pictime_url) return { ok: false, error: "Add the gallery link before delivering the gallery." };
+  if (gallery.status === "delivered") return { ok: false, error: "This gallery is already delivered." };
+  const booking = await ownedBooking(supabase, gallery.booking_id, user.id);
+  if (booking?.booking_status === "cancelled") return { ok: false, error: "This booking is cancelled." };
+  if (booking && ["inquiry", "quoted", "awaiting_contract", "awaiting_payment"].includes(booking.booking_status)) return { ok: false, error: "Confirm the booking before delivering the gallery." };
+
   const now = new Date();
   const iso = now.toISOString();
-  const { error, count } = await supabase.from("photo_galleries").update({ status: "delivered", delivered_at: gallery.delivered_at ?? iso, updated_at: iso }, { count: "exact" }).eq("id", id).eq("owner_id", user.id);
+  const { error, count } = await supabase.from("photo_galleries").update({ status: "delivered", ready_at: gallery.ready_at ?? iso, delivered_at: gallery.delivered_at ?? iso, updated_at: iso }, { count: "exact" }).eq("id", id).eq("owner_id", user.id);
   if (error) return { ok: false, error: error.message };
   if (!count) return { ok: false, error: "Gallery not found or you do not have access to it." };
-  const booking = await ownedBooking(supabase, gallery.booking_id, user.id);
-  const movedBooking = await deliverBooking(supabase, booking, user.id, now);
-  await writeAudit(supabase, { ownerId: user.id, actorId: user.id, entity: "gallery", entityId: id, action: "gallery.delivered", data: { manual: true, bookingDelivered: movedBooking } });
+
+  let balanceDue = false;
+  let deliveredBooking: BookingLite | null = booking;
+  if (booking) {
+    const { balanceBecameDue, ...cols } = deliveryColumns(booking, now);
+    const { data } = await supabase.from("photo_bookings").update({ ...cols, updated_at: iso }).eq("id", booking.id).eq("owner_id", user.id).select(BOOKING_COLS).maybeSingle();
+    deliveredBooking = (data as BookingLite | null) ?? { ...booking, ...cols };
+    balanceDue = balanceBecameDue;
+    if (cols.booking_status === "delivered") await writeAudit(supabase, { ownerId: user.id, actorId: user.id, entity: "booking", entityId: booking.id, action: "booking.status", data: { from: booking.booking_status, to: "delivered", via: "gallery" } });
+    if (balanceBecameDue) await writeAudit(supabase, { ownerId: user.id, actorId: user.id, entity: "booking", entityId: booking.id, action: "balance.due", data: { balance_qr: Number(booking.balance_qr), currency: booking.currency, gallery_id: id } });
+  }
+  await writeAudit(supabase, { ownerId: user.id, actorId: user.id, entity: "gallery", entityId: id, action: "gallery.delivered", data: { bookingId: booking?.id ?? null, notifyClient, balanceDue } });
+  if (booking) await writeAudit(supabase, { ownerId: user.id, actorId: user.id, entity: "booking", entityId: booking.id, action: "gallery.delivered", data: { gallery_id: id, notifyClient, balanceDue } });
+
+  let notified = false;
+  let notifyReason: string | undefined;
+  if (notifyClient) {
+    const out = await queueGalleryEmail(supabase, gallery, deliveredBooking, user.id, now);
+    notified = out.notified;
+    notifyReason = out.reason;
+    if (notified) {
+      await supabase.from("photo_galleries").update({ notified_at: gallery.notified_at ?? iso, updated_at: iso }).eq("id", id).eq("owner_id", user.id);
+      await writeAudit(supabase, { ownerId: user.id, actorId: user.id, entity: "gallery", entityId: id, action: "gallery.notified", data: { via: "delivered" } });
+    }
+  }
+  await enqueueOwnerTelegram(supabase, {
+    ownerId: user.id,
+    kind: "DELIVERY_SENT",
+    alertKey: `gallery:${id}:delivered`,
+    title: `Gallery delivered: ${gallery.name}`,
+    lines: [booking ? `Booking ${booking.public_ref ?? ""} · ${booking.athlete_name}`.trim() : null, balanceDue && deliveredBooking ? `Final balance due: ${formatQr(deliveredBooking.balance_qr)}. Create the payment link from the booking page.` : "No final balance to collect.", notified ? "Client e-mailed." : "Client not e-mailed."],
+    url: booking ? `${siteUrl()}/bookings/${booking.id}` : `${siteUrl()}/galleries/${id}`,
+    now,
+  });
   revalidateGalleryPaths(id, [gallery.booking_id]);
-  return { ok: true, status: "delivered", notified: false };
+  return { ok: true, status: "delivered", notified, notifyReason, balanceDue };
+}
+
+/** Owner marks a gallery delivered by hand (told the client some other way). Same effect as deliverGallery without the e-mail. */
+export async function markGalleryDelivered(id: string): Promise<GalleryActionResult> {
+  return deliverGallery(id, { notifyClient: false });
 }
 
 export async function deleteGallery(id: string): Promise<{ ok: true } | { ok: false; error: string }> {

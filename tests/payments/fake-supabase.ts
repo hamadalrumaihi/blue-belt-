@@ -27,14 +27,30 @@ function readColumn(row: Row, col: string): unknown {
   return v === undefined ? null : v;
 }
 
-const UNIQUE: Record<string, string[][]> = {
-  photo_payment_events: [["provider", "provider_event_id"]],
-  photo_payment_attempts: [["provider", "provider_payment_id"]],
-  photo_bookings: [["provider", "provider_invoice_id"]],
-  photo_notification_deliveries: [["owner_id", "channel", "alert_key"]],
-  photo_incidents: [["owner_id", "incident_key"]],
-  photo_payment_records: [["provider", "provider_payment_id"]],
+/** Unique indexes from the migrations; `where` models a partial index (rows outside it never clash). */
+type UniqueIndex = { cols: string[]; where?: (row: Row) => boolean };
+const UNIQUE: Record<string, UniqueIndex[]> = {
+  photo_payment_events: [{ cols: ["provider", "provider_event_id"] }],
+  photo_payment_attempts: [{ cols: ["provider", "provider_payment_id"] }],
+  photo_bookings: [{ cols: ["provider", "provider_invoice_id"] }],
+  photo_notification_deliveries: [{ cols: ["owner_id", "channel", "alert_key"] }],
+  photo_incidents: [{ cols: ["owner_id", "incident_key"] }],
+  photo_payment_records: [{ cols: ["provider", "provider_payment_id"] }],
+  photo_booking_payment_requests: [
+    { cols: ["booking_id", "stage"], where: (r) => r.status === "pending" },
+    { cols: ["owner_id", "idempotency_key"] },
+    { cols: ["provider", "provider_invoice_id"] },
+    { cols: ["pay_token_hash"] },
+  ],
 };
+
+function clashes(table: string, rows: Row[], row: Row, self?: Row): boolean {
+  return (UNIQUE[table] ?? []).some((ix) => {
+    if (ix.cols.some((c) => row[c] === null || row[c] === undefined)) return false;
+    if (ix.where && !ix.where(row)) return false;
+    return rows.some((r) => r !== self && (!ix.where || ix.where(r)) && ix.cols.every((c) => r[c] === row[c]));
+  });
+}
 
 export type FakeCall = { table: string; op: Op; payload?: Row; filters: number };
 export type FakeRpcCall = { name: string; args: Record<string, unknown> };
@@ -198,8 +214,7 @@ class FakeQuery {
       const inserted: Row[] = [];
       for (const input of this.upsertRows) {
         const row = { id: this.db.nextId(), ...input } as Row;
-        const clash = (UNIQUE[this.table] ?? []).some((cols) => rows.some((r) => cols.every((c) => r[c] === row[c])));
-        if (!clash) {
+        if (!clashes(this.table, rows, row)) {
           rows.push(row);
           inserted.push(row);
         }
@@ -208,21 +223,23 @@ class FakeQuery {
     }
     if (this.op === "insert") {
       const row = { id: this.db.nextId(), attempts: 1, ...this.payload } as Row;
-      for (const cols of UNIQUE[this.table] ?? []) {
-        if (cols.some((c) => row[c] === null || row[c] === undefined)) continue;
-        const clash = rows.find((r) => cols.every((c) => r[c] === row[c]));
-        if (clash) return { data: null, error: { code: "23505", message: `duplicate key value violates unique constraint (${cols.join(",")})` } };
-      }
+      if (clashes(this.table, rows, row)) return { data: null, error: { code: "23505", message: "duplicate key value violates unique constraint" } };
       rows.push(row);
       return this.shape([row]);
     }
     let hit = rows.filter((r) => this.matches(r));
     if (this.orderBy) {
       const { col, asc } = this.orderBy;
-      hit = [...hit].sort((a, b) => (String(a[col] ?? "") < String(b[col] ?? "") ? -1 : 1) * (asc ? 1 : -1));
+      const cmp = (a: unknown, b: unknown) => (typeof a === "number" && typeof b === "number" ? a - b : String(a ?? "") < String(b ?? "") ? -1 : String(a ?? "") > String(b ?? "") ? 1 : 0);
+      hit = [...hit].sort((a, b) => cmp(a[col], b[col]) * (asc ? 1 : -1));
     }
     if (this.limitN !== null) hit = hit.slice(0, this.limitN);
     if (this.op === "update") {
+      // Postgres checks unique indexes on update too (a second pending request for a stage must fail).
+      for (const r of hit) {
+        const next = { ...r, ...this.payload };
+        if (clashes(this.table, rows, next, r)) return { data: null, error: { code: "23505", message: "duplicate key value violates unique constraint" } };
+      }
       for (const r of hit) Object.assign(r, this.payload);
       return this.returning ? this.shape(hit) : { data: null, error: null };
     }

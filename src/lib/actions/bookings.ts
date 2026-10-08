@@ -6,7 +6,25 @@ import { writeAudit } from "@/lib/audit";
 import { requireOwnedAthlete, requireOwnedEvent } from "@/lib/authz";
 import { bookingEmailAlertKey, bookingEmailDraft, type BookingEmailKind, type BookingEmailOptions } from "@/lib/bookings/emails";
 import { parseBookingForm, parseFinalAmount, parseManualPayment } from "@/lib/bookings/form";
-import { BOOKING_STATUS_LABEL, BOOKING_TYPE_LABEL, bookingTransitionColumns, canTransitionBooking, effectivePayment, formatQr, initialBookingStatus, isBookingStatus, makePublicRef, PAYMENT_METHOD_LABEL, PAYMENT_REQUEST_BLOCKER_LABEL, paymentRequestBlocker } from "@/lib/bookings/state";
+import { confirmationBlockers, recomputeBookingGates } from "@/lib/bookings/gates";
+import { depositColumnsFor, readDepositPolicy } from "@/lib/bookings/policy";
+import {
+  BOOKING_STATUS_LABEL,
+  BOOKING_TYPE_LABEL,
+  bookingTransitionColumns,
+  canTransitionBooking,
+  deliveryColumns,
+  effectivePayment,
+  formatMoney,
+  formatQr,
+  initialBookingStatus,
+  isBookingStatus,
+  isCompletionReady,
+  isPaymentStage,
+  makePublicRef,
+  PAYMENT_METHOD_LABEL,
+  stageWords,
+} from "@/lib/bookings/state";
 import { parseClientForm } from "@/lib/client-form";
 import { createLogger } from "@/lib/log";
 import { enqueueClientEmail } from "@/lib/notifications/email/outbox";
@@ -14,12 +32,12 @@ import { enqueueOwnerTelegram } from "@/lib/notifications/owner";
 import { findOrCreatePerson } from "@/lib/people/match";
 import { isPaymentsEnabled } from "@/lib/payments/config";
 import { MYFATOORAH_PROVIDER } from "@/lib/payments/myfatoorah/client";
-import { createPayToken, isWebsitePayUrl, payPageUrl } from "@/lib/payments/pay-token";
+import { cancelStagePaymentRequest, createStagePaymentRequest, listStageRequests, pendingRequestFor, sendStagePaymentLink, STAGE_REQUEST_BLOCKER_LABEL, stageRequestBlocker, type CreateStageRequestResult } from "@/lib/payments/requests";
 import { rateLimit, RULES } from "@/lib/rate-limit";
 import { DEFAULT_STUDIO, loadStudio, siteUrl } from "@/lib/studio/queries";
 import { requireStudioUser } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
-import type { BookingStatus, Json, PhotoBookingRow } from "@/lib/supabase/database.types";
+import type { BookingStatus, Json, PaymentStage, PhotoBookingRow } from "@/lib/supabase/database.types";
 import { formatDateTime, zoneLabel } from "@/lib/time";
 import { isUuid } from "@/lib/validation";
 
@@ -27,9 +45,12 @@ import { isUuid } from "@/lib/validation";
  * Owner actions for the booking lifecycle. Every write goes through the
  * user client (RLS = the owner's rows only). `photo_bookings.status` is the
  * PROVIDER payment status and is never written here: a manual payment
- * updates the manual summary columns and the lifecycle, the webhook owns
- * the rest. Nothing here creates a tracked athlete except the explicit
- * createAthleteFromBooking / linkBookingToAthlete owner actions.
+ * updates the stage columns and the manual summary, the webhook owns the
+ * rest. Round 3 policy: 50% deposit before confirmation (only after the
+ * agreement is signed), 50% balance after delivery; confirmation goes
+ * through `recomputeBookingGates`, never a shortcut. Nothing here creates a
+ * tracked athlete except the explicit createAthleteFromBooking /
+ * linkBookingToAthlete owner actions.
  */
 export type BookingFormState = { error?: string; fieldErrors?: Record<string, string>; saved?: boolean } | null;
 export type BookingActionResult = { ok: true } | { ok: false; error: string };
@@ -59,6 +80,8 @@ function revalidateBooking(id: string, personId?: string | null) {
   revalidatePath(`/bookings/${id}`);
   revalidatePath("/payments");
   revalidatePath("/studio");
+  revalidatePath("/client");
+  revalidatePath(`/client/bookings/${id}`);
   if (personId) revalidatePath(`/people/${personId}`);
 }
 
@@ -87,6 +110,14 @@ function bookingLabel(b: Pick<PhotoBookingRow, "customer_name" | "public_ref" | 
 function sessionLine(b: Pick<PhotoBookingRow, "session_at" | "location">): string | null {
   if (!b.session_at && !b.location) return null;
   return [b.session_at ? `${formatDateTime(b.session_at)} ${zoneLabel()}` : null, b.location].filter(Boolean).join(" · ");
+}
+
+/** Re-reads the booking and moves it to the stage its gates allow; audits the move. Returns whether it just became confirmed. */
+async function applyGates(supabase: Client, userId: string, booking: PhotoBookingRow, reason: string): Promise<{ confirmedNow: boolean; current: PhotoBookingRow }> {
+  const gates = await recomputeBookingGates(supabase, booking.id, new Date());
+  if (gates.moved && gates.to) await writeAudit(supabase, { ownerId: userId, actorId: userId, entity: "booking", entityId: booking.id, action: "booking.status", data: { from: booking.booking_status, to: gates.to, reason } });
+  const current = (await ownedBooking(supabase, booking.id)) ?? booking;
+  return { confirmedNow: gates.moved && gates.confirmed, current };
 }
 
 // ---------------------------------------------------------------------------
@@ -131,6 +162,7 @@ export async function createBooking(_prev: BookingFormState, formData: FormData)
   const now = new Date();
   const lifecycle = bookingTransitionColumns({ quoted_at: null, confirmed_at: null, delivered_at: null, completed_at: null, cancelled_at: null }, bookingStatus, now);
   const sessionEnd = values.session_at && service?.duration_minutes ? new Date(new Date(values.session_at).getTime() + service.duration_minutes * 60_000).toISOString() : null;
+  const deposit = depositColumnsFor(amountQr, readDepositPolicy());
 
   let booking: PhotoBookingRow | null = null;
   let lastError: string | null = null;
@@ -162,6 +194,9 @@ export async function createBooking(_prev: BookingFormState, formData: FormData)
         notes: values.notes,
         details: values.details as Json,
         public_ref: makePublicRef(),
+        requires_contract: values.requires_contract,
+        contract_state: values.requires_contract ? "required" : "not_required",
+        ...deposit,
         ...lifecycle,
       })
       .select("*")
@@ -175,7 +210,7 @@ export async function createBooking(_prev: BookingFormState, formData: FormData)
   }
   if (!booking) return { error: lastError ?? "Could not allocate a booking reference. Try again." };
 
-  await writeAudit(supabase, { ownerId: user.id, actorId: user.id, entity: "booking", entityId: booking.id, action: "booking.created", data: { booking_type: booking.booking_type, booking_status: booking.booking_status, amount_qr: amountQr, source: "manual" } });
+  await writeAudit(supabase, { ownerId: user.id, actorId: user.id, entity: "booking", entityId: booking.id, action: "booking.created", data: { booking_type: booking.booking_type, booking_status: booking.booking_status, amount_qr: amountQr, deposit_qr: deposit.deposit_qr, balance_qr: deposit.balance_qr, source: "manual" } });
   await sendBookingEmail(supabase, booking, "BOOKING_RECEIVED");
   revalidateBooking(booking.id, person.id);
   redirect(`/bookings/${booking.id}`);
@@ -220,6 +255,9 @@ export async function updateBooking(id: string, _prev: BookingFormState, formDat
 
   const amountQr = values.amount_qr ?? (service && values.service_id !== booking.service_id ? service.price_qr : null) ?? booking.amount_qr;
   const sessionEnd = values.session_at && service?.duration_minutes ? new Date(new Date(values.session_at).getTime() + service.duration_minutes * 60_000).toISOString() : values.session_at ? booking.session_end_at : null;
+  const priceChanged = Math.abs(Number(amountQr) - Number(booking.amount_qr)) > 0.004;
+  const split = priceChanged ? splitForBooking(booking, Number(amountQr)) : { ok: true as const, columns: {} };
+  if (!split.ok) return { fieldErrors: { amount_qr: split.error } };
   const patch: Partial<PhotoBookingRow> = {
     booking_type: values.booking_type,
     event_id: values.event_id,
@@ -239,6 +277,7 @@ export async function updateBooking(id: string, _prev: BookingFormState, formDat
     payment_mode: values.payment_mode,
     notes: values.notes,
     details: values.details as Json,
+    ...split.columns,
   };
   const { data: updated, error } = await supabase.from("photo_bookings").update(patch).eq("id", id).eq("owner_id", user.id).select("*").maybeSingle();
   if (error) return { error: error.message };
@@ -246,6 +285,10 @@ export async function updateBooking(id: string, _prev: BookingFormState, formDat
 
   const changed = (Object.keys(patch) as Array<keyof PhotoBookingRow>).filter((k) => JSON.stringify(booking[k] ?? null) !== JSON.stringify(updated[k] ?? null));
   await writeAudit(supabase, { ownerId: user.id, actorId: user.id, entity: "booking", entityId: id, action: "booking.updated", data: { changed } });
+  if (priceChanged) {
+    await writeAudit(supabase, { ownerId: user.id, actorId: user.id, entity: "booking", entityId: id, action: "booking.price_set", data: { amount_qr: Number(amountQr), previous_qr: Number(booking.amount_qr), deposit_qr: Number(updated.deposit_qr), balance_qr: Number(updated.balance_qr), via: "edit" } });
+    if (booking.booking_status !== "inquiry") await applyGates(supabase, user.id, updated, "price changed");
+  }
   const scheduleChanged = booking.session_at !== updated.session_at || (booking.location ?? null) !== (updated.location ?? null);
   if (scheduleChanged && updated.booking_status === "confirmed") {
     await sendBookingEmail(supabase, updated, "BOOKING_CHANGED", { previous: { session_at: booking.session_at, location: booking.location }, suffix: String(Date.now()) });
@@ -255,8 +298,98 @@ export async function updateBooking(id: string, _prev: BookingFormState, formDat
 }
 
 // ---------------------------------------------------------------------------
-// Lifecycle
+// Price, quote, lifecycle
 // ---------------------------------------------------------------------------
+
+/**
+ * The deposit / balance columns for a new total. Before the deposit is paid
+ * the policy splits the total (50/50 by default). Once the deposit is paid
+ * it is money that already moved: the deposit stays and only the balance
+ * follows the new total (which cannot drop below the paid deposit).
+ */
+function splitForBooking(booking: PhotoBookingRow, amountQr: number): { ok: true; columns: Partial<PhotoBookingRow> } | { ok: false; error: string } {
+  if (booking.deposit_state === "paid") {
+    const deposit = Number(booking.deposit_qr) || 0;
+    if (amountQr + 0.004 < deposit) return { ok: false, error: `The total cannot be below the deposit already paid (${formatQr(deposit)}).` };
+    const balance = Math.round((amountQr - deposit) * 100) / 100;
+    const columns: Partial<PhotoBookingRow> = { balance_qr: balance };
+    if (booking.balance_state === "waived" && balance > 0) columns.balance_state = booking.gallery_delivered_at ? "due" : "not_due";
+    return { ok: true, columns };
+  }
+  if (booking.deposit_state === "waived") {
+    return { ok: true, columns: { balance_qr: Math.round(amountQr * 100) / 100 } };
+  }
+  return { ok: true, columns: depositColumnsFor(amountQr, readDepositPolicy()) };
+}
+
+/**
+ * The owner sets or confirms the total. The 50% deposit and the balance are
+ * computed here from the policy, never typed; after the deposit is paid
+ * only the balance changes. Refused once everything is paid, refunded, or
+ * the booking is closed. Audit: booking.price_set. Nothing is sent.
+ */
+export async function setBookingPrice(id: string, _prev: BookingFormState, formData: FormData): Promise<BookingFormState> {
+  if (!isUuid(id)) return { error: "Invalid booking." };
+  const { supabase, user } = await owner();
+  if (!user) return { error: "You are signed out." };
+  const { fieldErrors, values } = parseFinalAmount(formData);
+  if (Object.keys(fieldErrors).length) return { fieldErrors };
+  const booking = await ownedBooking(supabase, id);
+  if (!booking) return { error: "Booking not found." };
+  if (booking.booking_status === "cancelled") return { error: "This booking is cancelled." };
+  if (booking.booking_status === "completed") return { error: "This booking is completed; the price cannot change." };
+  if (booking.status === "refunded") return { error: "This booking was refunded through MyFatoorah; record a new booking instead." };
+  if (booking.deposit_state === "paid" && (booking.balance_state === "paid" || booking.balance_state === "waived") && Number(booking.balance_qr) > 0) return { error: "This booking is already paid in full; the price cannot change." };
+  const split = splitForBooking(booking, values.amount_qr);
+  if (!split.ok) return { fieldErrors: { amount_qr: split.error } };
+
+  const now = new Date().toISOString();
+  const metadata = metadataOf(booking);
+  const patch: Partial<PhotoBookingRow> = {
+    amount_qr: values.amount_qr,
+    currency: values.currency,
+    ...split.columns,
+    metadata: { ...metadata, final_amount_recorded_at: now, final_amount_note: values.note, final_amount_previous: Number(booking.amount_qr) } as Json,
+  };
+  const { data: updated, error } = await supabase.from("photo_bookings").update(patch).eq("id", id).eq("owner_id", user.id).select("*").maybeSingle();
+  if (error) return { error: error.message };
+  if (!updated) return { error: "Booking not found." };
+
+  await writeAudit(supabase, { ownerId: user.id, actorId: user.id, entity: "booking", entityId: id, action: "booking.price_set", data: { amount_qr: values.amount_qr, previous_qr: Number(booking.amount_qr), currency: values.currency, deposit_qr: Number(updated.deposit_qr ?? split.columns.deposit_qr ?? booking.deposit_qr), balance_qr: Number(updated.balance_qr ?? split.columns.balance_qr ?? booking.balance_qr), deposit_locked: booking.deposit_state === "paid", note: values.note } });
+  // An inquiry stays an inquiry until the owner approves the quote; later stages follow the gates at once.
+  if (booking.booking_status !== "inquiry") await applyGates(supabase, user.id, updated, "price set");
+  revalidateBooking(id, updated.client_id);
+  return { saved: true };
+}
+
+/** Kept for existing forms: the final amount after the shoot is the same action as setting the price. */
+export async function recordFinalAmount(id: string, prev: BookingFormState, formData: FormData): Promise<BookingFormState> {
+  return setBookingPrice(id, prev, formData);
+}
+
+/**
+ * The owner reviewed the request and approves the price: inquiry → quoted,
+ * then the gates decide the next waiting stage (agreement, then deposit).
+ * Nothing is sent; the owner shares the quote how they choose.
+ */
+export async function approveQuote(id: string): Promise<BookingActionResult> {
+  if (!isUuid(id)) return { ok: false, error: "Invalid booking." };
+  const { supabase, user } = await owner();
+  if (!user) return { ok: false, error: "You are signed out." };
+  const booking = await ownedBooking(supabase, id);
+  if (!booking) return { ok: false, error: "Booking not found." };
+  if (booking.booking_status !== "inquiry") return { ok: false, error: `This booking is already ${BOOKING_STATUS_LABEL[booking.booking_status].toLowerCase()}.` };
+  if (!(Number(booking.amount_qr) > 0)) return { ok: false, error: "Set the price before approving the quote." };
+  const now = new Date();
+  const cols = bookingTransitionColumns(booking, "quoted", now);
+  const { data: updated, error } = await supabase.from("photo_bookings").update(cols).eq("id", id).eq("owner_id", user.id).eq("booking_status", "inquiry").select("*").maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  if (!updated) return { ok: false, error: "The booking changed in the meantime. Refresh and try again." };
+  await writeAudit(supabase, { ownerId: user.id, actorId: user.id, entity: "booking", entityId: id, action: "booking.quote_approved", data: { amount_qr: Number(updated.amount_qr), deposit_qr: Number(updated.deposit_qr), balance_qr: Number(updated.balance_qr) } });
+  await applyGates(supabase, user.id, updated, "quote approved");
+  revalidateBooking(id, updated.client_id);
+  return { ok: true };
+}
 
 export async function transitionBooking(id: string, to: string, reason?: string | null): Promise<BookingActionResult> {
   if (!isUuid(id)) return { ok: false, error: "Invalid booking." };
@@ -266,32 +399,46 @@ export async function transitionBooking(id: string, to: string, reason?: string 
   const booking = await ownedBooking(supabase, id);
   if (!booking) return { ok: false, error: "Booking not found." };
   if (!canTransitionBooking(booking.booking_status, to)) return { ok: false, error: `A booking that is ${BOOKING_STATUS_LABEL[booking.booking_status].toLowerCase()} cannot move to ${BOOKING_STATUS_LABEL[to].toLowerCase()}.` };
+  // Confirmation is earned, never clicked: the agreement must be signed and the deposit paid.
+  if (to === "confirmed") {
+    const blockers = confirmationBlockers(booking);
+    if (blockers.length) return { ok: false, error: blockers.map((b) => b.message).join(" ") };
+  }
+  if (to === "completed" && booking.balance_state === "due") return { ok: false, error: "The final balance is still due. Record the payment first." };
 
   const now = new Date();
   const cols = bookingTransitionColumns(booking, to, now);
   const cancelReason = (reason ?? "").trim().slice(0, 500) || null;
   if (to === "cancelled") cols.cancel_reason = cancelReason;
+  let balanceBecameDue = false;
+  if (to === "delivered") {
+    const { balanceBecameDue: due, ...delivery } = deliveryColumns(booking, now);
+    Object.assign(cols, delivery);
+    balanceBecameDue = due;
+  }
   const { data: updated, error } = await supabase.from("photo_bookings").update(cols).eq("id", id).eq("owner_id", user.id).eq("booking_status", booking.booking_status).select("*").maybeSingle();
   if (error) return { ok: false, error: error.message };
   if (!updated) return { ok: false, error: "The booking changed in the meantime. Refresh and try again." };
 
   await writeAudit(supabase, { ownerId: user.id, actorId: user.id, entity: "booking", entityId: id, action: "booking.status", data: { from: booking.booking_status, to, reason: cancelReason } });
+  if (balanceBecameDue) await writeAudit(supabase, { ownerId: user.id, actorId: user.id, entity: "booking", entityId: id, action: "balance.due", data: { balance_qr: Number(updated.balance_qr), via: "status" } });
+  if (to === "completed") await writeAudit(supabase, { ownerId: user.id, actorId: user.id, entity: "booking", entityId: id, action: "booking.completed", data: { reason: "marked by owner" } });
   const url = `${siteUrl()}/bookings/${id}`;
   if (to === "confirmed") await sendBookingEmail(supabase, updated, "BOOKING_CONFIRMED");
   if (to === "cancelled") {
     await sendBookingEmail(supabase, updated, "BOOKING_CANCELLED", { suffix: String(now.getTime()) });
-    await enqueueOwnerTelegram(supabase, { ownerId: user.id, kind: "BOOKING_CANCELLED", alertKey: `booking:${id}:cancelled:${now.getTime()}`, title: `Booking cancelled — ${updated.customer_name}`, lines: [bookingLabel(updated), cancelReason ? `Reason: ${cancelReason}` : null], url, now });
+    await enqueueOwnerTelegram(supabase, { ownerId: user.id, kind: "BOOKING_CANCELLED", alertKey: `booking:${id}:cancelled:${now.getTime()}`, title: `Booking cancelled: ${updated.customer_name}`, lines: [bookingLabel(updated), cancelReason ? `Reason: ${cancelReason}` : null], url, now });
   }
   if (to === "delivered") {
     await sendBookingEmail(supabase, updated, "DELIVERY_COMPLETE");
-    await enqueueOwnerTelegram(supabase, { ownerId: user.id, kind: "DELIVERY_SENT", alertKey: `booking:${id}:delivered`, title: `Delivered — ${updated.customer_name}`, lines: [bookingLabel(updated), sessionLine(updated)], url, now });
+    await enqueueOwnerTelegram(supabase, { ownerId: user.id, kind: "DELIVERY_SENT", alertKey: `booking:${id}:delivered`, title: `Delivered: ${updated.customer_name}`, lines: [bookingLabel(updated), sessionLine(updated), balanceBecameDue ? `Final balance due: ${formatQr(updated.balance_qr)}. Create the payment link when ready.` : null], url, now });
   }
   revalidateBooking(id, updated.client_id);
   return { ok: true };
 }
 
 // ---------------------------------------------------------------------------
-// After the shoot: mark complete, record the final amount, request payment
+// After the shoot
 // ---------------------------------------------------------------------------
 
 function metadataOf(booking: Pick<PhotoBookingRow, "metadata">): Record<string, unknown> {
@@ -301,7 +448,7 @@ function metadataOf(booking: Pick<PhotoBookingRow, "metadata">): Record<string, 
 /**
  * The shoot happened. Stamps coverage_done_at once and moves a confirmed
  * booking to "in progress" through the normal transition rules. Payment is
- * not touched: it becomes requestable, nothing more.
+ * not touched: the balance becomes due only when the gallery is delivered.
  */
 export async function markShootComplete(id: string): Promise<BookingActionResult> {
   if (!isUuid(id)) return { ok: false, error: "Invalid booking." };
@@ -327,99 +474,103 @@ export async function markShootComplete(id: string): Promise<BookingActionResult
   return { ok: true };
 }
 
-/**
- * The amount the client pays after the shoot. Refused once MyFatoorah has
- * verified a payment (the money already moved); an unpaid provider invoice
- * from an earlier attempt stays linked, and the webhook's amount check plus
- * the next checkout attempt (which creates a fresh invoice) handle the rest.
- */
-export async function recordFinalAmount(id: string, _prev: BookingFormState, formData: FormData): Promise<BookingFormState> {
-  if (!isUuid(id)) return { error: "Invalid booking." };
-  const { supabase, user } = await owner();
-  if (!user) return { error: "You are signed out." };
-  const { fieldErrors, values } = parseFinalAmount(formData);
-  if (Object.keys(fieldErrors).length) return { fieldErrors };
-  const booking = await ownedBooking(supabase, id);
-  if (!booking) return { error: "Booking not found." };
-  if (booking.booking_status === "cancelled") return { error: "This booking is cancelled." };
-  if (booking.status === "paid" || booking.status === "disputed") return { error: "This booking is already paid through MyFatoorah; the amount cannot change." };
-  if (booking.status === "refunded") return { error: "This booking was refunded through MyFatoorah; record a new booking instead." };
+// ---------------------------------------------------------------------------
+// Stage payment requests (deposit / balance)
+// ---------------------------------------------------------------------------
 
-  const now = new Date().toISOString();
-  const metadata = metadataOf(booking);
-  const patch: Partial<PhotoBookingRow> = {
-    amount_qr: values.amount_qr,
-    currency: values.currency,
-    metadata: { ...metadata, final_amount_recorded_at: now, final_amount_note: values.note, final_amount_previous: Number(booking.amount_qr) } as Json,
-  };
-  const { data: updated, error } = await supabase.from("photo_bookings").update(patch).eq("id", id).eq("owner_id", user.id).select("*").maybeSingle();
-  if (error) return { error: error.message };
-  if (!updated) return { error: "Booking not found." };
+export type StageRequestActionResult = { ok: true; payUrl: string; created: boolean; regenerated: boolean; requestId: string } | { ok: false; error: string; code?: Extract<CreateStageRequestResult, { ok: false }>["code"] };
 
-  await writeAudit(supabase, { ownerId: user.id, actorId: user.id, entity: "booking", entityId: id, action: "booking.final_amount", data: { amount_qr: values.amount_qr, previous_qr: Number(booking.amount_qr), currency: values.currency, note: values.note } });
-  revalidateBooking(id, updated.client_id);
-  return { saved: true };
+function requestActor(userId: string) {
+  return { userId, kind: "owner" as const };
 }
 
-export type PaymentRequestResult = { ok: true; payUrl: string; emailQueued: boolean } | { ok: false; error: string };
-
 /**
- * Creates the website pay link for a booking (explicit owner action). Only
- * after the shoot is marked complete and a final amount exists. The link is
- * `/pay/<token>`: the token's hash and creation time go into the booking's
- * metadata, the link itself into payment_url (the client portal shows it);
- * an earlier provider URL moves to metadata.provider_payment_url. A new
- * link replaces the previous one. The lifecycle is NOT changed: payment and
- * booking status stay separate. The client is e-mailed ONLY when
- * `notifyClient` is ticked; the owner always gets a Telegram notice.
+ * "Create payment link" for one stage (explicit owner action). Idempotent:
+ * an existing pending link is returned as is. The deposit is requestable
+ * only once the agreement is signed; the balance only once delivery made it
+ * due. Never messages the customer. Without MyFatoorah configured the owner
+ * pastes a link from the provider dashboard (`manualUrl`) instead.
  */
-export async function createPaymentRequest(id: string, opts: { notifyClient?: boolean } = {}): Promise<PaymentRequestResult> {
-  const notifyClient = opts.notifyClient === true;
+export async function requestStagePayment(id: string, stageRaw: string, opts: { manualUrl?: string | null } = {}): Promise<StageRequestActionResult> {
   if (!isUuid(id)) return { ok: false, error: "Invalid booking." };
-  if (!isPaymentsEnabled()) return { ok: false, error: "Online payments (MyFatoorah) are not enabled yet. Record cash or bank payments by hand." };
+  if (!isPaymentStage(stageRaw)) return { ok: false, error: "Unknown payment stage." };
   const { supabase, user } = await owner();
   if (!user) return { ok: false, error: "You are signed out." };
   const limit = rateLimit(`payment-request:${user.id}`, RULES.providerActionPerUser);
   if (!limit.ok) return { ok: false, error: `Too many payment links in a short time. Try again in ${limit.retryAfterSeconds}s.` };
   const booking = await ownedBooking(supabase, id);
   if (!booking) return { ok: false, error: "Booking not found." };
-  const blocker = paymentRequestBlocker(booking);
-  if (blocker) return { ok: false, error: PAYMENT_REQUEST_BLOCKER_LABEL[blocker] };
-
-  const now = new Date();
-  const { token, hash } = createPayToken();
-  const payUrl = payPageUrl(siteUrl(), token);
-  const metadata = metadataOf(booking);
-  const providerUrl = booking.payment_url && !isWebsitePayUrl(booking.payment_url) ? booking.payment_url : (metadata.provider_payment_url as string | undefined) ?? null;
-  const patch: Partial<PhotoBookingRow> = {
-    payment_url: payUrl,
-    payment_mode: "link_later",
-    provider: booking.provider ?? MYFATOORAH_PROVIDER,
-    metadata: { ...metadata, pay_token_hash: hash, pay_token_created_at: now.toISOString(), payment_requested_at: now.toISOString(), ...(providerUrl ? { provider_payment_url: providerUrl } : {}) } as Json,
-  };
-  const { data: updated, error } = await supabase.from("photo_bookings").update(patch).eq("id", id).eq("owner_id", user.id).select("*").maybeSingle();
-  if (error) return { ok: false, error: error.message };
-  if (!updated) return { ok: false, error: "Booking not found." };
-
-  const payment = effectivePayment(updated);
-  await writeAudit(supabase, { ownerId: user.id, actorId: user.id, entity: "booking", entityId: id, action: "booking.payment_requested", data: { amount_qr: Number(updated.amount_qr), due_qr: payment.dueQr, notify_client: notifyClient, token_hash_prefix: hash.slice(0, 8) } });
-  await enqueueOwnerTelegram(supabase, {
-    ownerId: user.id,
-    kind: "BOOKING_PAYMENT_REQUESTED",
-    alertKey: `booking:${id}:payment-requested:${hash.slice(0, 8)}`,
-    title: `Payment link ready: ${updated.customer_name}`,
-    lines: [bookingLabel(updated), `${formatQr(payment.dueQr)} due`, `Pay: ${payUrl}`, notifyClient ? "Sent to the client by e-mail." : "Not sent to the client. Share the link yourself, or tick \"Send to client by e-mail\" next time."],
-    url: `${siteUrl()}/bookings/${id}`,
-    now,
-  });
-  let emailQueued = false;
-  if (notifyClient && updated.customer_email) {
-    await sendBookingEmail(supabase, updated, "PAYMENT_REQUESTED", { suffix: hash.slice(0, 8) });
-    emailQueued = true;
-  }
-  revalidateBooking(id, updated.client_id);
-  return { ok: true, payUrl, emailQueued };
+  const res = await createStagePaymentRequest(supabase, { booking, stage: stageRaw, actor: requestActor(user.id), paymentsEnabled: isPaymentsEnabled(), siteUrl: siteUrl(), manualUrl: opts.manualUrl ?? null });
+  if (!res.ok) return { ok: false, error: res.error, code: res.code };
+  revalidateBooking(id, booking.client_id);
+  return { ok: true, payUrl: res.payUrl, created: res.created, regenerated: res.regenerated, requestId: res.request.id };
 }
+
+/** Cancels the current pending link for a stage and mints a fresh one (generation + 1). */
+export async function regenerateStagePayment(id: string, stageRaw: string, opts: { manualUrl?: string | null } = {}): Promise<StageRequestActionResult> {
+  if (!isUuid(id)) return { ok: false, error: "Invalid booking." };
+  if (!isPaymentStage(stageRaw)) return { ok: false, error: "Unknown payment stage." };
+  const { supabase, user } = await owner();
+  if (!user) return { ok: false, error: "You are signed out." };
+  const booking = await ownedBooking(supabase, id);
+  if (!booking) return { ok: false, error: "Booking not found." };
+  const blocker = stageRequestBlocker(booking, stageRaw);
+  if (blocker) return { ok: false, error: STAGE_REQUEST_BLOCKER_LABEL[blocker] };
+  const pending = pendingRequestFor(await listStageRequests(supabase, id), stageRaw);
+  if (pending) {
+    const cancelled = await cancelStagePaymentRequest(supabase, { request: pending, actor: requestActor(user.id), reason: "regenerated" });
+    if (!cancelled.ok) return { ok: false, error: cancelled.error };
+  }
+  return requestStagePayment(id, stageRaw, opts);
+}
+
+export type SendStageLinkActionResult = { ok: true; emailQueued: boolean; reason?: string } | { ok: false; error: string };
+
+/** The explicit "Send payment link" action: queues the client e-mail and the owner notice for a pending request. */
+export async function sendStagePaymentRequest(id: string, requestId: string): Promise<SendStageLinkActionResult> {
+  if (!isUuid(id) || !isUuid(requestId)) return { ok: false, error: "Invalid payment request." };
+  const { supabase, user } = await owner();
+  if (!user) return { ok: false, error: "You are signed out." };
+  const booking = await ownedBooking(supabase, id);
+  if (!booking) return { ok: false, error: "Booking not found." };
+  const request = (await listStageRequests(supabase, id)).find((r) => r.id === requestId);
+  if (!request) return { ok: false, error: "Payment request not found." };
+  const blocker = stageRequestBlocker(booking, request.stage);
+  if (blocker) return { ok: false, error: STAGE_REQUEST_BLOCKER_LABEL[blocker] };
+  const { businessName } = await emailOptions();
+  const res = await sendStagePaymentLink(supabase, { booking, request, actor: requestActor(user.id), businessName, portalUrl: `${siteUrl()}/client/bookings/${id}`, ownerUrl: `${siteUrl()}/bookings/${id}` });
+  revalidateBooking(id, booking.client_id);
+  return res;
+}
+
+export type PaymentRequestResult = { ok: true; payUrl: string; emailQueued: boolean } | { ok: false; error: string };
+
+/**
+ * Legacy entry point kept for older callers: the stage that is open right
+ * now (deposit before confirmation, balance after delivery) gets a link,
+ * and the client is e-mailed only when asked.
+ */
+export async function createPaymentRequest(id: string, opts: { notifyClient?: boolean } = {}): Promise<PaymentRequestResult> {
+  if (!isUuid(id)) return { ok: false, error: "Invalid booking." };
+  if (!isPaymentsEnabled()) return { ok: false, error: "Online payments (MyFatoorah) are not enabled yet. Record cash or bank payments by hand." };
+  const { supabase, user } = await owner();
+  if (!user) return { ok: false, error: "You are signed out." };
+  const booking = await ownedBooking(supabase, id);
+  if (!booking) return { ok: false, error: "Booking not found." };
+  const stage: PaymentStage = booking.balance_state === "due" ? "balance" : "deposit";
+  const created = await requestStagePayment(id, stage);
+  if (!created.ok) return { ok: false, error: created.error };
+  let emailQueued = false;
+  if (opts.notifyClient === true) {
+    const sent = await sendStagePaymentRequest(id, created.requestId);
+    emailQueued = sent.ok && sent.emailQueued;
+  }
+  return { ok: true, payUrl: created.payUrl, emailQueued };
+}
+
+// ---------------------------------------------------------------------------
+// Manual payments (cash / bank / Fawran) per stage
+// ---------------------------------------------------------------------------
 
 /** Sum of manual records → booking summary columns. Returns the refreshed row. */
 async function refreshManualSummary(supabase: Client, booking: PhotoBookingRow, method: PhotoBookingRow["payment_method"]): Promise<PhotoBookingRow | null> {
@@ -438,8 +589,11 @@ async function refreshManualSummary(supabase: Client, booking: PhotoBookingRow, 
 }
 
 /**
- * Records cash / bank transfer / Fawran received by hand. Never touches the
- * provider status: a booking MyFatoorah has verified as paid is refused.
+ * Records cash / bank transfer / Fawran received by hand FOR ONE STAGE and
+ * settles that stage (deposit → paid, or balance → paid once it is due).
+ * Never writes the provider status, never overrides a request the provider
+ * already verified, and cancels the stage's pending link so the client
+ * cannot pay twice. The lifecycle then follows the gates.
  */
 export async function recordManualPayment(id: string, _prev: BookingFormState, formData: FormData): Promise<BookingFormState> {
   if (!isUuid(id)) return { error: "Invalid booking." };
@@ -449,8 +603,16 @@ export async function recordManualPayment(id: string, _prev: BookingFormState, f
   if (Object.keys(fieldErrors).length) return { fieldErrors };
   const booking = await ownedBooking(supabase, id);
   if (!booking) return { error: "Booking not found." };
-  if (booking.status === "paid") return { error: "Already paid through MyFatoorah." };
   if (booking.status === "refunded") return { error: "This booking was refunded through MyFatoorah; record a new booking instead." };
+  if (booking.booking_status === "cancelled") return { error: "This booking is cancelled." };
+  const stage = values.stage;
+  if (stage === "deposit" && booking.deposit_state === "paid") return { fieldErrors: { stage: "The deposit is already paid." } };
+  if (stage === "deposit" && (booking.deposit_state === "not_required" || booking.deposit_state === "waived")) return { fieldErrors: { stage: "No deposit is required for this booking." } };
+  if (stage === "balance" && booking.balance_state === "paid") return { fieldErrors: { stage: "The final balance is already paid." } };
+  if (stage === "balance" && booking.balance_state === "waived") return { fieldErrors: { stage: "There is no remaining balance for this booking." } };
+  if (stage === "balance" && booking.balance_state === "not_due") return { fieldErrors: { stage: "Final balance is not due until delivery." } };
+  const requests = await listStageRequests(supabase, id);
+  if (requests.some((r) => r.stage === stage && r.status === "paid")) return { error: `The ${stageWords(booking, stage)} was already paid online.` };
 
   const { data: record, error } = await supabase
     .from("photo_payment_records")
@@ -459,30 +621,35 @@ export async function recordManualPayment(id: string, _prev: BookingFormState, f
     .single();
   if (error || !record) return { error: error?.message ?? "Could not save the payment." };
 
-  const refreshed = (await refreshManualSummary(supabase, booking, values.method)) ?? booking;
-  await writeAudit(supabase, { ownerId: user.id, actorId: user.id, entity: "booking", entityId: id, action: "payment.manual", data: { record_id: record.id, method: values.method, amount_qr: values.amount_qr, note: values.note, paid_at: values.paid_at } });
+  const stagePatch: Partial<PhotoBookingRow> = stage === "deposit" ? { deposit_state: "paid", deposit_paid_at: values.paid_at } : { balance_state: "paid", balance_paid_at: values.paid_at };
+  await supabase.from("photo_bookings").update(stagePatch).eq("id", id).eq("owner_id", user.id);
+  await writeAudit(supabase, { ownerId: user.id, actorId: user.id, entity: "booking", entityId: id, action: stage === "deposit" ? "deposit.paid" : "balance.paid", data: { record_id: record.id, method: values.method, amount_qr: values.amount_qr, paid_at: values.paid_at, source: "manual" } });
+  const pending = pendingRequestFor(requests, stage);
+  if (pending) await cancelStagePaymentRequest(supabase, { request: pending, actor: requestActor(user.id), reason: "paid by hand" });
 
-  const payment = effectivePayment(refreshed);
-  let confirmed: PhotoBookingRow | null = null;
-  if (payment.state === "paid" && PRE_CONFIRMATION.includes(refreshed.booking_status)) {
-    const cols = bookingTransitionColumns(refreshed, "confirmed", new Date());
-    const { data } = await supabase.from("photo_bookings").update(cols).eq("id", id).eq("owner_id", user.id).eq("booking_status", refreshed.booking_status).select("*").maybeSingle();
+  const refreshed = (await refreshManualSummary(supabase, booking, values.method)) ?? { ...booking, ...stagePatch };
+  await writeAudit(supabase, { ownerId: user.id, actorId: user.id, entity: "booking", entityId: id, action: "payment.manual", data: { record_id: record.id, stage, method: values.method, amount_qr: values.amount_qr, note: values.note, paid_at: values.paid_at } });
+
+  const { confirmedNow, current: afterGates } = await applyGates(supabase, user.id, refreshed, stage === "deposit" ? "deposit paid by hand" : "balance paid by hand");
+  let current = afterGates;
+  if (isCompletionReady(current)) {
+    const { data } = await supabase.from("photo_bookings").update({ booking_status: "completed", completed_at: current.completed_at ?? new Date().toISOString() }).eq("id", id).eq("owner_id", user.id).eq("booking_status", "delivered").select("*").maybeSingle();
     if (data) {
-      confirmed = data;
-      await writeAudit(supabase, { ownerId: user.id, actorId: user.id, entity: "booking", entityId: id, action: "booking.status", data: { from: refreshed.booking_status, to: "confirmed", reason: "manual payment" } });
+      current = data;
+      await writeAudit(supabase, { ownerId: user.id, actorId: user.id, entity: "booking", entityId: id, action: "booking.completed", data: { reason: "final balance paid by hand" } });
     }
   }
-  const current = confirmed ?? refreshed;
+  const payment = effectivePayment(current);
   await enqueueOwnerTelegram(supabase, {
     ownerId: user.id,
     kind: "BOOKING_PAID",
     alertKey: `booking:${id}:manual:${record.id}`,
-    title: `${payment.state === "paid" ? "Booking paid" : "Payment recorded"} — ${current.customer_name}`,
-    lines: [bookingLabel(current), `${formatQr(values.amount_qr)} by ${PAYMENT_METHOD_LABEL[values.method]}${values.note ? ` · ${values.note}` : ""}`, payment.dueQr > 0 ? `Still due: ${formatQr(payment.dueQr)}` : null],
+    title: `${stage === "deposit" ? "Deposit" : "Final balance"} recorded: ${current.customer_name}`,
+    lines: [bookingLabel(current), `${formatMoney(values.amount_qr, booking.currency)} ${stageWords(booking, stage)} by ${PAYMENT_METHOD_LABEL[values.method]}${values.note ? ` · ${values.note}` : ""}`, payment.dueQr > 0 ? `Still due: ${formatQr(payment.dueQr)}` : "Paid in full.", confirmedNow ? "Booking confirmed." : null],
     url: `${siteUrl()}/bookings/${id}`,
   });
-  await sendBookingEmail(supabase, current, "PAYMENT_RECEIVED", { payment: { amountQr: values.amount_qr, methodLabel: PAYMENT_METHOD_LABEL[values.method], dueQr: payment.dueQr }, suffix: record.id });
-  if (confirmed) await sendBookingEmail(supabase, confirmed, "BOOKING_CONFIRMED");
+  await sendBookingEmail(supabase, current, "PAYMENT_RECEIVED", { payment: { amountQr: values.amount_qr, methodLabel: PAYMENT_METHOD_LABEL[values.method], dueQr: payment.dueQr, stage }, suffix: record.id });
+  if (confirmedNow) await sendBookingEmail(supabase, current, "BOOKING_CONFIRMED");
   revalidateBooking(id, current.client_id);
   return { saved: true };
 }

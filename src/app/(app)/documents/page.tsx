@@ -4,7 +4,7 @@ import { BrandHeader } from "@/components/BrandHeader";
 import { PageBody } from "@/components/AppShell";
 import { EmptyState } from "@/components/EmptyState";
 import { FileTextIcon, PlusIcon } from "@/components/icons";
-import { DOCUMENT_KIND_LABEL, isDocumentKind } from "@/lib/documents/state";
+import { DOCUMENT_KIND_LABEL, isDocumentKind, SIGNER_ROLE_LABEL } from "@/lib/documents/state";
 import { isDocumentListFilter, listDocuments, type DocumentListFilter } from "@/lib/documents/queries";
 import { formatStamp } from "@/lib/time";
 import { cn } from "@/lib/utils";
@@ -17,6 +17,7 @@ const FILTERS: Array<{ key: DocumentListFilter; label: string }> = [
   { key: "awaiting", label: "Awaiting signature" },
   { key: "signed", label: "Signed" },
   { key: "drafts", label: "Drafts" },
+  { key: "closed", label: "Declined / voided" },
   { key: "all", label: "All" },
 ];
 
@@ -53,7 +54,7 @@ export default async function DocumentsPage({ searchParams }: PageProps<"/docume
         {docs.length === 0 ? (
           <EmptyState
             icon={<FileTextIcon />}
-            title={view === "awaiting" ? "Nothing waiting for a signature." : view === "drafts" ? "No drafts." : view === "signed" ? "No signed documents yet." : "No documents yet."}
+            title={view === "awaiting" ? "Nothing waiting for a signature." : view === "drafts" ? "No drafts." : view === "signed" ? "No signed documents yet." : view === "closed" ? "Nothing declined or voided." : "No documents yet."}
             description="Create a document from a template, send the link, and the client signs on their phone. The signed PDF is kept here and in their portal."
             action={<Link href="/documents/new" className="btn-primary"><PlusIcon size={18} /> New document</Link>}
           />
@@ -66,12 +67,14 @@ export default async function DocumentsPage({ searchParams }: PageProps<"/docume
                     <p className="truncate font-bold text-ink">{d.title}</p>
                     <p className="mt-0.5 truncate text-xs text-muted">
                       {isDocumentKind(d.kind) ? DOCUMENT_KIND_LABEL[d.kind] : d.kind}
+                      {d.signer_role === "guardian" ? ` · ${SIGNER_ROLE_LABEL.guardian}` : ""}
                       {d.client ? ` · ${d.client.full_name}` : ""}
                       {d.booking ? ` · ${d.booking.public_ref ?? d.booking.athlete_name}` : ""}
                     </p>
                     <p className="mt-0.5 text-xs text-muted">
-                      {d.status === "signed" && d.signed_at ? `Signed ${formatStamp(d.signed_at)}` : d.status === "draft" ? `Created ${formatStamp(d.created_at)}` : d.sent_at ? `Sent ${formatStamp(d.sent_at)}` : ""}
-                      {d.status !== "signed" && d.status !== "draft" && d.expires_at ? ` · expires ${formatStamp(d.expires_at)}` : ""}
+                      {d.status === "signed" && d.signed_at ? `Signed ${formatStamp(d.signed_at)}` : d.status === "void" && d.voided_at ? `Voided ${formatStamp(d.voided_at)}` : d.status === "declined" && d.declined_at ? `Declined ${formatStamp(d.declined_at)}` : d.status === "draft" ? `Created ${formatStamp(d.created_at)}` : d.sent_at ? `Sent ${formatStamp(d.sent_at)}` : ""}
+                      {(d.status === "sent" || d.status === "viewed") && d.expires_at ? ` · expires ${formatStamp(d.expires_at)}` : ""}
+                      {d.provider !== "internal" ? ` · ${d.provider}` : ""}
                     </p>
                   </div>
                   <DocumentStatusPill status={d.status} />

@@ -10,7 +10,8 @@ describe("Pic-Time testimonials embed", () => {
     expect(html).toContain('id="pictimeIntegration"');
     expect(html).toContain('name="pictimeIntegration"');
     expect(html).toContain(`src="${PICTIME_TESTIMONIALS_SRC.replace(/&/g, "&amp;")}"`);
-    expect(html).toContain('title="Client testimonials from Pic-Time"');
+    expect(html).toContain('title="Client testimonials from our galleries"');
+    expect(html).not.toMatch(/title="[^"]*pic-?time/i);
     expect(html).toMatch(/sandbox="[^"]*allow-scripts[^"]*"/);
     expect(html).toContain("width:100%");
     // Loading skeleton first; the fallback is not shown until Pic-Time fails to answer.

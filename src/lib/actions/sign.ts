@@ -9,7 +9,8 @@ import { trimOrNull } from "@/lib/utils";
 /**
  * Form actions behind the public signing page. The token travels in a
  * hidden field; the client's address and user agent are read from the
- * request (never from the form) and stored as signature evidence.
+ * request (never from the form) and stored as signature evidence. The copy
+ * never names a vendor.
  */
 export type SignState = { error?: string; fieldErrors?: Record<string, string>; signed?: { documentId: string; signedAt: string }; declined?: boolean } | null;
 
@@ -18,11 +19,14 @@ const ERROR_TEXT: Record<SignError, string> = {
   expired: "This signing link has expired. Ask the studio to send a new one.",
   already_signed: "This agreement has already been signed.",
   declined: "This agreement was declined and can no longer be signed.",
-  invalid_name: "Type your full legal name (at least 3 letters).",
+  voided: "This agreement was withdrawn by the studio. Ask them for a new one.",
+  invalid_name: "Type your full name (at least 3 letters).",
   invalid_email: "Enter a valid e-mail address, or leave it empty.",
   not_agreed: "Tick the box to confirm you have read the agreement.",
   hash_mismatch: "This document changed after it was sent. Ask the studio to send it again.",
   conflict: "Something went wrong while saving. Please try again.",
+  guardian_name_mismatch: "This release must be signed by the parent or guardian named on the booking. Type that person's full name.",
+  minor_cannot_sign: "The athlete cannot sign this release. A parent or guardian must type their own name.",
 };
 
 async function clientAddress(): Promise<{ ip: string | null; userAgent: string | null }> {
@@ -45,7 +49,7 @@ export async function signByToken(_prev: SignState, formData: FormData): Promise
   const agreed = formData.get("agreed") === "on" || formData.get("agreed") === "1";
   const res = await signDocument(token, { signerName, signerEmail, signerPhone, agreed, ip, userAgent });
   if (!res.ok) {
-    if (res.error === "invalid_name") return { fieldErrors: { signer_name: ERROR_TEXT.invalid_name } };
+    if (res.error === "invalid_name" || res.error === "guardian_name_mismatch" || res.error === "minor_cannot_sign") return { fieldErrors: { signer_name: ERROR_TEXT[res.error] } };
     if (res.error === "invalid_email") return { fieldErrors: { signer_email: ERROR_TEXT.invalid_email } };
     if (res.error === "not_agreed") return { fieldErrors: { agreed: ERROR_TEXT.not_agreed } };
     return { error: ERROR_TEXT[res.error] };

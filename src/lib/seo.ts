@@ -1,5 +1,6 @@
 import type { Metadata, MetadataRoute } from "next";
 import { PUBLIC_BOOKING_TYPES } from "@/lib/bookings/public-form";
+import { businessIdentity, formatPhone, type BusinessIdentity } from "@/lib/studio/business";
 import type { PhotoServiceRow, PhotoStudioRow } from "@/lib/supabase/database.types";
 
 /**
@@ -127,11 +128,11 @@ const AREA_SERVED = [
  * one Service per booking type. Prices appear only when a public service of
  * that type carries a real price; quoted work has no offer at all.
  */
-export function buildHomeJsonLd({ base, studio, services }: { base: string; studio: PhotoStudioRow | null; services: readonly PhotoServiceRow[] }): HomeJsonLd {
+export function buildHomeJsonLd({ base, studio, services, identity = businessIdentity() }: { base: string; studio: PhotoStudioRow | null; services: readonly PhotoServiceRow[]; identity?: BusinessIdentity }): HomeJsonLd {
   const origin = base.replace(/\/$/, "");
   const businessId = `${origin}/#business`;
   const name = studio?.business_name?.trim() || SITE_NAME;
-  const city = studio?.city?.trim() || "Doha, Qatar";
+  const city = studio?.city?.trim() || identity.location;
   const sameAs: string[] = [];
   const ig = studio?.instagram?.replace(/^@/, "").trim();
   if (ig) sameAs.push(`https://instagram.com/${ig}`);
@@ -140,6 +141,8 @@ export function buildHomeJsonLd({ base, studio, services }: { base: string; stud
     "@type": ["ProfessionalService", "LocalBusiness"],
     "@id": businessId,
     name,
+    legalName: identity.legalName,
+    identifier: { "@type": "PropertyValue", propertyID: "Commercial Registration (Qatar)", value: identity.crNumber },
     url: `${origin}/`,
     description: studio?.about?.trim() || DEFAULT_DESCRIPTION,
     image: `${origin}/brand/logo.png`,
@@ -147,8 +150,9 @@ export function buildHomeJsonLd({ base, studio, services }: { base: string; stud
     address: { "@type": "PostalAddress", addressLocality: city, addressCountry: "QA" },
     priceRange: "QAR",
   };
-  if (studio?.phone?.trim()) business.telephone = studio.phone.trim();
-  if (studio?.email?.trim()) business.email = studio.email.trim();
+  const telephone = studio?.phone?.trim() || formatPhone(identity.phone);
+  if (telephone) business.telephone = telephone;
+  business.email = studio?.email?.trim() || identity.email;
   if (sameAs.length) business.sameAs = sameAs;
 
   const serviceEntries: JsonLdService[] = PUBLIC_BOOKING_TYPES.map((t) => {

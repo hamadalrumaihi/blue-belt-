@@ -13,12 +13,12 @@ export const GALLERY_LINK_LABEL = "View and buy photos";
 type Props = {
   accountLink: { href: string; label: string };
   bookingOpen: boolean;
-  /** The Pic-Time client gallery (see `pictimeGalleryUrl`); opens in a new tab. */
+  /** The public client gallery (see `pictimeGalleryUrl`); opens in a new tab. */
   galleryUrl: string;
 };
 
 /**
- * Public site header: logo, Services, the external Pic-Time gallery link,
+ * Public site header: logo, Services, the external gallery link,
  * Contact, Book now and the account link. Collapses to a sheet on phones;
  * Book now stays visible at every width.
  */
@@ -30,7 +30,7 @@ export function PublicHeader({ accountLink, bookingOpen, galleryUrl }: Props) {
     <a href={galleryUrl} target="_blank" rel="noopener noreferrer" data-umami-event="gallery-click" className={className} onClick={() => setOpen(false)}>
       {GALLERY_LINK_LABEL}
       <ExternalIcon size={14} className="ml-1 inline" />
-      <span className="sr-only"> (opens Pic-Time in a new tab)</span>
+      <span className="sr-only"> (opens your gallery in a new tab)</span>
     </a>
   );
   return (

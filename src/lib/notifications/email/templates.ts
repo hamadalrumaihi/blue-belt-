@@ -1,4 +1,5 @@
 import { escapeHtml } from "@/lib/notifications/telegram/core";
+import { businessIdentity, businessLegalLine } from "@/lib/studio/business";
 import type { ClientNotificationKind } from "./kinds";
 
 /**
@@ -25,7 +26,7 @@ export function renderEmailText(c: EmailContent): string {
     lines.push("");
   }
   if (c.cta) lines.push(`${c.cta.label}: ${c.cta.url}`, "");
-  lines.push(c.footer ?? `${c.businessName}`);
+  lines.push(legalFooterLine(), c.footer ?? `${c.businessName}`);
   return lines.join("\n");
 }
 
@@ -48,7 +49,14 @@ export function renderEmailHtml(c: EmailContent): string {
     ${cta}
   </div>
   <p style="font-size:12px;color:#68758a;margin:16px 0 0">${escapeHtml(c.footer ?? `${c.businessName} · This message was sent about your booking.`)}</p>
+  <p style="font-size:12px;color:#68758a;margin:8px 0 0">${escapeHtml(legalFooterLine())}</p>
 </div></body></html>`;
+}
+
+/** "Blue belt media photography, CR 235175, Doha, Qatar · bluebeltmediaqatar@gmail.com" under every client e-mail. */
+export function legalFooterLine(): string {
+  const id = businessIdentity();
+  return `${businessLegalLine(id)} · ${id.email}`;
 }
 
 function escapeAttr(s: string): string {

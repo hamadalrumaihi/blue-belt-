@@ -33,8 +33,9 @@ vi.mock("@/lib/notifications/email/outbox", () => ({ enqueueClientEmail: (...arg
 
 /**
  * Hand-rolled Supabase stand-in: every builder method returns the chain and
- * awaiting it yields the canned result for that table (first select) — enough
- * to test guards. Writes are recorded so tests can assert what was touched.
+ * awaiting it yields the canned result for that table (in call order). Enough
+ * to test guards and what was written. Writes are recorded so tests can
+ * assert what was touched.
  */
 type Result = { data: unknown; error: { code?: string; message: string } | null; count?: number | null };
 const results: Record<string, Result | Result[]> = {};
@@ -61,10 +62,11 @@ function chain(table: string) {
 const getUser = vi.fn();
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn(async () => ({ auth: { getUser }, from: (table: string) => chain(table) })) }));
 
-import { assignBookingCoverage, createAthleteFromBooking, createBooking, createPaymentRequest, deleteManualPayment, linkBookingToAthlete, markShootComplete, recordFinalAmount, recordManualPayment, transitionBooking } from "@/lib/actions/bookings";
+import { approveQuote, assignBookingCoverage, createAthleteFromBooking, createBooking, createPaymentRequest, deleteManualPayment, linkBookingToAthlete, markShootComplete, recordFinalAmount, recordManualPayment, regenerateStagePayment, requestStagePayment, sendStagePaymentRequest, setBookingPrice, transitionBooking } from "@/lib/actions/bookings";
 import { createLogger, setLogSink } from "@/lib/log";
 import { isPaymentsEnabled } from "@/lib/payments/config";
 import { processWebhook, type WebhookDeps } from "@/lib/payments/myfatoorah/webhook";
+import { PAYMENTS_NOT_CONFIGURED_MESSAGE } from "@/lib/payments/requests";
 import { FakeSupabase } from "./payments/fake-supabase";
 import { BOOKING_ID, booking, paymentEvent } from "./payments/fixtures";
 
@@ -73,12 +75,16 @@ setLogSink(() => {});
 const USER = "11111111-1111-4111-8111-111111111111";
 const ATH = "22222222-2222-4222-8222-222222222222";
 const REC = "55555555-5555-4555-8555-555555555555";
+const REQ = "66666666-6666-4666-8666-666666666666";
 
 function fd(entries: Record<string, string>): FormData {
   const f = new FormData();
   for (const [k, v] of Object.entries(entries)) f.set(k, v);
   return f;
 }
+
+const updates = (table: string) => writes.filter((w) => w.table === table && w.op === "update").map((w) => w.payload as Record<string, unknown>);
+const auditActions = () => writeAudit.mock.calls.map((c) => (c as unknown as [unknown, { action: string }])[1].action);
 
 beforeEach(() => {
   for (const k of Object.keys(results)) delete results[k];
@@ -90,18 +96,27 @@ beforeEach(() => {
   getUser.mockResolvedValue({ data: { user: { id: USER } } });
 });
 
+/** QAR 1000 booking, agreement required and signed, deposit 500 pending. */
+const signed = (overrides: Parameters<typeof booking>[0] = {}) => booking({ amount_qr: 1000, deposit_qr: 500, balance_qr: 500, deposit_state: "pending", balance_state: "not_due", requires_contract: true, contract_state: "signed", booking_status: "awaiting_payment", provider_invoice_id: null, payment_url: null, status: "pending", ...overrides });
+const pendingRequest = (overrides: Record<string, unknown> = {}) => ({ id: REQ, owner_id: USER, booking_id: BOOKING_ID, stage: "deposit", amount_qr: 500, currency: "QAR", provider: "WEBSITE", provider_invoice_id: null, provider_payment_id: null, provider_reference: null, payment_url: "https://site.test/pay/bbp_" + "a".repeat(40), status: "pending", idempotency_key: "k", generation: 1, pay_token_hash: "h", error_code: null, error_message: null, metadata: {}, created_at: "2026-10-08T09:00:00.000Z", sent_at: null, paid_at: null, failed_at: null, cancelled_at: null, expired_at: null, updated_at: "2026-10-08T09:00:00.000Z", ...overrides });
+
 describe("signed out", () => {
   it("every action refuses before touching the database", async () => {
     getUser.mockResolvedValue({ data: { user: null } });
     expect(await createBooking(null, fd({ booking_type: "club", customer_name: "A" }))).toMatchObject({ error: expect.stringMatching(/signed out/i) });
     expect(await transitionBooking(BOOKING_ID, "confirmed")).toMatchObject({ ok: false, error: expect.stringMatching(/signed out/i) });
-    expect(await recordManualPayment(BOOKING_ID, null, fd({ method: "cash", amount_qr: "10" }))).toMatchObject({ error: expect.stringMatching(/signed out/i) });
+    expect(await recordManualPayment(BOOKING_ID, null, fd({ method: "cash", amount_qr: "10", stage: "deposit" }))).toMatchObject({ error: expect.stringMatching(/signed out/i) });
     expect(await deleteManualPayment(REC)).toMatchObject({ ok: false, error: expect.stringMatching(/signed out/i) });
     expect(await assignBookingCoverage(BOOKING_ID, { photographerId: null })).toMatchObject({ ok: false, error: expect.stringMatching(/signed out/i) });
     expect(await linkBookingToAthlete(BOOKING_ID, ATH)).toMatchObject({ ok: false, error: expect.stringMatching(/signed out/i) });
     expect(await createAthleteFromBooking(BOOKING_ID, null, fd({}))).toMatchObject({ error: expect.stringMatching(/signed out/i) });
     expect(await markShootComplete(BOOKING_ID)).toMatchObject({ ok: false, error: expect.stringMatching(/signed out/i) });
+    expect(await setBookingPrice(BOOKING_ID, null, fd({ amount_qr: "350" }))).toMatchObject({ error: expect.stringMatching(/signed out/i) });
     expect(await recordFinalAmount(BOOKING_ID, null, fd({ amount_qr: "350" }))).toMatchObject({ error: expect.stringMatching(/signed out/i) });
+    expect(await approveQuote(BOOKING_ID)).toMatchObject({ ok: false, error: expect.stringMatching(/signed out/i) });
+    expect(await requestStagePayment(BOOKING_ID, "deposit")).toMatchObject({ ok: false, error: expect.stringMatching(/signed out/i) });
+    expect(await regenerateStagePayment(BOOKING_ID, "deposit")).toMatchObject({ ok: false, error: expect.stringMatching(/signed out/i) });
+    expect(await sendStagePaymentRequest(BOOKING_ID, REQ)).toMatchObject({ ok: false, error: expect.stringMatching(/signed out/i) });
     vi.mocked(isPaymentsEnabled).mockReturnValue(true);
     expect(await createPaymentRequest(BOOKING_ID)).toMatchObject({ ok: false, error: expect.stringMatching(/signed out/i) });
     expect(writes).toEqual([]);
@@ -109,7 +124,7 @@ describe("signed out", () => {
 });
 
 describe("input guards", () => {
-  it("rejects malformed ids and unknown statuses without a query", async () => {
+  it("rejects malformed ids, unknown statuses and unknown stages without a query", async () => {
     expect(await transitionBooking("nope", "confirmed")).toMatchObject({ ok: false, error: expect.stringMatching(/invalid booking/i) });
     expect(await transitionBooking(BOOKING_ID, "paid")).toMatchObject({ ok: false, error: expect.stringMatching(/unknown booking status/i) });
     expect(await recordManualPayment("nope", null, fd({}))).toMatchObject({ error: expect.stringMatching(/invalid booking/i) });
@@ -118,8 +133,9 @@ describe("input guards", () => {
     expect(await linkBookingToAthlete(BOOKING_ID, "nope")).toMatchObject({ ok: false, error: expect.stringMatching(/athlete/i) });
     expect(await createAthleteFromBooking("nope", null, fd({}))).toMatchObject({ error: expect.stringMatching(/invalid booking/i) });
     expect(await createPaymentRequest("nope")).toMatchObject({ ok: false, error: expect.stringMatching(/invalid booking/i) });
+    expect(await requestStagePayment(BOOKING_ID, "tip")).toMatchObject({ ok: false, error: expect.stringMatching(/unknown payment stage/i) });
     expect(await markShootComplete("nope")).toMatchObject({ ok: false, error: expect.stringMatching(/invalid booking/i) });
-    expect(await recordFinalAmount("nope", null, fd({ amount_qr: "1" }))).toMatchObject({ error: expect.stringMatching(/invalid booking/i) });
+    expect(await setBookingPrice("nope", null, fd({ amount_qr: "1" }))).toMatchObject({ error: expect.stringMatching(/invalid booking/i) });
     expect(writes).toEqual([]);
   });
 
@@ -129,14 +145,13 @@ describe("input guards", () => {
     expect(writes).toEqual([]);
   });
 
-  it("createPaymentRequest is inert while payments are off", async () => {
+  it("createPaymentRequest (legacy entry point) is inert while payments are off", async () => {
     expect(await createPaymentRequest(BOOKING_ID, { notifyClient: true })).toMatchObject({ ok: false, error: expect.stringMatching(/not enabled/i) });
     expect(writes).toEqual([]);
   });
 });
 
 const DONE = "2026-10-06T09:00:00.000Z";
-const payable = () => booking({ booking_status: "in_progress", coverage_done_at: DONE, amount_qr: 350, status: "pending", provider_invoice_id: null, payment_url: null, metadata: {} });
 
 describe("markShootComplete", () => {
   it("stamps coverage_done_at once and moves a confirmed booking to in_progress through the transition rules", async () => {
@@ -148,23 +163,15 @@ describe("markShootComplete", () => {
     expect(await markShootComplete(BOOKING_ID)).toEqual({ ok: true });
     const update = writes.find((w) => w.table === "photo_bookings" && w.op === "update")?.payload as Record<string, unknown>;
     expect(update).toMatchObject({ booking_status: "in_progress", coverage_done_at: expect.any(String) });
-    expect("status" in update || "paid_at" in update || "amount_qr" in update).toBe(false);
+    expect("status" in update || "paid_at" in update || "amount_qr" in update || "balance_state" in update).toBe(false);
     expect(writeAudit).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ action: "booking.shoot_complete", entityId: BOOKING_ID }));
-    expect(writeAudit).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ action: "booking.status", data: expect.objectContaining({ from: "confirmed", to: "in_progress" }) }));
     expect(enqueueClientEmail).not.toHaveBeenCalled();
   });
 
-  it("keeps a later stage as it is, is a no-op when already done, and refuses before confirmation or after cancellation", async () => {
-    const delivered = booking({ booking_status: "delivered", coverage_done_at: null });
-    results.photo_bookings = [{ data: delivered, error: null }, { data: { ...delivered, coverage_done_at: DONE }, error: null }];
-    expect(await markShootComplete(BOOKING_ID)).toEqual({ ok: true });
-    expect((writes.find((w) => w.op === "update")?.payload as Record<string, unknown>).booking_status).toBeUndefined();
-
-    writes.length = 0;
+  it("is a no-op when already done, and refuses before confirmation or after cancellation", async () => {
     results.photo_bookings = { data: booking({ booking_status: "in_progress", coverage_done_at: DONE }), error: null };
     expect(await markShootComplete(BOOKING_ID)).toEqual({ ok: true });
     expect(writes).toEqual([]);
-
     results.photo_bookings = { data: booking({ booking_status: "inquiry" }), error: null };
     expect(await markShootComplete(BOOKING_ID)).toMatchObject({ ok: false, error: expect.stringMatching(/confirm the booking/i) });
     results.photo_bookings = { data: booking({ booking_status: "cancelled" }), error: null };
@@ -173,129 +180,265 @@ describe("markShootComplete", () => {
   });
 });
 
-describe("recordFinalAmount", () => {
+describe("setBookingPrice", () => {
   it("validates the amount and note before loading the booking", async () => {
-    expect(await recordFinalAmount(BOOKING_ID, null, fd({ amount_qr: "0" }))).toMatchObject({ fieldErrors: { amount_qr: expect.any(String) } });
-    expect(await recordFinalAmount(BOOKING_ID, null, fd({ amount_qr: "2000000" }))).toMatchObject({ fieldErrors: { amount_qr: expect.any(String) } });
-    expect(await recordFinalAmount(BOOKING_ID, null, fd({ amount_qr: "350", note: "x".repeat(301) }))).toMatchObject({ fieldErrors: { note: expect.any(String) } });
+    expect(await setBookingPrice(BOOKING_ID, null, fd({ amount_qr: "0" }))).toMatchObject({ fieldErrors: { amount_qr: expect.any(String) } });
+    expect(await setBookingPrice(BOOKING_ID, null, fd({ amount_qr: "2000000" }))).toMatchObject({ fieldErrors: { amount_qr: expect.any(String) } });
+    expect(await setBookingPrice(BOOKING_ID, null, fd({ amount_qr: "350", note: "x".repeat(301) }))).toMatchObject({ fieldErrors: { note: expect.any(String) } });
     expect(writes).toEqual([]);
   });
 
-  it("refuses once MyFatoorah has verified a payment; otherwise updates the amount and stamps metadata", async () => {
-    results.photo_bookings = { data: booking({ status: "paid" }), error: null };
-    expect(await recordFinalAmount(BOOKING_ID, null, fd({ amount_qr: "400" }))).toMatchObject({ error: expect.stringMatching(/already paid/i) });
-    expect(writes).toEqual([]);
-
-    const b = payable();
-    results.photo_bookings = [{ data: b, error: null }, { data: { ...b, amount_qr: 1200.5 }, error: null }];
-    expect(await recordFinalAmount(BOOKING_ID, null, fd({ amount_qr: "1,200.50", note: "Two extra hours" }))).toEqual({ saved: true });
-    const update = writes.find((w) => w.table === "photo_bookings" && w.op === "update")?.payload as Record<string, unknown>;
-    expect(update).toMatchObject({ amount_qr: 1200.5, currency: "QAR", metadata: expect.objectContaining({ final_amount_recorded_at: expect.any(String), final_amount_note: "Two extra hours", final_amount_previous: 350 }) });
+  it("QAR 1000 is split on the server into a 500 deposit and a 500 balance; audit booking.price_set; an inquiry stays an inquiry", async () => {
+    const b = booking({ booking_status: "inquiry", amount_qr: 0, deposit_qr: 0, balance_qr: 0, deposit_state: "not_required", requires_contract: true, contract_state: "required" });
+    results.photo_bookings = [{ data: b, error: null }, { data: { ...b, amount_qr: 1000, deposit_qr: 500, balance_qr: 500, deposit_state: "pending" }, error: null }];
+    expect(await setBookingPrice(BOOKING_ID, null, fd({ amount_qr: "1,000", note: "Two extra hours" }))).toEqual({ saved: true });
+    const update = updates("photo_bookings")[0];
+    expect(update).toMatchObject({ amount_qr: 1000, currency: "QAR", deposit_percent: 50, deposit_qr: 500, balance_qr: 500, deposit_state: "pending", metadata: expect.objectContaining({ final_amount_note: "Two extra hours", final_amount_previous: 0 }) });
     expect("status" in update || "booking_status" in update).toBe(false);
-    expect(writeAudit).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ action: "booking.final_amount", data: expect.objectContaining({ amount_qr: 1200.5, previous_qr: 350 }) }));
+    expect(writeAudit).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ action: "booking.price_set", data: expect.objectContaining({ amount_qr: 1000, deposit_qr: 500, balance_qr: 500 }) }));
+    expect(updates("photo_bookings")).toHaveLength(1);
+    expect(enqueueClientEmail).not.toHaveBeenCalled();
+  });
+
+  it("after the deposit is paid the deposit never changes: only the balance follows the new total, and the total cannot drop below the deposit", async () => {
+    const b = signed({ deposit_state: "paid", deposit_paid_at: DONE, booking_status: "confirmed" });
+    results.photo_bookings = [{ data: b, error: null }, { data: { ...b, amount_qr: 1200, balance_qr: 700 }, error: null }, { data: { ...b, amount_qr: 1200, balance_qr: 700 }, error: null }, { data: { ...b, amount_qr: 1200, balance_qr: 700 }, error: null }];
+    expect(await setBookingPrice(BOOKING_ID, null, fd({ amount_qr: "1200" }))).toEqual({ saved: true });
+    const update = updates("photo_bookings")[0];
+    expect(update).toMatchObject({ amount_qr: 1200, balance_qr: 700 });
+    expect("deposit_qr" in update || "deposit_state" in update).toBe(false);
+    expect(writeAudit).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ action: "booking.price_set", data: expect.objectContaining({ deposit_locked: true, balance_qr: 700 }) }));
+
+    writes.length = 0;
+    results.photo_bookings = { data: b, error: null };
+    expect(await setBookingPrice(BOOKING_ID, null, fd({ amount_qr: "400" }))).toMatchObject({ fieldErrors: { amount_qr: expect.stringMatching(/deposit already paid/i) } });
+    expect(writes).toEqual([]);
+  });
+
+  it("refuses once paid in full, refunded, cancelled or completed", async () => {
+    results.photo_bookings = { data: signed({ deposit_state: "paid", balance_state: "paid", booking_status: "delivered" }), error: null };
+    expect(await setBookingPrice(BOOKING_ID, null, fd({ amount_qr: "400" }))).toMatchObject({ error: expect.stringMatching(/paid in full/i) });
+    results.photo_bookings = { data: signed({ status: "refunded" }), error: null };
+    expect(await setBookingPrice(BOOKING_ID, null, fd({ amount_qr: "400" }))).toMatchObject({ error: expect.stringMatching(/refunded/i) });
+    results.photo_bookings = { data: signed({ booking_status: "completed" }), error: null };
+    expect(await setBookingPrice(BOOKING_ID, null, fd({ amount_qr: "400" }))).toMatchObject({ error: expect.stringMatching(/completed/i) });
+    expect(writes).toEqual([]);
   });
 });
 
-describe("createPaymentRequest", () => {
+describe("approveQuote", () => {
+  it("moves an inquiry to quoted, audits booking.quote_approved and lets the gates pick the waiting stage; nothing is sent", async () => {
+    const b = signed({ booking_status: "inquiry", contract_state: "required" });
+    const quoted = { ...b, booking_status: "quoted", quoted_at: DONE };
+    results.photo_bookings = [{ data: b, error: null }, { data: quoted, error: null }, { data: quoted, error: null }, { data: null, error: null }, { data: { ...quoted, booking_status: "awaiting_contract" }, error: null }];
+    expect(await approveQuote(BOOKING_ID)).toEqual({ ok: true });
+    expect(updates("photo_bookings")[0]).toMatchObject({ booking_status: "quoted", quoted_at: expect.any(String) });
+    expect(updates("photo_bookings")[1]).toMatchObject({ booking_status: "awaiting_contract" });
+    expect(auditActions()).toEqual(["booking.quote_approved", "booking.status"]);
+    expect(enqueueClientEmail).not.toHaveBeenCalled();
+    expect(enqueueOwnerTelegram).not.toHaveBeenCalled();
+  });
+
+  it("refuses without a price or outside the inquiry stage", async () => {
+    results.photo_bookings = { data: signed({ booking_status: "inquiry", amount_qr: 0, deposit_qr: 0 }), error: null };
+    expect(await approveQuote(BOOKING_ID)).toMatchObject({ ok: false, error: expect.stringMatching(/set the price/i) });
+    results.photo_bookings = { data: signed({ booking_status: "quoted" }), error: null };
+    expect(await approveQuote(BOOKING_ID)).toMatchObject({ ok: false, error: expect.stringMatching(/already/i) });
+    expect(writes).toEqual([]);
+  });
+});
+
+describe("transitionBooking and the gates", () => {
+  it("the owner cannot click Confirm past the gates: unsigned agreement or unpaid deposit refuse with the blocker text", async () => {
+    results.photo_bookings = { data: signed({ contract_state: "sent", booking_status: "awaiting_contract" }), error: null };
+    expect(await transitionBooking(BOOKING_ID, "confirmed")).toMatchObject({ ok: false, error: expect.stringMatching(/agreement has not been signed/i) });
+    results.photo_bookings = { data: signed(), error: null };
+    expect(await transitionBooking(BOOKING_ID, "confirmed")).toMatchObject({ ok: false, error: "Blocked because the 50% deposit has not been paid." });
+    expect(writes).toEqual([]);
+  });
+
+  it("confirms by hand only when the agreement is signed AND the deposit is paid", async () => {
+    const b = signed({ deposit_state: "paid", deposit_paid_at: DONE });
+    results.photo_bookings = [{ data: b, error: null }, { data: { ...b, booking_status: "confirmed", confirmed_at: DONE }, error: null }];
+    expect(await transitionBooking(BOOKING_ID, "confirmed")).toEqual({ ok: true });
+    expect(updates("photo_bookings")[0]).toMatchObject({ booking_status: "confirmed" });
+    expect(enqueueClientEmail.mock.calls.map((c) => (c as unknown as [unknown, { kind: string }])[1].kind)).toEqual(["BOOKING_CONFIRMED"]);
+  });
+
+  it("marking delivered by hand makes the balance due (never creates or sends a link) and completed is refused while the balance is due", async () => {
+    const b = signed({ deposit_state: "paid", booking_status: "in_progress", confirmed_at: DONE, coverage_done_at: DONE });
+    results.photo_bookings = [{ data: b, error: null }, { data: { ...b, booking_status: "delivered", balance_state: "due" }, error: null }];
+    expect(await transitionBooking(BOOKING_ID, "delivered")).toEqual({ ok: true });
+    expect(updates("photo_bookings")[0]).toMatchObject({ booking_status: "delivered", delivered_at: expect.any(String), gallery_delivered_at: expect.any(String), balance_state: "due", balance_due_at: expect.any(String) });
+    expect(auditActions()).toEqual(["booking.status", "balance.due"]);
+    expect(writes.some((w) => w.table === "photo_booking_payment_requests")).toBe(false);
+    expect(enqueueClientEmail.mock.calls.map((c) => (c as unknown as [unknown, { kind: string }])[1].kind)).toEqual(["DELIVERY_COMPLETE"]);
+
+    writes.length = 0;
+    results.photo_bookings = { data: { ...b, booking_status: "delivered", balance_state: "due" }, error: null };
+    expect(await transitionBooking(BOOKING_ID, "completed")).toMatchObject({ ok: false, error: expect.stringMatching(/final balance is still due/i) });
+    expect(writes).toEqual([]);
+  });
+});
+
+describe("stage payment requests (owner actions)", () => {
   beforeEach(() => {
     vi.mocked(isPaymentsEnabled).mockReturnValue(true);
   });
 
-  it("refuses before the shoot is complete, without an amount, or once paid; nothing is written or sent", async () => {
-    results.photo_bookings = { data: { ...payable(), coverage_done_at: null }, error: null };
-    expect(await createPaymentRequest(BOOKING_ID)).toMatchObject({ ok: false, error: expect.stringMatching(/shoot complete/i) });
-    results.photo_bookings = { data: { ...payable(), amount_qr: 0 }, error: null };
-    expect(await createPaymentRequest(BOOKING_ID)).toMatchObject({ ok: false, error: expect.stringMatching(/final amount/i) });
-    results.photo_bookings = { data: { ...payable(), status: "paid" }, error: null };
-    expect(await createPaymentRequest(BOOKING_ID)).toMatchObject({ ok: false, error: expect.stringMatching(/already paid/i) });
-    results.photo_bookings = { data: { ...payable(), amount_paid_qr: 350, manual_paid_at: DONE }, error: null };
-    expect(await createPaymentRequest(BOOKING_ID)).toMatchObject({ ok: false, error: expect.stringMatching(/already paid/i) });
-    results.photo_bookings = { data: { ...payable(), booking_status: "inquiry" }, error: null };
-    expect(await createPaymentRequest(BOOKING_ID)).toMatchObject({ ok: false, error: expect.stringMatching(/confirm the booking/i) });
+  it("refuses the deposit before the agreement is signed, and the balance before delivery; nothing is written or sent", async () => {
+    results.photo_bookings = { data: signed({ contract_state: "sent", booking_status: "awaiting_contract" }), error: null };
+    expect(await requestStagePayment(BOOKING_ID, "deposit")).toMatchObject({ ok: false, code: "contract_unsigned", error: expect.stringMatching(/agreement has not been signed/i) });
+    results.photo_bookings = { data: signed(), error: null };
+    expect(await requestStagePayment(BOOKING_ID, "balance")).toMatchObject({ ok: false, code: "balance_not_due", error: "Final balance is not due until delivery." });
     expect(writes).toEqual([]);
     expect(enqueueOwnerTelegram).not.toHaveBeenCalled();
     expect(enqueueClientEmail).not.toHaveBeenCalled();
   });
 
-  it("stores the WEBSITE pay link (token hash in metadata), leaves the lifecycle alone, tells the owner, and e-mails the client only when asked", async () => {
-    const b = payable();
-    const updated = (payload: Record<string, unknown>) => ({ ...b, ...payload });
-    results.photo_bookings = [{ data: b, error: null }, { data: updated({ payment_url: "https://site.test/pay/placeholder" }), error: null }];
-    const out = await createPaymentRequest(BOOKING_ID);
-    expect(out).toMatchObject({ ok: true, emailQueued: false });
+  it("creates the deposit link for the booking's own 500 (never a browser amount), audits it, and sends NOTHING", async () => {
+    results.photo_bookings = { data: signed(), error: null };
+    results.photo_booking_payment_requests = [{ data: [], error: null }, { data: pendingRequest(), error: null }];
+    const out = await requestStagePayment(BOOKING_ID, "deposit", { ...({ amount: 1 } as object) });
+    expect(out).toMatchObject({ ok: true, created: true, regenerated: false, requestId: REQ });
     if (!out.ok) throw new Error("unreachable");
     expect(out.payUrl).toMatch(/^https:\/\/site\.test\/pay\/bbp_[A-Za-z0-9]{40}$/);
-    const update = writes.find((w) => w.table === "photo_bookings" && w.op === "update")?.payload as Record<string, unknown>;
-    expect(update.payment_url).toBe(out.payUrl);
-    expect(update.metadata).toMatchObject({ pay_token_hash: expect.stringMatching(/^[0-9a-f]{64}$/), pay_token_created_at: expect.any(String), payment_requested_at: expect.any(String) });
-    expect((update.metadata as Record<string, unknown>).pay_token_hash).not.toContain(out.payUrl.split("/pay/")[1]);
-    expect("booking_status" in update || "status" in update || "provider_invoice_id" in update || "amount_qr" in update).toBe(false);
-    expect(writeAudit).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ action: "booking.payment_requested", data: expect.objectContaining({ amount_qr: 350, notify_client: false }) }));
-    expect(enqueueOwnerTelegram).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ kind: "BOOKING_PAYMENT_REQUESTED", lines: expect.arrayContaining([`Pay: ${out.payUrl}`]) }));
+    const insert = writes.find((w) => w.table === "photo_booking_payment_requests" && w.op === "insert")?.payload as Record<string, unknown>;
+    expect(insert).toMatchObject({ owner_id: USER, booking_id: BOOKING_ID, stage: "deposit", amount_qr: 500, currency: "QAR", provider: "WEBSITE", status: "pending", generation: 1 });
+    expect(insert.pay_token_hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(auditActions()).toEqual(["payment_request.created"]);
     expect(enqueueClientEmail).not.toHaveBeenCalled();
-
-    // Opt-in e-mail: the PAYMENT_REQUESTED mail goes out with the website link as its button.
-    writes.length = 0;
-    results.photo_bookings = [{ data: b, error: null }, { data: updated({ payment_url: "https://site.test/pay/bbp_" + "a".repeat(40) }), error: null }];
-    const sent = await createPaymentRequest(BOOKING_ID, { notifyClient: true });
-    expect(sent).toMatchObject({ ok: true, emailQueued: true });
-    const mail = enqueueClientEmail.mock.calls.map((c) => (c as unknown as [unknown, { kind: string; draft: { subject: string; text: string } }])[1])[0];
-    expect(mail.kind).toBe("PAYMENT_REQUESTED");
-    expect(mail.draft.subject).toMatch(/^Pay online for your booking/);
-    expect(mail.draft.text).toContain("https://site.test/pay/bbp_");
-    expect(mail.draft.text).not.toContain("\u2014");
+    expect(enqueueOwnerTelegram).not.toHaveBeenCalled();
   });
 
-  it("keeps an earlier provider URL out of payment_url: it moves to metadata.provider_payment_url", async () => {
-    const b = { ...payable(), payment_url: "https://demo.myfatoorah.com/ie/0106230003434", provider_invoice_id: "6409988" };
-    results.photo_bookings = [{ data: b, error: null }, { data: b, error: null }];
-    const out = await createPaymentRequest(BOOKING_ID);
-    expect(out.ok).toBe(true);
-    const update = writes.find((w) => w.table === "photo_bookings" && w.op === "update")?.payload as Record<string, unknown>;
-    expect(update.payment_url).toMatch(/^https:\/\/site\.test\/pay\//);
-    expect((update.metadata as Record<string, unknown>).provider_payment_url).toBe("https://demo.myfatoorah.com/ie/0106230003434");
+  it("a second call returns the same pending link without a new row", async () => {
+    results.photo_bookings = { data: signed(), error: null };
+    results.photo_booking_payment_requests = { data: [pendingRequest()], error: null };
+    const out = await requestStagePayment(BOOKING_ID, "deposit");
+    expect(out).toMatchObject({ ok: true, created: false, requestId: REQ, payUrl: pendingRequest().payment_url });
+    expect(writes.filter((w) => w.op === "insert")).toEqual([]);
+  });
+
+  it("without MyFatoorah configured: a safe admin blocker, or a pasted MANUAL_LINK on the same request row", async () => {
+    vi.mocked(isPaymentsEnabled).mockReturnValue(false);
+    results.photo_bookings = { data: signed(), error: null };
+    results.photo_booking_payment_requests = { data: [], error: null };
+    expect(await requestStagePayment(BOOKING_ID, "deposit")).toEqual({ ok: false, code: "payments_off", error: PAYMENTS_NOT_CONFIGURED_MESSAGE });
+    expect(writes.filter((w) => w.op === "insert")).toEqual([]);
+
+    results.photo_bookings = { data: signed(), error: null };
+    results.photo_booking_payment_requests = [{ data: [], error: null }, { data: pendingRequest({ provider: "MANUAL_LINK", payment_url: "https://portal.example/inv/1", pay_token_hash: null }), error: null }];
+    expect(await requestStagePayment(BOOKING_ID, "deposit", { manualUrl: "https://portal.example/inv/1" })).toMatchObject({ ok: true, payUrl: "https://portal.example/inv/1" });
+    const insert = writes.find((w) => w.table === "photo_booking_payment_requests" && w.op === "insert")?.payload as Record<string, unknown>;
+    expect(insert).toMatchObject({ provider: "MANUAL_LINK", payment_url: "https://portal.example/inv/1", pay_token_hash: null, amount_qr: 500 });
+    expect(auditActions()).toEqual(["payment_request.created", "payment_request.manual_link"]);
+    expect(enqueueClientEmail).not.toHaveBeenCalled();
+  });
+
+  it("Send payment link is the explicit step: vendor-free e-mail to the client, Telegram to the owner, sent_at stamped", async () => {
+    results.photo_bookings = { data: signed({ public_ref: "BB-7K3PQ2" }), error: null };
+    results.photo_booking_payment_requests = { data: [pendingRequest()], error: null };
+    expect(await sendStagePaymentRequest(BOOKING_ID, REQ)).toEqual({ ok: true, emailQueued: true });
+    const mail = enqueueClientEmail.mock.calls.map((c) => (c as unknown as [unknown, { kind: string; alertKey: string; draft: { subject: string; text: string } }])[1])[0];
+    expect(mail.kind).toBe("PAYMENT_REQUESTED");
+    expect(mail.alertKey).toBe(`email:booking:${BOOKING_ID}:payment-requested:${REQ}:1`);
+    expect(mail.draft.subject).toBe("Complete your online payment (BB-7K3PQ2)");
+    expect(mail.draft.text).toContain("deposit (50%)");
+    expect(mail.draft.text).toContain("500 QAR");
+    expect(mail.draft.text).toContain(pendingRequest().payment_url);
+    expect(mail.draft.text.toLowerCase()).not.toMatch(/fatoorah/);
+    expect(enqueueOwnerTelegram).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ kind: "BOOKING_PAYMENT_REQUESTED" }));
+    expect(updates("photo_booking_payment_requests")[0]).toMatchObject({ sent_at: expect.any(String) });
+    expect(auditActions()).toEqual(["payment_request.sent"]);
+  });
+
+  it("Regenerate cancels the pending link and creates generation + 1", async () => {
+    results.photo_bookings = { data: signed(), error: null };
+    results.photo_booking_payment_requests = [
+      { data: [pendingRequest()], error: null }, // listStageRequests (regenerate)
+      { data: [{ id: REQ }], error: null }, // cancel update
+      { data: [pendingRequest({ status: "cancelled" })], error: null }, // listStageRequests (create)
+      { data: pendingRequest({ id: "77777777-7777-4777-8777-777777777777", generation: 2 }), error: null }, // insert
+    ];
+    const out = await regenerateStagePayment(BOOKING_ID, "deposit");
+    expect(out).toMatchObject({ ok: true, created: true, regenerated: true });
+    expect(updates("photo_booking_payment_requests")[0]).toMatchObject({ status: "cancelled" });
+    const insert = writes.find((w) => w.table === "photo_booking_payment_requests" && w.op === "insert")?.payload as Record<string, unknown>;
+    expect(insert.generation).toBe(2);
+    expect(auditActions()).toEqual(["payment_request.cancelled", "payment_request.created", "payment_request.regenerated"]);
   });
 });
 
 describe("recordManualPayment", () => {
-  it("refuses once MyFatoorah has verified the booking as paid — nothing is written", async () => {
-    results.photo_bookings = { data: booking({ status: "paid" }), error: null };
-    const out = await recordManualPayment(BOOKING_ID, null, fd({ method: "cash", amount_qr: "350" }));
-    expect(out).toEqual({ error: "Already paid through MyFatoorah." });
+  it("validates the sheet (method and stage) before loading the booking", async () => {
+    const out = await recordManualPayment(BOOKING_ID, null, fd({ method: "myfatoorah", amount_qr: "0", stage: "tip" }));
+    expect(out).toMatchObject({ fieldErrors: { method: expect.any(String), amount_qr: expect.any(String), stage: expect.any(String) } });
     expect(writes).toEqual([]);
+  });
+
+  it("never overrides a request the provider verified, and refuses a balance before delivery", async () => {
+    results.photo_bookings = { data: signed(), error: null };
+    results.photo_booking_payment_requests = { data: [pendingRequest({ status: "paid" })], error: null };
+    expect(await recordManualPayment(BOOKING_ID, null, fd({ method: "cash", amount_qr: "500", stage: "deposit" }))).toMatchObject({ error: expect.stringMatching(/already paid online/i) });
+    results.photo_bookings = { data: signed({ deposit_state: "paid" }), error: null };
+    expect(await recordManualPayment(BOOKING_ID, null, fd({ method: "cash", amount_qr: "500", stage: "deposit" }))).toMatchObject({ fieldErrors: { stage: expect.stringMatching(/already paid/i) } });
+    results.photo_bookings = { data: signed(), error: null };
+    expect(await recordManualPayment(BOOKING_ID, null, fd({ method: "cash", amount_qr: "500", stage: "balance" }))).toMatchObject({ fieldErrors: { stage: "Final balance is not due until delivery." } });
+    expect(writes.filter((w) => w.op === "insert")).toEqual([]);
     expect(writeAudit).not.toHaveBeenCalled();
-    expect(enqueueOwnerTelegram).not.toHaveBeenCalled();
   });
 
-  it("validates the sheet before loading the booking", async () => {
-    const out = await recordManualPayment(BOOKING_ID, null, fd({ method: "myfatoorah", amount_qr: "0" }));
-    expect(out).toMatchObject({ fieldErrors: { method: expect.any(String), amount_qr: expect.any(String) } });
-    expect(writes).toEqual([]);
-  });
-
-  it("records the payment, refreshes the manual summary and never writes the provider status", async () => {
-    const b = booking({ status: "pending", booking_status: "awaiting_payment", amount_qr: 350 });
+  it("settles the DEPOSIT stage, cancels its pending link, confirms through the gates and never writes the provider status", async () => {
+    const b = signed();
+    const confirmed = { ...b, deposit_state: "paid", amount_paid_qr: 500, manual_paid_at: DONE, booking_status: "confirmed", confirmed_at: DONE };
     results.photo_bookings = [
       { data: b, error: null }, // ownedBooking
-      { data: { ...b, amount_paid_qr: 350, manual_paid_at: "2026-10-06T09:00:00.000Z", payment_method: "cash" }, error: null }, // summary refresh
-      { data: { ...b, amount_paid_qr: 350, booking_status: "confirmed", confirmed_at: "2026-10-06T09:00:00.000Z" }, error: null }, // confirm transition
+      { data: null, error: null }, // stage patch
+      { data: { ...b, deposit_state: "paid", amount_paid_qr: 500, manual_paid_at: DONE, payment_method: "cash" }, error: null }, // summary refresh
+      { data: { ...b, deposit_state: "paid" }, error: null }, // gates: re-read
+      { data: null, error: null }, // gates: move to confirmed
+      { data: confirmed, error: null }, // re-read after gates
+    ];
+    results.photo_booking_payment_requests = [
+      { data: [pendingRequest()], error: null }, // listStageRequests
+      { data: [{ id: REQ }], error: null }, // cancel pending link
     ];
     results.photo_payment_records = [
-      { data: { id: REC, kind: "manual", method: "cash", amount_qr: 350 }, error: null }, // insert
-      { data: [{ amount_qr: 350, paid_at: "2026-10-06T09:00:00.000Z" }], error: null }, // sum
+      { data: { id: REC, kind: "manual", method: "cash", amount_qr: 500 }, error: null }, // insert
+      { data: [{ amount_qr: 500, paid_at: DONE }], error: null }, // sum
     ];
-    const out = await recordManualPayment(BOOKING_ID, null, fd({ method: "cash", amount_qr: "350", paid_at: "2026-10-06" }));
-    expect(out).toEqual({ saved: true });
-    const insert = writes.find((w) => w.table === "photo_payment_records" && w.op === "insert");
-    expect(insert?.payload).toMatchObject({ booking_id: BOOKING_ID, kind: "manual", method: "cash", amount_qr: 350, recorded_by: USER, owner_id: USER });
-    const bookingUpdates = writes.filter((w) => w.table === "photo_bookings" && w.op === "update").map((w) => w.payload as Record<string, unknown>);
+    expect(await recordManualPayment(BOOKING_ID, null, fd({ method: "cash", amount_qr: "500", paid_at: "2026-10-06", stage: "deposit" }))).toEqual({ saved: true });
+    expect(writes.find((w) => w.table === "photo_payment_records" && w.op === "insert")?.payload).toMatchObject({ booking_id: BOOKING_ID, kind: "manual", method: "cash", amount_qr: 500, recorded_by: USER, owner_id: USER });
+    const bookingUpdates = updates("photo_bookings");
+    expect(bookingUpdates[0]).toMatchObject({ deposit_state: "paid", deposit_paid_at: expect.any(String) });
+    expect("balance_state" in bookingUpdates[0]).toBe(false);
+    expect(bookingUpdates[1]).toMatchObject({ amount_paid_qr: 500, payment_method: "cash" });
+    expect(bookingUpdates[2]).toMatchObject({ booking_status: "confirmed" });
     expect(bookingUpdates.some((p) => "status" in p || "paid_at" in p)).toBe(false);
-    expect(bookingUpdates[0]).toMatchObject({ amount_paid_qr: 350, payment_method: "cash" });
-    expect(bookingUpdates[1]).toMatchObject({ booking_status: "confirmed" });
-    expect(writeAudit).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ action: "payment.manual", entityId: BOOKING_ID, data: expect.objectContaining({ method: "cash", amount_qr: 350 }) }));
+    expect(updates("photo_booking_payment_requests")[0]).toMatchObject({ status: "cancelled" });
+    expect(auditActions()).toEqual(["deposit.paid", "payment_request.cancelled", "payment.manual", "booking.status"]);
     expect(enqueueOwnerTelegram).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ kind: "BOOKING_PAID", alertKey: `booking:${BOOKING_ID}:manual:${REC}` }));
     expect(enqueueClientEmail.mock.calls.map((c) => (c as unknown as [unknown, { kind: string }])[1].kind)).toEqual(["PAYMENT_RECEIVED", "BOOKING_CONFIRMED"]);
     expect(writes.some((w) => w.table === "photo_athletes")).toBe(false);
+  });
+
+  it("settles the BALANCE stage after delivery and completes the booking", async () => {
+    const b = signed({ deposit_state: "paid", booking_status: "delivered", balance_state: "due", confirmed_at: DONE, delivered_at: DONE });
+    const settled = { ...b, balance_state: "paid", balance_paid_at: DONE };
+    results.photo_bookings = [
+      { data: b, error: null },
+      { data: null, error: null },
+      { data: settled, error: null },
+      { data: settled, error: null }, // gates re-read (delivered: nothing to move)
+      { data: settled, error: null }, // re-read after gates
+      { data: { ...settled, booking_status: "completed" }, error: null }, // completion update
+    ];
+    results.photo_payment_records = [{ data: { id: REC }, error: null }, { data: [{ amount_qr: 500, paid_at: DONE }], error: null }];
+    expect(await recordManualPayment(BOOKING_ID, null, fd({ method: "bank_transfer", amount_qr: "500", stage: "balance" }))).toEqual({ saved: true });
+    expect(updates("photo_bookings")[0]).toMatchObject({ balance_state: "paid" });
+    expect("deposit_state" in updates("photo_bookings")[0]).toBe(false);
+    expect(updates("photo_bookings").at(-1)).toMatchObject({ booking_status: "completed" });
+    expect(auditActions()).toEqual(["balance.paid", "payment.manual", "booking.completed"]);
   });
 });
 
@@ -325,7 +468,7 @@ describe("tracked athletes are explicit", () => {
     expect(writes.filter((w) => w.op === "update")).toEqual([]);
   });
 
-  it("the webhook's paid path confirms the lifecycle, mirrors the payment and queues client mail — and inserts NO athlete", async () => {
+  it("the webhook's paid path confirms through the gates, mirrors the payment and queues client mail, and inserts NO athlete", async () => {
     const db = new FakeSupabase();
     db.seed("photo_bookings", [booking({ booking_status: "awaiting_payment" })]);
     let t = Date.parse("2026-10-06T12:00:00.000Z");
@@ -333,7 +476,7 @@ describe("tracked athletes are explicit", () => {
     const out = await processWebhook({ body: paymentEvent(), signatureValid: true }, deps);
     expect(out.result).toBe("processed");
     const row = db.tables.photo_bookings.find((b) => b.id === BOOKING_ID)!;
-    expect(row).toMatchObject({ status: "paid", booking_status: "confirmed" });
+    expect(row).toMatchObject({ status: "paid", booking_status: "confirmed", deposit_state: "paid" });
     expect(row.confirmed_at).toBeTruthy();
     expect(row.watcher_athlete_id).toBeNull();
     expect(db.tables.photo_athletes).toHaveLength(0);

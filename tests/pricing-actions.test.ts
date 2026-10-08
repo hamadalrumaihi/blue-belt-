@@ -242,12 +242,20 @@ describe("applyQuoteToBooking (owner)", () => {
     expect(writeAudit).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ entity: "booking", entityId: BOOKING, action: "quote.applied", data: expect.objectContaining({ quote_id: QUOTE, amount_qr: 750, from: "inquiry", to: "quoted" }) }));
   });
 
-  it("leaves a later lifecycle stage alone and only sets the amount", async () => {
+  it("leaves a later lifecycle stage alone and sets the amount with the server-side 50/50 split", async () => {
     results.photo_quotes = { data: quoteRow(), error: null };
     results.photo_bookings = [{ data: booking({ booking_status: "awaiting_payment", amount_qr: 350 }), error: null }, { data: { id: BOOKING, client_id: null, booking_status: "awaiting_payment" }, error: null }];
     expect(await applyQuoteToBooking(QUOTE, 900)).toEqual({ ok: true });
     const bookingUpdate = writes.find((w) => w.table === "photo_bookings" && w.op === "update")!;
-    expect(bookingUpdate.payload).toEqual({ amount_qr: 900 });
+    expect(bookingUpdate.payload).toEqual({ amount_qr: 900, deposit_percent: 50, deposit_qr: 450, balance_qr: 450, deposit_state: "pending" });
+  });
+
+  it("only moves the balance once the deposit is paid", async () => {
+    results.photo_quotes = { data: quoteRow(), error: null };
+    results.photo_bookings = [{ data: booking({ booking_status: "confirmed", amount_qr: 1000, deposit_state: "paid", deposit_qr: 500, balance_qr: 500 }), error: null }, { data: { id: BOOKING, client_id: null, booking_status: "confirmed" }, error: null }];
+    expect(await applyQuoteToBooking(QUOTE, 1200)).toEqual({ ok: true });
+    const bookingUpdate = writes.find((w) => w.table === "photo_bookings" && w.op === "update")!;
+    expect(bookingUpdate.payload).toEqual({ amount_qr: 1200, balance_qr: 700 });
   });
 
   it("reports a concurrent change instead of applying blindly", async () => {

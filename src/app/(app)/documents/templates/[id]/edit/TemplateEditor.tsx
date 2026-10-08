@@ -11,6 +11,7 @@ const FIELD_HELP: Record<MergeField, string> = {
   client_name: "Client's full name",
   client_email: "Client's e-mail",
   client_phone: "Client's phone",
+  guardian_name: "Parent or guardian of a minor",
   athlete_name: "Athlete on the booking",
   organization_name: "Club / academy",
   business_name: "Your studio name",
@@ -20,7 +21,8 @@ const FIELD_HELP: Record<MergeField, string> = {
   session_date: "Session date & time",
   location: "Venue / place",
   amount: "Booking amount (QAR)",
-  deposit: "Deposit (QAR)",
+  deposit: "50% deposit (QAR)",
+  balance: "50% balance after delivery (QAR)",
   booking_ref: "Booking reference",
   today: "Date the document is created",
 };

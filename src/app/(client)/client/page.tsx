@@ -3,9 +3,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { EmptyState } from "@/components/EmptyState";
 import { BookmarkIcon, ChevronRightIcon, ExternalIcon } from "@/components/icons";
-import { BOOKING_TYPE_LABEL, effectivePayment, formatQr } from "@/lib/bookings/state";
-import { clientPaymentLine, listMyBookings, loadMyPeople } from "@/lib/client-portal/queries";
-import { DOCUMENT_STATUS_LABEL } from "@/lib/documents/state";
+import { BOOKING_TYPE_LABEL } from "@/lib/bookings/state";
+import { listMyBookings, loadMyPeople } from "@/lib/client-portal/queries";
 import { isStudioRole, resolveViewer } from "@/lib/roles";
 import { loadPublicStudio } from "@/lib/studio/queries";
 import { formatDateTime } from "@/lib/time";
@@ -41,11 +40,10 @@ export default async function ClientPortalPage() {
           />
         ) : (
           <ul className="mt-6 space-y-3">
-            {items.map(({ booking, documents, gallery, payments }) => {
-              const pay = effectivePayment(booking);
-              const payLine = clientPaymentLine(booking);
+            {items.map(({ booking, documents, gallery, summary }) => {
               const contract = documents[0] ?? null;
               const when = booking.session_at ? formatDateTime(booking.session_at) : null;
+              const galleryReady = Boolean(gallery && (gallery.status === "ready" || gallery.status === "delivered") && gallery.pictime_url);
               return (
                 <li key={booking.id} className="card p-4">
                   <div className="flex items-start justify-between gap-3">
@@ -60,25 +58,25 @@ export default async function ClientPortalPage() {
                   <dl className="mt-4 grid gap-2 text-sm sm:grid-cols-3">
                     <div className="rounded-xl bg-page p-3">
                       <dt className="text-xs font-semibold text-muted">Payment</dt>
-                      <dd className="mt-0.5 font-bold text-ink">{payLine.title}</dd>
-                      {payLine.detail && <p className="mt-1 text-xs text-muted">{payLine.detail}</p>}
-                      {payLine.payUrl && <a href={payLine.payUrl} className="btn-primary mt-2 min-h-10 w-full px-3 text-xs">Pay online{pay.state === "partial" ? ` (${formatQr(pay.dueQr)})` : ""}</a>}
+                      <dd className="mt-0.5 font-bold text-ink">{summary.headline}</dd>
+                      <p className="mt-1 text-xs text-muted">{summary.deposit.label}{summary.deposit.amount ? ` · ${summary.deposit.amount}` : ""}</p>
+                      <p className="text-xs text-muted">{summary.balance.label}{summary.balance.amount ? ` · ${summary.balance.amount}` : ""}</p>
+                      {summary.pay && <a href={summary.pay.payUrl} className="btn-primary mt-2 min-h-11 w-full px-3 text-xs">Pay online {summary.pay.amount}</a>}
                     </div>
                     <div className="rounded-xl bg-page p-3">
                       <dt className="text-xs font-semibold text-muted">Agreement</dt>
-                      <dd className="mt-0.5 font-bold text-ink">{contract ? DOCUMENT_STATUS_LABEL[contract.status] : "None yet"}</dd>
-                      {contract && (contract.status === "sent" || contract.status === "viewed") && <p className="mt-1 text-xs text-muted">Open the signing link from your e-mail or WhatsApp to sign.</p>}
-                      {contract?.status === "signed" && <a href={`/api/documents/${contract.id}/pdf`} className="mt-1 inline-block text-xs font-semibold text-primary hover:underline">Download signed copy</a>}
+                      <dd className="mt-0.5 font-bold text-ink">{summary.contract.label}</dd>
+                      {contract && (contract.status === "sent" || contract.status === "viewed") && <p className="mt-1 text-xs text-muted">Open the signing link from your e-mail or WhatsApp to sign your agreement.</p>}
+                      {contract?.status === "signed" && <a href={`/api/documents/${contract.id}/pdf`} className="mt-1 inline-block min-h-11 py-2 text-xs font-semibold text-primary hover:underline">Download signed copy</a>}
                     </div>
                     <div className="rounded-xl bg-page p-3">
                       <dt className="text-xs font-semibold text-muted">Gallery</dt>
-                      <dd className="mt-0.5 font-bold text-ink">{gallery && (gallery.status === "ready" || gallery.status === "delivered") && gallery.pictime_url ? "Ready" : "Not ready yet"}</dd>
-                      {gallery && (gallery.status === "ready" || gallery.status === "delivered") && gallery.pictime_url && <a href={gallery.pictime_url} target="_blank" rel="noopener noreferrer" className="btn-secondary mt-2 min-h-10 w-full px-3 text-xs"><ExternalIcon size={14} /> View gallery</a>}
+                      <dd className="mt-0.5 font-bold text-ink">{galleryReady ? (gallery?.status === "delivered" ? "Gallery delivered" : "Gallery ready") : booking.booking_status === "in_progress" ? "Editing" : "Not ready yet"}</dd>
+                      {galleryReady && gallery?.pictime_url && <a href={gallery.pictime_url} target="_blank" rel="noopener noreferrer" className="btn-secondary mt-2 min-h-11 w-full px-3 text-xs"><ExternalIcon size={14} /> View and buy photos</a>}
                     </div>
                   </dl>
 
-                  <div className="mt-3 flex items-center justify-between gap-2">
-                    <p className="text-xs text-muted">{payments.length ? `${payments.length} payment${payments.length === 1 ? "" : "s"} recorded` : ""}</p>
+                  <div className="mt-3 flex items-center justify-end gap-2">
                     <Link href={`/client/bookings/${booking.id}`} className="btn-ghost min-h-11 px-3 text-sm text-primary">Details <ChevronRightIcon size={16} /></Link>
                   </div>
                 </li>

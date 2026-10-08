@@ -7,7 +7,8 @@ import { DownloadIcon, EditIcon } from "@/components/icons";
 import { BOOKING_STATUS_LABEL } from "@/lib/bookings/state";
 import { shortHash } from "@/lib/documents/hash";
 import { getDocument } from "@/lib/documents/queries";
-import { DOCUMENT_KIND_LABEL, isDocumentKind } from "@/lib/documents/state";
+import { DOCUMENT_KIND_LABEL, isDocumentKind, SIGNER_ROLE_LABEL } from "@/lib/documents/state";
+import { esignStatus } from "@/lib/esign/config";
 import { formatStamp } from "@/lib/time";
 import { isUuid } from "@/lib/validation";
 import { DocumentStatusPill } from "../DocumentStatusPill";
@@ -28,8 +29,11 @@ function evidenceRows(evidence: unknown): Array<[string, string]> {
   const push = (label: string, v: unknown) => {
     if (typeof v === "string" && v) rows.push([label, v]);
   };
-  push("Method", e.method === "typed_name" ? "Typed name + agreement checkbox" : String(e.method ?? ""));
+  push("Method", e.method === "typed_name" ? "Typed name + agreement checkbox" : e.method === "mock" ? "Test signing, not a real signature" : String(e.method ?? ""));
   push("Typed name", e.typed_name);
+  push("Signer role", e.signer_role === "guardian" ? "Parent or guardian" : e.signer_role === "client" ? "Client" : "");
+  push("Envelope", e.envelope_id);
+  push("Note", e.note);
   push("Agreed to", e.agreed_text);
   push("Network address", e.ip);
   push("Device", e.user_agent);
@@ -48,10 +52,11 @@ export default async function DocumentDetailPage({ params }: PageProps<"/documen
   const kindLabel = isDocumentKind(doc.kind) ? DOCUMENT_KIND_LABEL[doc.kind] : doc.kind;
   const evidence = evidenceRows(doc.signature_evidence);
   const hashMatches = doc.body_hash !== null;
+  const esign = esignStatus();
 
   return (
     <>
-      <BrandHeader title={doc.title} subtitle={kindLabel} backHref="/documents" actions={doc.status === "draft" ? <Link href={`/documents/${doc.id}/edit`} className="btn-secondary min-h-10 px-3 text-xs"><EditIcon size={16} /> Edit text</Link> : undefined} />
+      <BrandHeader title={doc.title} subtitle={`${kindLabel} · signer: ${SIGNER_ROLE_LABEL[doc.signer_role]}`} backHref="/documents" actions={doc.status === "draft" ? <Link href={`/documents/${doc.id}/edit`} className="btn-secondary min-h-10 px-3 text-xs"><EditIcon size={16} /> Edit text</Link> : undefined} />
       <PageBody className="max-w-3xl space-y-4">
         <section className="card p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -64,11 +69,17 @@ export default async function DocumentDetailPage({ params }: PageProps<"/documen
             {doc.viewed_at && <><dt>First opened</dt><dd className="text-ink">{formatStamp(doc.viewed_at)}</dd></>}
             {doc.signed_at && <><dt>Signed</dt><dd className="text-ink">{formatStamp(doc.signed_at)}</dd></>}
             {doc.declined_at && <><dt>Declined</dt><dd className="text-ink">{formatStamp(doc.declined_at)}</dd></>}
-            {doc.expires_at && doc.status !== "signed" && <><dt>{doc.status === "draft" ? "Valid for" : "Expires"}</dt><dd className="text-ink">{doc.status === "draft" ? `${Math.max(1, Math.round((Date.parse(doc.expires_at) - Date.parse(doc.created_at)) / 86_400_000))} days after sending` : formatStamp(doc.expires_at)}</dd></>}
-            <dt>Template</dt><dd className="text-ink">{template ? `${template.name} · v${doc.template_version ?? template.version}` : "—"}</dd>
+            {doc.voided_at && <><dt>Voided</dt><dd className="text-ink">{formatStamp(doc.voided_at)}</dd></>}
+            {doc.expires_at && (doc.status === "draft" || doc.status === "sent" || doc.status === "viewed" || doc.status === "expired") && <><dt>{doc.status === "draft" ? "Valid for" : doc.status === "expired" ? "Expired" : "Expires"}</dt><dd className="text-ink">{doc.status === "draft" ? `${Math.max(1, Math.round((Date.parse(doc.expires_at) - Date.parse(doc.created_at)) / 86_400_000))} days after sending` : formatStamp(doc.expires_at)}</dd></>}
+            <dt>Signer</dt><dd className="text-ink">{SIGNER_ROLE_LABEL[doc.signer_role]}{doc.required_for_confirmation ? "" : " · not needed for confirmation"}</dd>
+            <dt>Template</dt><dd className="text-ink">{template ? `${template.name} · v${doc.template_version ?? template.version}` : "—"}{doc.document_version ? ` (${doc.document_version})` : ""}</dd>
             <dt>Body hash</dt><dd className="font-mono text-ink">{shortHash(doc.body_hash)}</dd>
+            <dt>Provider</dt><dd className="break-all text-ink">{doc.provider}{doc.provider_envelope_id ? ` · envelope ${doc.provider_envelope_id}` : ""}{doc.provider_status ? ` · ${doc.provider_status}` : ""}</dd>
+            {doc.provider_error && <><dt>Provider error</dt><dd className="break-all font-semibold text-danger">{doc.provider_error}</dd></>}
+            {doc.completed_document_ref && <><dt>Completed document</dt><dd className="break-all text-ink">{doc.completed_document_ref}</dd></>}
+            {doc.certificate_ref && <><dt>Certificate</dt><dd className="break-all text-ink">{doc.certificate_ref}</dd></>}
           </dl>
-          <DocumentActions documentId={doc.id} status={doc.status} title={doc.title} />
+          <DocumentActions documentId={doc.id} status={doc.status} title={doc.title} provider={doc.provider} esign={{ provider: esign.provider, configured: esign.configured, mock: esign.mock, missing: esign.missing }} />
         </section>
 
         <section className="card p-4">
@@ -83,9 +94,9 @@ export default async function DocumentDetailPage({ params }: PageProps<"/documen
           </dl>
         </section>
 
-        {(doc.status === "signed" || doc.status === "declined") && evidence.length > 0 && (
+        {(doc.status === "signed" || doc.status === "declined" || doc.status === "void") && evidence.length > 0 && (
           <section className="card p-4">
-            <p className="eyebrow">{doc.status === "signed" ? "Signature evidence" : "Decline details"}</p>
+            <p className="eyebrow">{doc.status === "signed" ? "Signature evidence" : doc.status === "void" ? "Void details" : "Decline details"}</p>
             <dl className="mt-2 grid grid-cols-[9rem_1fr] gap-x-4 gap-y-1 text-xs">
               {evidence.map(([k, v]) => (
                 <div key={k} className="contents">

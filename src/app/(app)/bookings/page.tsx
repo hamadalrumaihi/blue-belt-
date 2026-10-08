@@ -16,11 +16,18 @@ export const dynamic = "force-dynamic";
 
 const FILTERS: Array<{ key: BookingFilter; label: string }> = [
   { key: "needs_action", label: "Needs action" },
+  { key: "awaiting_deposit", label: "Awaiting deposit" },
   { key: "confirmed", label: "Confirmed / upcoming" },
-  { key: "shoot_done", label: "Shoot done, awaiting payment" },
+  { key: "balance_due", label: "Balance due" },
   { key: "delivered", label: "Delivered" },
   { key: "all", label: "All" },
 ];
+
+const EMPTY_HINT: Partial<Record<BookingFilter, string>> = {
+  needs_action: "Every booking is confirmed, delivered or closed.",
+  awaiting_deposit: "No signed booking is waiting for its deposit.",
+  balance_due: "No delivered booking has a balance due.",
+};
 
 function href(filter: BookingFilter, q: string | null, type: string | null): string {
   const params = new URLSearchParams();
@@ -69,7 +76,7 @@ export default async function BookingsPage({ searchParams }: PageProps<"/booking
           counts.all === 0 ? (
             <EmptyState icon={<BookmarkIcon />} title="No bookings yet" description="Add a booking by hand, or open public booking on your website so clients can request one." action={<Link href="/bookings/new" className="btn-primary">New booking</Link>} />
           ) : (
-            <EmptyState compact title={q ? `Nothing matches “${q}”` : `Nothing under “${current.label}”`} description={filter === "needs_action" && !q ? "Every booking is confirmed, delivered or closed." : filter === "shoot_done" && !q ? "No completed shoot is waiting for payment." : "Try another filter or search."} action={<Link href="/bookings?filter=all" className="btn-secondary">Show all bookings</Link>} />
+            <EmptyState compact title={q ? `Nothing matches “${q}”` : `Nothing under “${current.label}”`} description={!q && EMPTY_HINT[filter] ? EMPTY_HINT[filter] : "Try another filter or search."} action={<Link href="/bookings?filter=all" className="btn-secondary">Show all bookings</Link>} />
           )
         ) : (
           <ul className="card divide-y divide-line">
@@ -91,6 +98,7 @@ export default async function BookingsPage({ searchParams }: PageProps<"/booking
                     <div className="mt-1.5 flex flex-wrap gap-1.5">
                       <BookingStatusBadge status={b.booking_status} size="sm" />
                       <PaymentBadge payment={b.payment} amountQr={b.amount_qr} size="sm" />
+                      {b.balance_state === "due" && <span className="inline-flex items-center rounded-full border border-warning/30 bg-warning-soft px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-warning">Balance due</span>}
                     </div>
                   </div>
                   <p className="shrink-0 text-right text-sm font-black tabular-nums text-ink">{formatQr(b.amount_qr)}</p>

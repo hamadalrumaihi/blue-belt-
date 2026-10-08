@@ -6,20 +6,26 @@ import { FormError, FormField } from "@/components/FormField";
 import { CloseIcon, PlusIcon } from "@/components/icons";
 import { recordManualPayment, type BookingFormState } from "@/lib/actions/bookings";
 import { formatQr, PAYMENT_METHOD_LABEL } from "@/lib/bookings/state";
+import type { PaymentStage } from "@/lib/supabase/database.types";
 import { todayInZone } from "@/lib/time";
 
-type Props = { bookingId: string; providerPaid: boolean; dueQr: number; currency: string };
+export type ManualStage = { stage: PaymentStage; amountQr: number; open: boolean; reason: string | null };
+
+type Props = { bookingId: string; providerPaid: boolean; currency: string; stages: ManualStage[] };
 
 const METHODS = ["cash", "bank_transfer", "fawran", "other"] as const;
+const STAGE_TITLE: Record<PaymentStage, string> = { deposit: "Deposit (50%)", balance: "Remaining balance (50%)" };
 
 /**
- * "Record a payment" sheet for cash / bank transfer / Fawran. Disabled once
- * MyFatoorah has verified the booking as paid — a manual record never
- * overrides the provider's verdict.
+ * "Record a payment" sheet for cash / bank transfer / Fawran. The owner says
+ * which stage it settles; a stage the provider already verified is never
+ * overridden (it is simply not offered).
  */
-export function ManualPaymentForm({ bookingId, providerPaid, dueQr, currency }: Props) {
+export function ManualPaymentForm({ bookingId, providerPaid, currency, stages }: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const openStages = stages.filter((s) => s.open);
+  const [stage, setStage] = useState<PaymentStage>(openStages[0]?.stage ?? "deposit");
   const [state, formAction, pending] = useActionState<BookingFormState, FormData>(async (prev, fd) => {
     const res = await recordManualPayment(bookingId, prev, fd);
     if (res?.saved) {
@@ -29,9 +35,11 @@ export function ManualPaymentForm({ bookingId, providerPaid, dueQr, currency }: 
     return res;
   }, null);
   const fe = state?.fieldErrors ?? {};
-  const ids = { method: useId(), amount: useId(), paid: useId(), note: useId() };
+  const ids = { stage: useId(), method: useId(), amount: useId(), paid: useId(), note: useId() };
+  const selected = stages.find((s) => s.stage === stage) ?? openStages[0] ?? null;
 
   if (providerPaid) return <p className="text-xs text-muted">Paid online, verified by MyFatoorah. Manual records are not needed.</p>;
+  if (!openStages.length) return <p className="text-xs text-muted">Nothing can be recorded by hand right now: {stages.map((s) => `${STAGE_TITLE[s.stage].toLowerCase()}: ${s.reason ?? "open"}`).join("; ")}.</p>;
 
   return (
     <>
@@ -42,11 +50,20 @@ export function ManualPaymentForm({ bookingId, providerPaid, dueQr, currency }: 
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2 id={`${ids.method}-title`} className="text-lg font-extrabold text-ink">Record a payment</h2>
-                {dueQr > 0 && <p className="text-sm text-muted">{formatQr(dueQr)} still due</p>}
+                <p className="text-sm text-muted">Received outside the website. The stage you pick is marked paid.</p>
               </div>
               <button type="button" className="btn-ghost h-9 w-9 p-0" onClick={() => setOpen(false)} aria-label="Close" disabled={pending}><CloseIcon size={18} /></button>
             </div>
             <FormError message={state?.error} />
+            <FormField label="Which payment is this?" htmlFor={ids.stage} required error={fe.stage}>
+              <select id={ids.stage} name="stage" className="input" value={stage} onChange={(e) => setStage(e.target.value as PaymentStage)} required>
+                {stages.map((s) => (
+                  <option key={s.stage} value={s.stage} disabled={!s.open}>
+                    {STAGE_TITLE[s.stage]} · {formatQr(s.amountQr)}{s.open ? "" : ` (${s.reason})`}
+                  </option>
+                ))}
+              </select>
+            </FormField>
             <FormField label="How did it arrive?" htmlFor={ids.method} required error={fe.method}>
               <select id={ids.method} name="method" className="input" defaultValue="cash" required>
                 {METHODS.map((m) => <option key={m} value={m}>{PAYMENT_METHOD_LABEL[m]}</option>)}
@@ -54,7 +71,7 @@ export function ManualPaymentForm({ bookingId, providerPaid, dueQr, currency }: 
             </FormField>
             <div className="grid gap-4 sm:grid-cols-2">
               <FormField label={`Amount (${currency})`} htmlFor={ids.amount} required error={fe.amount_qr}>
-                <input id={ids.amount} name="amount_qr" className="input" inputMode="decimal" type="text" defaultValue={dueQr > 0 ? String(dueQr) : ""} placeholder="350" autoComplete="off" required />
+                <input key={stage} id={ids.amount} name="amount_qr" className="input" inputMode="decimal" type="text" defaultValue={selected && selected.amountQr > 0 ? String(selected.amountQr) : ""} placeholder="350" autoComplete="off" required />
               </FormField>
               <FormField label="Received on" htmlFor={ids.paid} error={fe.paid_at}>
                 <input id={ids.paid} name="paid_at" className="input" type="date" defaultValue={todayInZone()} />
@@ -64,8 +81,8 @@ export function ManualPaymentForm({ bookingId, providerPaid, dueQr, currency }: 
               <input id={ids.note} name="note" className="input" maxLength={500} autoComplete="off" />
             </FormField>
             <div className="flex gap-2">
-              <button type="button" className="btn-secondary flex-1" onClick={() => setOpen(false)} disabled={pending}>Cancel</button>
-              <button type="submit" className="btn-primary flex-1" disabled={pending} aria-busy={pending}>{pending ? "Saving…" : "Save payment"}</button>
+              <button type="button" className="btn-secondary min-h-11 flex-1" onClick={() => setOpen(false)} disabled={pending}>Cancel</button>
+              <button type="submit" className="btn-primary min-h-11 flex-1" disabled={pending} aria-busy={pending}>{pending ? "Saving..." : "Save payment"}</button>
             </div>
           </form>
         </div>
