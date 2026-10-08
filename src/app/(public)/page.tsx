@@ -5,7 +5,7 @@ import { PUBLIC_BOOKING_TYPES } from "@/lib/bookings/public-form";
 import { formatQr } from "@/lib/bookings/state";
 import { buildHomeJsonLd, DEFAULT_DESCRIPTION, DEFAULT_TITLE, pageMetadata, serializeJsonLd } from "@/lib/seo";
 import { DEFAULT_STUDIO, loadPublicStudio, pictimeGalleryUrl, siteUrl } from "@/lib/studio/queries";
-import { PictimeTestimonials } from "@/components/public/PictimeTestimonials";
+import { Testimonials } from "@/components/public/Testimonials";
 import { readTestimonials } from "@/lib/studio/site-content";
 import type { BookingType, PhotoServiceRow } from "@/lib/supabase/database.types";
 
@@ -157,35 +157,8 @@ export default async function HomePage() {
         </div>
       </section>
 
-      {/* Testimonials */}
-      <section className="mx-auto max-w-6xl px-4 py-16 lg:px-8 lg:py-24" aria-labelledby="stories-heading">
-        <div className="max-w-2xl">
-          <p className="eyebrow">Athletes and clubs</p>
-          <h2 id="stories-heading" className="mt-2 text-3xl font-extrabold tracking-tight text-navy sm:text-4xl">In their words</h2>
-        </div>
-        <div className="mt-10">
-          <PictimeTestimonials fallback={testimonials.length ? (
-          <ul className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {testimonials.map((t) => (
-              <li key={`${t.name}-${t.quote.slice(0, 16)}`} className="card flex flex-col p-6">
-                <blockquote className="flex-1 text-base leading-relaxed text-ink">“{t.quote}”</blockquote>
-                <p className="mt-5 text-sm font-bold text-navy">{t.name}{t.role ? <span className="font-normal text-muted"> · {t.role}</span> : null}</p>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <div className="rounded-card border border-dashed border-line p-8 text-center">
-            <p className="text-base font-semibold text-ink">Client words are coming.</p>
-            <p className="mx-auto mt-2 max-w-md text-sm text-muted">We only publish what athletes and coaches actually said. Until then, see recent work on Instagram and in our galleries.</p>
-            {studio?.instagram && (
-              <a href={`https://instagram.com/${studio.instagram.replace(/^@/, "")}`} target="_blank" rel="noopener noreferrer" data-umami-event="contact-click" className="btn-secondary mt-5">
-                See recent work on Instagram
-              </a>
-            )}
-          </div>
-        )} />
-        </div>
-      </section>
+      {/* Native client reviews */}
+      <Testimonials reviews={testimonials} />
 
       {/* CTA */}
       <section className="bg-navy text-white">

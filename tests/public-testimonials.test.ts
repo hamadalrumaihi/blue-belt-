@@ -2,31 +2,37 @@ import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { PICTIME_RESIZE_SCRIPT, PICTIME_TESTIMONIALS_SRC, PictimeTestimonials } from "@/components/public/PictimeTestimonials";
+import { Testimonials } from "@/components/public/Testimonials";
 
-describe("Pic-Time testimonials embed", () => {
-  it("renders the Pic-Time iframe with the studio's testimonials URL, a title and a sandbox", () => {
-    const html = renderToStaticMarkup(createElement(PictimeTestimonials, { fallback: createElement("p", null, "fallback copy") }));
-    expect(html).toContain('id="pictimeIntegration"');
-    expect(html).toContain('name="pictimeIntegration"');
-    expect(html).toContain(`src="${PICTIME_TESTIMONIALS_SRC.replace(/&/g, "&amp;")}"`);
-    expect(html).toContain('title="Client testimonials from our galleries"');
-    expect(html).not.toMatch(/title="[^"]*pic-?time/i);
-    expect(html).toMatch(/sandbox="[^"]*allow-scripts[^"]*"/);
-    expect(html).toContain("width:100%");
-    // Loading skeleton first; the fallback is not shown until Pic-Time fails to answer.
-    expect(html).toContain('aria-busy="true"');
-    expect(html).not.toContain("fallback copy");
-    // No inline script / arbitrary HTML: the resize helper is attached from a fixed URL on load.
+describe("native website testimonials", () => {
+  it("shows a working contact invitation instead of an empty embed when there are no reviews", () => {
+    const html = renderToStaticMarkup(createElement(Testimonials, { reviews: [] }));
+    expect(html).toContain("Shot with us? Tell us how it went.");
+    expect(html).toContain('href="/contact"');
+    expect(html).not.toContain("<blockquote");
+    expect(html).not.toContain("<iframe");
     expect(html).not.toContain("<script");
-    expect(html).not.toContain("onload=");
+    expect(html).not.toMatch(/pic-?time/i);
   });
 
-  it("uses only the two Pic-Time origins and the home page embeds it", () => {
-    expect(new URL(PICTIME_TESTIMONIALS_SRC).origin).toBe("https://bluebeltmedia.pic-time.com");
-    expect(new URL(PICTIME_RESIZE_SCRIPT).origin).toBe("https://pictimecloudaf-pub-g3csanfebyefg3dm.a02.azurefd.net");
+  it("renders supplied reviews safely, supports Arabic, and never invents a rating", () => {
+    const html = renderToStaticMarkup(createElement(Testimonials, { reviews: [
+      { name: "هزاع", quote: "صور جميلة", role: "Athlete" },
+      { name: "Coach", quote: '<script>alert("test")</script>', role: null },
+    ] }));
+    expect(html).toContain("صور جميلة");
+    expect(html).toContain("هزاع");
+    expect(html).toContain('dir="auto"');
+    expect(html).toContain("&lt;script&gt;");
+    expect(html).not.toContain("<script>");
+    expect(html).not.toContain("Shot with us?");
+    expect(html).not.toContain("rating");
+    expect(html).toContain('tabindex="0"');
+  });
+
+  it("uses the native section on the homepage without mounting the vendor embed", () => {
     const page = readFileSync(new URL("../src/app/(public)/page.tsx", import.meta.url), "utf8");
-    expect(page).toContain("<PictimeTestimonials");
-    expect(page).toContain("fallback=");
+    expect(page).toContain("<Testimonials reviews={testimonials}");
+    expect(page).not.toContain("PictimeTestimonials");
   });
 });
