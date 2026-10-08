@@ -1,4 +1,4 @@
-import type { DocumentKind, DocumentStatus } from "@/lib/supabase/database.types";
+import type { DocumentKind, DocumentStatus, SignerRole } from "@/lib/supabase/database.types";
 
 /**
  * Document lifecycle (photo_documents.status). Pure.
@@ -6,10 +6,11 @@ import type { DocumentKind, DocumentStatus } from "@/lib/supabase/database.types
  *   draft → sent → viewed → signed
  *                        → declined
  *                        → expired
+ *   draft / sent / viewed → void   (withdrawn by the studio, with a reason)
  *
  * `signed` is immutable: body, hash and evidence never change afterwards. A
- * declined or expired document is re-issued as a NEW document (new token,
- * new version), never edited in place.
+ * declined, expired or voided document is re-issued as a NEW document (new
+ * token or envelope, new version), never edited in place.
  */
 export const DOCUMENT_STATUSES = ["draft", "sent", "viewed", "signed", "declined", "expired", "void"] as const satisfies readonly DocumentStatus[];
 
@@ -36,15 +37,34 @@ export const DOCUMENT_STATUS_LABEL: Record<DocumentStatus, string> = {
 export const DOCUMENT_KINDS = ["services_agreement", "event_agreement", "session_agreement", "print_release", "model_release", "guardian_release", "club_agreement", "custom"] as const satisfies readonly DocumentKind[];
 
 export const DOCUMENT_KIND_LABEL: Record<DocumentKind, string> = {
-  services_agreement: "Photography services agreement",
-  event_agreement: "Combat sports event photography agreement",
-  session_agreement: "Fighter portrait / session agreement",
-  print_release: "Print release",
+  services_agreement: "Photography Services Agreement",
+  event_agreement: "Combat Sport Event Photography Services Agreement",
+  session_agreement: "Fighter Portrait Session Agreement",
+  print_release: "Print Release",
   model_release: "Model / image release",
-  guardian_release: "Minor / guardian release",
+  guardian_release: "Minor / Guardian Release",
   club_agreement: "Club / team agreement",
   custom: "Custom document",
 };
+
+export const SIGNER_ROLES = ["client", "guardian"] as const satisfies readonly SignerRole[];
+
+export const SIGNER_ROLE_LABEL: Record<SignerRole, string> = {
+  client: "Client",
+  guardian: "Parent or guardian",
+};
+
+export function isSignerRole(v: unknown): v is SignerRole {
+  return typeof v === "string" && (SIGNER_ROLES as readonly string[]).includes(v);
+}
+
+/** Statuses that count as "still in play" for a booking: drafts are not yet sent, closed ones were superseded. */
+export const ACTIVE_DOCUMENT_STATUSES: readonly DocumentStatus[] = ["sent", "viewed", "signed", "declined"];
+
+/** Terminal statuses: nothing can happen to the document any more. */
+export function isClosedDocumentStatus(status: DocumentStatus): boolean {
+  return DOCUMENT_TRANSITIONS[status].length === 0;
+}
 
 export function isDocumentStatus(v: unknown): v is DocumentStatus {
   return typeof v === "string" && (DOCUMENT_STATUSES as readonly string[]).includes(v);
@@ -68,6 +88,7 @@ export const MERGE_FIELDS = [
   "client_name",
   "client_email",
   "client_phone",
+  "guardian_name",
   "athlete_name",
   "organization_name",
   "business_name",
@@ -78,6 +99,7 @@ export const MERGE_FIELDS = [
   "location",
   "amount",
   "deposit",
+  "balance",
   "booking_ref",
   "today",
 ] as const;

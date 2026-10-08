@@ -5,18 +5,27 @@ import { FormError, FormField } from "@/components/FormField";
 import { CheckIcon } from "@/components/icons";
 import { declineByToken, signByToken } from "@/lib/actions/sign";
 
-type Props = { token: string; studioName: string; documentId: string; prefill: { name: string | null; email: string | null; phone: string | null } };
+type Props = {
+  token: string;
+  studioName: string;
+  documentId: string;
+  prefill: { name: string | null; email: string | null; phone: string | null };
+  signer: { role: "client" | "guardian"; athleteName: string | null; guardianName: string | null };
+};
 
 /**
- * Typed-name e-signature. Everything the client needs is on one screen:
+ * Typed-name e-signature. Everything the signer needs is on one screen:
  * name, optional contact details (prefilled when we know them), one
- * agreement checkbox and a large Sign button. Decline is deliberately
- * quieter and asks for a reason the studio will see.
+ * agreement checkbox and a large Sign button. The guardian variant says who
+ * the person is signing for. Decline is deliberately quieter and asks for a
+ * reason the studio will see.
  */
-export function SignForm({ token, studioName, documentId, prefill }: Props) {
+export function SignForm({ token, studioName, documentId, prefill, signer }: Props) {
   const [state, action, pending] = useActionState(signByToken, null);
   const [declineState, declineAction, declining] = useActionState(declineByToken, null);
   const [showDecline, setShowDecline] = useState(false);
+  const guardian = signer.role === "guardian";
+  const athlete = signer.athleteName ?? "the athlete";
 
   if (state?.signed) {
     return (
@@ -41,32 +50,34 @@ export function SignForm({ token, studioName, documentId, prefill }: Props) {
     <>
       <form action={action} className="card mt-6 p-5 sm:p-6" noValidate>
         <input type="hidden" name="token" value={token} />
-        <h2 className="text-lg font-extrabold text-ink">Sign this agreement</h2>
-        <p className="mt-1 text-sm text-muted">Typing your name here is your signature. Use the name you would write on paper.</p>
+        <h2 className="text-lg font-extrabold text-ink">{guardian ? "Sign as parent or guardian" : "Sign this agreement"}</h2>
+        <p className="mt-1 text-sm text-muted">
+          {guardian ? `You are signing as the parent or guardian of ${athlete}. Type your own full name, not the athlete's.` : "Typing your name here is your signature. Use the name you would write on paper."}
+        </p>
         <div className="mt-5 space-y-4">
-          <FormField label="Type your full legal name" htmlFor="signer_name" required error={state?.fieldErrors?.signer_name}>
-            <input id="signer_name" name="signer_name" type="text" autoComplete="name" required maxLength={120} defaultValue={prefill.name ?? ""} className="input text-lg" placeholder="e.g. Ahmed Al-Thani" aria-describedby={state?.fieldErrors?.signer_name ? "signer_name-error" : undefined} />
+          <FormField label="Type your full name to sign" htmlFor="signer_name" required error={state?.fieldErrors?.signer_name} hint={guardian && signer.guardianName ? `Addressed to ${signer.guardianName}.` : undefined}>
+            <input id="signer_name" name="signer_name" type="text" autoComplete="name" required maxLength={120} defaultValue={prefill.name ?? ""} className="input min-h-12 text-lg" placeholder="Your full name" aria-describedby={state?.fieldErrors?.signer_name ? "signer_name-error" : undefined} />
           </FormField>
           <div className="grid gap-4 sm:grid-cols-2">
             <FormField label="E-mail (for your copy)" htmlFor="signer_email" error={state?.fieldErrors?.signer_email}>
-              <input id="signer_email" name="signer_email" type="email" inputMode="email" autoComplete="email" maxLength={160} defaultValue={prefill.email ?? ""} className="input" />
+              <input id="signer_email" name="signer_email" type="email" inputMode="email" autoComplete="email" maxLength={160} defaultValue={prefill.email ?? ""} className="input min-h-12" />
             </FormField>
             <FormField label="Phone (optional)" htmlFor="signer_phone">
-              <input id="signer_phone" name="signer_phone" type="tel" inputMode="tel" autoComplete="tel" maxLength={40} defaultValue={prefill.phone ?? ""} className="input" />
+              <input id="signer_phone" name="signer_phone" type="tel" inputMode="tel" autoComplete="tel" maxLength={40} defaultValue={prefill.phone ?? ""} className="input min-h-12" />
             </FormField>
           </div>
           <div>
             <label htmlFor="agreed" className="flex min-h-11 cursor-pointer items-start gap-3 rounded-xl border border-line bg-page p-3 text-sm text-ink">
               <input id="agreed" name="agreed" type="checkbox" required className="mt-0.5 h-5 w-5 shrink-0 accent-primary" aria-describedby={state?.fieldErrors?.agreed ? "agreed-error" : undefined} />
-              <span>I have read this agreement and I agree to sign it electronically.</span>
+              <span>{guardian ? `I have read this release, I am the parent or guardian of ${athlete}, and I agree to sign it electronically.` : "I have read this agreement and I agree to sign it electronically."}</span>
             </label>
             {state?.fieldErrors?.agreed && <p id="agreed-error" className="mt-1 text-xs font-semibold text-danger" role="alert">{state.fieldErrors.agreed}</p>}
           </div>
           <FormError message={state?.error} />
           <button type="submit" className="btn-primary min-h-14 w-full text-base" disabled={pending} aria-busy={pending}>
-            {pending ? "Signing…" : "Sign agreement"}
+            {pending ? "Signing..." : guardian ? "Sign as parent or guardian" : "Sign agreement"}
           </button>
-          <p className="text-xs text-muted">Your typed name, the time, and your device&apos;s network address are recorded as evidence of signing. This is intended to be an electronic signature under Qatar Law No. 16 of 2010.</p>
+          <p className="text-xs text-muted">Your typed name, the time, and your device&apos;s network address are recorded as evidence of signing. This is intended to be an electronic signature under Qatar law.</p>
         </div>
       </form>
 
@@ -83,7 +94,7 @@ export function SignForm({ token, studioName, documentId, prefill }: Props) {
             </FormField>
             <FormError message={declineState?.error} />
             <div className="mt-3 flex flex-wrap gap-2">
-              <button type="submit" className="btn-danger-outline min-h-11" disabled={declining} aria-busy={declining}>{declining ? "Sending…" : "Decline"}</button>
+              <button type="submit" className="btn-danger-outline min-h-11" disabled={declining} aria-busy={declining}>{declining ? "Sending..." : "Decline"}</button>
               <button type="button" className="btn-ghost min-h-11" onClick={() => setShowDecline(false)}>Back to signing</button>
             </div>
           </form>

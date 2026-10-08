@@ -1,44 +1,46 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { writeAudit } from "@/lib/audit";
-import { bookingTransitionColumns, canTransitionBooking } from "@/lib/bookings/state";
+import { checkSignerForRole } from "@/lib/documents/contract-state";
+import { applyProviderEvent, signerContactFor, studioNameOf } from "@/lib/documents/events";
 import { bodyHash } from "@/lib/documents/hash";
 import { isAcceptableSignerName, isSignable } from "@/lib/documents/state";
 import { hashSigningToken, isSigningTokenShape } from "@/lib/documents/tokens";
-import { buildEmail } from "@/lib/notifications/email/templates";
-import { enqueueClientEmail } from "@/lib/notifications/email/outbox";
-import { enqueueOwnerTelegram } from "@/lib/notifications/owner";
-import { DEFAULT_STUDIO, siteUrl } from "@/lib/studio/queries";
 import { createServiceClient, isServiceClientConfigured } from "@/lib/supabase/service";
-import type { Database, Json, PhotoBookingRow, PhotoDocumentRow } from "@/lib/supabase/database.types";
+import type { Database, Json, PhotoDocumentRow, SignerRole } from "@/lib/supabase/database.types";
 import { isValidEmail } from "@/lib/utils";
 
 type Client = SupabaseClient<Database>;
 
 /**
- * The public signing flow. There is no session on /sign/<token>: the token
- * is the credential, so every function here runs with the service client
- * and looks the document up by the token's hash. Nothing is written that the
- * token holder could not already see, and a signed document is immutable:
- * the update is guarded by status so two taps (or two devices) cannot both
- * sign, and the body hash is re-checked right before the signature lands.
+ * The public signing flow (the `internal` e-signature provider). There is
+ * no session on /sign/<token>: the token is the credential, so every
+ * function here runs with the service client and looks the document up by
+ * the token's hash. Nothing is written that the token holder could not
+ * already see, and a signed document is immutable: the update is guarded by
+ * status so two taps (or two devices) cannot both sign, and the body hash
+ * is re-checked right before the signature lands.
  *
  * Evidence stored with the signature (signature_evidence): the typed name,
  * the exact agreement sentence, the client's network address and user agent
- * (kept in full, as evidence of who signed — see the privacy page), the body
+ * (kept in full, as evidence of who signed; see the privacy page), the body
  * hash and a prefix of the token hash that was used.
+ *
+ * Every status change goes through `applyProviderEvent`, the same path a
+ * provider webhook takes, so the booking's contract_state and gates are
+ * updated identically. The booking is never confirmed from here: the gates
+ * confirm it only when the deposit is also paid.
  */
 
 export type SigningDeps = { supabase?: Client; now?: Date };
 
 export const AGREED_TEXT = "I have read this agreement and I agree to sign it electronically.";
 const MAX_USER_AGENT = 300;
-const MAX_REASON = 500;
 
-export type SigningNotice = "expired" | "already_signed" | "declined";
+export type SigningNotice = "expired" | "already_signed" | "declined" | "voided";
 
 export type SafeSigningDocument = Pick<PhotoDocumentRow, "id" | "title" | "kind" | "body" | "status" | "signer_name" | "signed_at" | "declined_at" | "expires_at" | "sent_at"> & {
   prefill: { name: string | null; email: string | null; phone: string | null };
+  signer: { role: SignerRole; athleteName: string | null; guardianName: string | null };
 };
 
 export type SigningView = { ok: true; doc: SafeSigningDocument; studioName: string; notice: SigningNotice | null } | { ok: false; error: "not_found" };
@@ -54,25 +56,21 @@ async function findByToken(supabase: Client, token: string): Promise<PhotoDocume
   return data ?? null;
 }
 
-async function studioNameOf(supabase: Client, ownerId: string): Promise<string> {
-  const { data } = await supabase.from("photo_studio").select("business_name").eq("owner_id", ownerId).maybeSingle();
-  return data?.business_name ?? DEFAULT_STUDIO.business_name;
-}
-
-async function prefillOf(supabase: Client, doc: PhotoDocumentRow): Promise<SafeSigningDocument["prefill"]> {
-  if (doc.client_id) {
-    const { data } = await supabase.from("photo_people").select("full_name,email,phone").eq("id", doc.client_id).maybeSingle();
-    if (data) return { name: data.full_name, email: data.email, phone: data.phone };
-  }
-  if (doc.booking_id) {
-    const { data } = await supabase.from("photo_bookings").select("customer_name,customer_email,customer_phone").eq("id", doc.booking_id).maybeSingle();
-    if (data) return { name: data.customer_name, email: data.customer_email, phone: data.customer_phone };
-  }
-  return { name: null, email: null, phone: null };
-}
-
-function safe(doc: PhotoDocumentRow, prefill: SafeSigningDocument["prefill"]): SafeSigningDocument {
-  return { id: doc.id, title: doc.title, kind: doc.kind, body: doc.body, status: doc.status, signer_name: doc.signer_name, signed_at: doc.signed_at, declined_at: doc.declined_at, expires_at: doc.expires_at, sent_at: doc.sent_at, prefill };
+function safe(doc: PhotoDocumentRow, contact: Awaited<ReturnType<typeof signerContactFor>>): SafeSigningDocument {
+  return {
+    id: doc.id,
+    title: doc.title,
+    kind: doc.kind,
+    body: doc.body,
+    status: doc.status,
+    signer_name: doc.signer_name,
+    signed_at: doc.signed_at,
+    declined_at: doc.declined_at,
+    expires_at: doc.expires_at,
+    sent_at: doc.sent_at,
+    prefill: { name: contact.name, email: contact.email, phone: contact.phone },
+    signer: { role: doc.signer_role, athleteName: contact.athleteName, guardianName: contact.guardianName },
+  };
 }
 
 /**
@@ -90,45 +88,38 @@ export async function loadSigningDocument(token: string, deps: SigningDeps = {})
   let notice: SigningNotice | null = null;
   if (doc.status === "signed") notice = "already_signed";
   else if (doc.status === "declined") notice = "declined";
+  else if (doc.status === "void") notice = "voided";
   else if (doc.status === "expired" || !isSignable(doc, now)) {
     notice = "expired";
     if (doc.status !== "expired") {
-      await supabase.from("photo_documents").update({ status: "expired", updated_at: now.toISOString() }).eq("id", doc.id).in("status", ["sent", "viewed"]);
-      doc.status = "expired";
+      const res = await applyProviderEvent(supabase, { doc, event: { type: "expired", occurredAt: now.toISOString() }, actor: { kind: "system" }, notify: false }, now);
+      if (res.ok && res.applied) doc.status = "expired";
     }
   } else if (doc.status === "sent") {
-    const { data } = await supabase.from("photo_documents").update({ status: "viewed", viewed_at: now.toISOString(), updated_at: now.toISOString() }).eq("id", doc.id).eq("status", "sent").select("id");
-    if ((data ?? []).length) {
+    const res = await applyProviderEvent(supabase, { doc, event: { type: "viewed", occurredAt: now.toISOString() }, actor: { kind: "client" }, notify: false }, now);
+    if (res.ok && res.applied) {
       doc.status = "viewed";
       doc.viewed_at = now.toISOString();
-      await writeAudit(supabase, { ownerId: doc.owner_id, actorKind: "client", entity: "document", entityId: doc.id, action: "document.viewed" });
     }
   }
-  const [studioName, prefill] = await Promise.all([studioNameOf(supabase, doc.owner_id), prefillOf(supabase, doc)]);
-  return { ok: true, doc: safe(doc, prefill), studioName, notice };
+  const [studioName, contact] = await Promise.all([studioNameOf(supabase, doc.owner_id), signerContactFor(supabase, doc)]);
+  return { ok: true, doc: safe(doc, contact), studioName, notice };
 }
 
 export type SignInput = { signerName: string; signerEmail?: string | null; signerPhone?: string | null; agreed: boolean; ip: string | null; userAgent: string | null; now?: Date };
 
-export type SignError = "not_found" | "expired" | "already_signed" | "declined" | "invalid_name" | "invalid_email" | "not_agreed" | "hash_mismatch" | "conflict";
+export type SignError = "not_found" | "expired" | "already_signed" | "declined" | "voided" | "invalid_name" | "invalid_email" | "not_agreed" | "hash_mismatch" | "conflict" | "guardian_name_mismatch" | "minor_cannot_sign";
 
-export type SignResult = { ok: true; documentId: string; signedAt: string } | { ok: false; error: SignError };
-
-/**
- * A signed agreement confirms the booking. Nothing is paid up front: the
- * owner records the final amount after the shoot and only then requests
- * payment, so the booking never waits on money before the date.
- */
-function bookingTargetAfterSignature(): "confirmed" {
-  return "confirmed";
-}
+export type SignResult = { ok: true; documentId: string; signedAt: string; contractState: string | null } | { ok: false; error: SignError };
 
 /**
  * Records a typed-name signature. Atomic against double submission: the
- * update only matches while the row is still sent/viewed. After the row is
- * signed: audit (actor 'client'), owner Telegram, client copy e-mail, and
- * the booking moves on from awaiting_contract to confirmed (payment comes
- * after the shoot). Never touches photo_athletes.
+ * update only matches while the row is still sent/viewed. A guardian
+ * release must be signed by the parent or guardian on file, never by the
+ * athlete. After the row is signed: audit (actor 'client'), booking
+ * contract_state re-derived, gates recomputed, owner Telegram, client copy
+ * e-mail. Never touches photo_athletes and never confirms the booking
+ * itself.
  */
 export async function signDocument(token: string, input: SignInput, deps: SigningDeps = {}): Promise<SignResult> {
   const supabase = clientOf(deps);
@@ -145,14 +136,22 @@ export async function signDocument(token: string, input: SignInput, deps: Signin
   if (!doc || doc.status === "draft") return { ok: false, error: "not_found" };
   if (doc.status === "signed") return { ok: false, error: "already_signed" };
   if (doc.status === "declined") return { ok: false, error: "declined" };
+  if (doc.status === "void") return { ok: false, error: "voided" };
   if (!isSignable(doc, now)) return { ok: false, error: "expired" };
   const currentHash = bodyHash(doc.body);
   if (!doc.body_hash || doc.body_hash !== currentHash) return { ok: false, error: "hash_mismatch" };
+
+  if (doc.signer_role === "guardian") {
+    const contact = await signerContactFor(supabase, doc);
+    const check = checkSignerForRole("guardian", signerName, { athleteName: contact.athleteName, guardianName: contact.guardianName });
+    if (!check.ok) return { ok: false, error: check.error };
+  }
 
   const signedAt = now.toISOString();
   const evidence: Record<string, Json> = {
     method: "typed_name",
     typed_name: signerName,
+    signer_role: doc.signer_role,
     agreed_text: AGREED_TEXT,
     ip: input.ip ?? null,
     user_agent: (input.userAgent ?? "").slice(0, MAX_USER_AGENT) || null,
@@ -160,59 +159,17 @@ export async function signDocument(token: string, input: SignInput, deps: Signin
     token_hash_prefix: hashSigningToken(token).slice(0, 8),
     signed_at: signedAt,
   };
-  const { data: updated, error } = await supabase
-    .from("photo_documents")
-    .update({ status: "signed", signed_at: signedAt, signer_name: signerName, signer_email: signerEmail, signer_phone: signerPhone, signature_evidence: evidence, updated_at: signedAt })
-    .eq("id", doc.id)
-    .in("status", ["sent", "viewed"])
-    .select("id");
-  if (error) return { ok: false, error: "conflict" };
-  if (!(updated ?? []).length) return { ok: false, error: "already_signed" };
-
-  await writeAudit(supabase, { ownerId: doc.owner_id, actorKind: "client", entity: "document", entityId: doc.id, action: "document.signed", data: { signerName, bookingId: doc.booking_id } });
-
-  // Booking lifecycle: the contract step is done.
-  let booking: PhotoBookingRow | null = null;
-  if (doc.booking_id) {
-    const { data } = await supabase.from("photo_bookings").select("*").eq("id", doc.booking_id).maybeSingle();
-    booking = data ?? null;
-    if (booking && booking.booking_status === "awaiting_contract") {
-      const target = bookingTargetAfterSignature();
-      if (canTransitionBooking(booking.booking_status, target)) {
-        await supabase.from("photo_bookings").update({ ...bookingTransitionColumns(booking, target, now), contract_document_id: doc.id }).eq("id", booking.id).eq("booking_status", "awaiting_contract");
-      }
-    }
-  }
-
-  const studioName = await studioNameOf(supabase, doc.owner_id);
-  await enqueueOwnerTelegram(supabase, {
-    ownerId: doc.owner_id,
-    kind: "CONTRACT_SIGNED",
-    alertKey: `document:${doc.id}:signed`,
-    title: `Agreement signed: ${doc.title}`,
-    lines: [`Signed by ${signerName}`, booking ? `Booking ${booking.public_ref ?? booking.id.slice(0, 8)} · ${booking.athlete_name}` : null],
-    url: `${siteUrl()}/documents/${doc.id}`,
+  const res = await applyProviderEvent(
+    supabase,
+    { doc, event: { type: "signed", occurredAt: signedAt, envelopeId: doc.provider_envelope_id ?? doc.id }, actor: { kind: "client" }, signer: { name: signerName, email: signerEmail, phone: signerPhone, evidence } },
     now,
-  });
-
-  // The copy goes to the address the studio has on file; the typed address is evidence only.
-  const to = (await prefillOf(supabase, doc)).email ?? signerEmail;
-  if (to) {
-    const draft = buildEmail(to, {
-      kind: "CONTRACT_SIGNED",
-      subject: `${studioName}: your signed copy of "${doc.title}"`,
-      greeting: `Hello ${signerName},`,
-      paragraphs: [`Thank you — your agreement with ${studioName} was signed on ${new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Qatar", day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(now)} (Qatar time).`, "You can download a PDF copy from your client portal at any time; sign in with this e-mail address."],
-      cta: { label: "Download your copy", url: `${siteUrl()}/client` },
-      facts: [["Document", doc.title], ...(booking?.public_ref ? [["Booking", booking.public_ref] as [string, string]] : [])],
-      businessName: studioName,
-    });
-    await enqueueClientEmail(supabase, { ownerId: doc.owner_id, kind: "CONTRACT_SIGNED", alertKey: `email:document:${doc.id}:signed`, draft, personId: doc.client_id, bookingId: doc.booking_id, now });
-  }
-  return { ok: true, documentId: doc.id, signedAt };
+  );
+  if (!res.ok) return { ok: false, error: "conflict" };
+  if (!res.applied) return { ok: false, error: "already_signed" };
+  return { ok: true, documentId: doc.id, signedAt, contractState: res.booking?.state ?? null };
 }
 
-export type DeclineResult = { ok: true; documentId: string } | { ok: false; error: "not_found" | "expired" | "already_signed" | "declined" | "conflict" };
+export type DeclineResult = { ok: true; documentId: string } | { ok: false; error: "not_found" | "expired" | "already_signed" | "declined" | "voided" | "conflict" };
 
 /** The client says no: the document is closed (declined) and the owner is told why. */
 export async function declineDocument(token: string, reason: string | null | undefined, deps: SigningDeps = {}): Promise<DeclineResult> {
@@ -223,25 +180,10 @@ export async function declineDocument(token: string, reason: string | null | und
   if (!doc || doc.status === "draft") return { ok: false, error: "not_found" };
   if (doc.status === "signed") return { ok: false, error: "already_signed" };
   if (doc.status === "declined") return { ok: false, error: "declined" };
+  if (doc.status === "void") return { ok: false, error: "voided" };
   if (!isSignable(doc, now)) return { ok: false, error: "expired" };
-  const text = (reason ?? "").trim().slice(0, MAX_REASON) || null;
-  const { data: updated, error } = await supabase
-    .from("photo_documents")
-    .update({ status: "declined", declined_at: now.toISOString(), signature_evidence: { method: "declined", reason: text, declined_at: now.toISOString() }, updated_at: now.toISOString() })
-    .eq("id", doc.id)
-    .in("status", ["sent", "viewed"])
-    .select("id");
-  if (error) return { ok: false, error: "conflict" };
-  if (!(updated ?? []).length) return { ok: false, error: "already_signed" };
-  await writeAudit(supabase, { ownerId: doc.owner_id, actorKind: "client", entity: "document", entityId: doc.id, action: "document.declined", data: { reason: text } });
-  await enqueueOwnerTelegram(supabase, {
-    ownerId: doc.owner_id,
-    kind: "CONTRACT_DECLINED",
-    alertKey: `document:${doc.id}:declined`,
-    title: `Agreement declined: ${doc.title}`,
-    lines: [text ? `Reason: ${text}` : "No reason given."],
-    url: `${siteUrl()}/documents/${doc.id}`,
-    now,
-  });
+  const res = await applyProviderEvent(supabase, { doc, event: { type: "declined", occurredAt: now.toISOString(), envelopeId: doc.provider_envelope_id ?? doc.id }, actor: { kind: "client" }, reason: reason ?? null }, now);
+  if (!res.ok) return { ok: false, error: "conflict" };
+  if (!res.applied) return { ok: false, error: "already_signed" };
   return { ok: true, documentId: doc.id };
 }

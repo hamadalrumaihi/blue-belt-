@@ -9,13 +9,14 @@ import { formatDateTime } from "@/lib/time";
 import { SignForm } from "./SignForm";
 
 export const dynamic = "force-dynamic";
-export const metadata: Metadata = { title: "Review and sign", robots: { index: false, follow: false } };
+export const metadata: Metadata = { title: "Sign your agreement", robots: { index: false, follow: false } };
 
 /**
  * The page a client opens from the e-mail / WhatsApp link. No account
  * needed: the token in the URL is the credential. Reads the whole agreement
  * on one scrollable page, then signs by typing a name. Rate limited per
- * address so a leaked link cannot be brute-forced or hammered.
+ * address so a leaked link cannot be brute-forced or hammered. Mobile
+ * first: one column at 390px, 44px targets, no vendor names anywhere.
  */
 export default async function SignPage({ params }: PageProps<"/sign/[token]">) {
   const { token } = await params;
@@ -29,13 +30,21 @@ export default async function SignPage({ params }: PageProps<"/sign/[token]">) {
   if (!view.ok) return <Notice title="This link is not valid" text="It may have been replaced by a newer link. Ask the studio to send the agreement again." />;
   const { doc, studioName, notice } = view;
   const kindLabel = isDocumentKind(doc.kind) ? DOCUMENT_KIND_LABEL[doc.kind] : "Agreement";
+  const guardian = doc.signer.role === "guardian";
+  const athlete = doc.signer.athleteName ?? "the athlete";
 
   return (
     <main className="mx-auto w-full max-w-3xl px-4 py-8 sm:py-12">
       <header className="mb-6">
         <p className="eyebrow">{studioName}</p>
-        <h1 className="mt-2 text-2xl font-extrabold tracking-tight text-ink sm:text-3xl">{doc.title}</h1>
+        <h1 className="mt-2 text-2xl font-extrabold tracking-tight text-ink sm:text-3xl">Sign your agreement</h1>
+        <p className="mt-2 text-base font-semibold text-ink">{doc.title}</p>
         <p className="mt-1 text-sm text-muted">{kindLabel}{doc.sent_at ? ` · sent ${formatDateTime(doc.sent_at)} Qatar time` : ""}</p>
+        {guardian && (
+          <p className="mt-3 rounded-xl border border-primary/20 bg-lightblue px-3 py-2 text-sm font-semibold text-ink" role="note">
+            You are signing as the parent or guardian of {athlete}.{doc.signer.guardianName ? ` This release is addressed to ${doc.signer.guardianName}.` : ""}
+          </p>
+        )}
       </header>
 
       {notice === "already_signed" && (
@@ -49,6 +58,12 @@ export default async function SignPage({ params }: PageProps<"/sign/[token]">) {
         <div className="mb-6 rounded-2xl border border-line bg-page p-4 text-sm text-ink" role="status">
           <p className="font-bold">Declined</p>
           <p className="mt-1">You declined this agreement{doc.declined_at ? ` on ${formatDateTime(doc.declined_at)} Qatar time` : ""}. If that was a mistake, contact the studio and they can send a new one.</p>
+        </div>
+      )}
+      {notice === "voided" && (
+        <div className="mb-6 rounded-2xl border border-line bg-page p-4 text-sm text-ink" role="status">
+          <p className="font-bold">Withdrawn</p>
+          <p className="mt-1">{studioName} withdrew this agreement. If you were expecting to sign, ask them for a new link. The text below is shown for reference only.</p>
         </div>
       )}
       {notice === "expired" && (
@@ -68,7 +83,7 @@ export default async function SignPage({ params }: PageProps<"/sign/[token]">) {
         </article>
       </section>
 
-      {notice === null && <SignForm token={token} studioName={studioName} prefill={doc.prefill} documentId={doc.id} />}
+      {notice === null && <SignForm token={token} studioName={studioName} prefill={doc.prefill} documentId={doc.id} signer={doc.signer} />}
 
       <p className="mt-8 text-center text-xs text-muted">Questions about this agreement? Contact {studioName} before signing.</p>
     </main>

@@ -15,17 +15,18 @@ type Client = SupabaseClient<Database>;
  * signing page and the PDF route, which have no session.
  */
 
-export type DocumentListFilter = "awaiting" | "signed" | "drafts" | "all";
+export type DocumentListFilter = "awaiting" | "signed" | "drafts" | "closed" | "all";
 
 export const DOCUMENT_LIST_STATUSES: Record<DocumentListFilter, readonly DocumentStatus[]> = {
   awaiting: ["sent", "viewed"],
   signed: ["signed"],
   drafts: ["draft"],
-  all: ["draft", "sent", "viewed", "signed", "declined", "expired"],
+  closed: ["declined", "expired", "void"],
+  all: ["draft", "sent", "viewed", "signed", "declined", "expired", "void"],
 };
 
 export function isDocumentListFilter(v: unknown): v is DocumentListFilter {
-  return v === "awaiting" || v === "signed" || v === "drafts" || v === "all";
+  return v === "awaiting" || v === "signed" || v === "drafts" || v === "closed" || v === "all";
 }
 
 export type DocumentListItem = PhotoDocumentRow & {

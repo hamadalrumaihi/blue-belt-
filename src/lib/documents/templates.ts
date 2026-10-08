@@ -9,17 +9,76 @@ import type { DocumentKind } from "@/lib/supabase/database.types";
  * These are DRAFTS. Every body starts with a notice saying so; the owner is
  * expected to have them reviewed by a lawyer before relying on them. Pure
  * data: no I/O, safe to import from tests and the templates editor.
+ *
+ * Policy the wording must reflect (round 3, confirmed by the owner):
+ *   - 50% deposit before the booking is confirmed; 50% balance after delivery.
+ *   - Cancellation tiers: 7+ days: deposit may be moved once to a new date,
+ *     subject to availability; 3 to 6 days: deposit retained; under 72 hours
+ *     or no-show: full agreed amount due; event cancelled by the organiser:
+ *     reschedule or credit first; refunds where legally required or agreed.
+ *     Everything subject to mandatory Qatar consumer protection law.
+ *   - Vendors are never named: "payment provider", "gallery hosting
+ *     provider", "electronic signature provider".
+ *   - No em dashes anywhere in customer-facing text.
+ *
+ * Clauses a lawyer should look at first (flagged, not invented around):
+ *   1. Cancellation tiers, especially "full agreed amount due" under 72
+ *      hours and on no-show: may be read as a penalty rather than a genuine
+ *      pre-estimate of loss, and consumer law may limit it.
+ *   2. "Deposit retained" at 3 to 6 days: same concern as above.
+ *   3. Liability caps (refund of fees paid only; no indirect loss).
+ *   4. Portfolio and social media use defaulting to "allowed unless the
+ *      client opts out", and in particular any publication of a minor.
+ *   5. Validity of a typed-name electronic signature under Law No. 16 of
+ *      2010 and what evidence must be kept (we keep name, time, network
+ *      address, device string and the document hash).
+ *   6. Balance payment term after delivery (no number of days is written;
+ *      the Studio requests it after delivery) and what happens if it is
+ *      never paid, since delivery is not withheld.
+ *   7. Guardian release: age threshold (18), proof of guardianship, and
+ *      safeguarding wording during sessions with minors.
  */
 
 export const DRAFT_NOTICE = "DRAFT TEMPLATE: review with a lawyer before use. Blue Belt Media makes no claim this text is enforceable until reviewed.";
 
+export const PLACEHOLDER_NOTICE = "Placeholder: needs final legal review.";
+
+const CONSUMER_LAW = "Nothing in this agreement limits any right the Client has under the mandatory consumer protection law of the State of Qatar. Where this agreement and that law differ, the law applies.";
+
+const DELIVERY_TEXT = "Edited images are delivered through a private online gallery hosted by the Studio's gallery hosting provider. The Client receives a link and may download the images included in the service. Unedited (RAW) files are not delivered. Delivery normally takes place within 14 days of the session unless the booking says otherwise; busy tournament periods may take longer and the Studio will keep the Client informed.";
+
+const FEES_TEXT = `The total fee is {{amount}}.
+a) Deposit: 50% of the fee ({{deposit}}) is due before the booking is confirmed. The booking is confirmed only when this agreement is signed and the deposit has been received. Until then the date is not reserved.
+b) Balance: the remaining 50% ({{balance}}) is due after delivery of the gallery. The Studio sends a payment request after delivery; nothing is charged automatically.
+c) Payment is made by secure online payment through the Studio's payment provider, or by another method agreed in writing. The Studio confirms each payment once its payment provider reports it.`;
+
+const CANCELLATION_TEXT = `${PLACEHOLDER_NOTICE}
+a) 7 days or more before the date: the deposit may be moved once to a new date, subject to availability. It is not refunded.
+b) 3 to 6 days before the date: the deposit is retained by the Studio.
+c) Under 72 hours before the date, or no-show: the full agreed amount is due, because the Studio has turned down other work for that date.
+d) Event cancelled or postponed by the organiser: the Studio offers a new date or a credit first; a refund where legally required or agreed.
+e) If the Studio has to cancel for reasons within its control, all money paid is refunded in full.
+f) Refunds are made where legally required or where agreed in writing.
+${CONSUMER_LAW}`;
+
+const PORTFOLIO_TEXT = `The Studio may use images from this booking in its portfolio, website, social media and printed samples to show its work. If the Client does not want this, the Client can opt out by writing "No portfolio use" next to their name when signing, or by e-mail at any time, and the Studio will stop new publication within a reasonable time.`;
+
 const SIGNATURE_BLOCK = `SIGNATURE
 
-By typing your full legal name below and ticking the agreement box, you confirm that you have read this agreement, that you understand it and that you agree to be bound by it. This typed-name electronic signature is intended to be a valid electronic signature under Qatar Law No. 16 of 2010 (Electronic Transactions and Commerce). {{business_name}} records the date and time of signing, the name typed, and technical details of the device used, and keeps a copy for both parties.
+By typing your full legal name below and ticking the agreement box, you confirm that you have read this agreement, that you understand it and that you agree to be bound by it. This typed-name electronic signature is intended to be a valid electronic signature under Qatar Law No. 16 of 2010 (Electronic Transactions and Commerce). The Studio, or its electronic signature provider, records the date and time of signing, the name typed, and technical details of the device used, and keeps a copy for both parties.
 
-If the client is under 18, this agreement must be signed by a parent or legal guardian, who confirms they have authority to sign on the minor's behalf.
+If the client is under 18, this agreement must be signed by a parent or legal guardian, who confirms they have authority to sign on the minor's behalf, and a separate Minor / Guardian Release is also signed.
 
 Signed for the client: ________________________ (typed name)
+For {{business_name}}: accepted on sending.
+Date: {{today}}`;
+
+const GUARDIAN_SIGNATURE_BLOCK = `SIGNATURE
+
+By typing your full legal name below and ticking the agreement box, you confirm that you are the parent or legal guardian of the Athlete named above, that you have read this release, that you understand it and that you agree to it. This typed-name electronic signature is intended to be a valid electronic signature under Qatar Law No. 16 of 2010 (Electronic Transactions and Commerce). The Studio, or its electronic signature provider, records the date and time of signing, the name typed, and technical details of the device used, and keeps a copy for both parties.
+
+Signed by the parent or legal guardian: ________________________ (typed name)
+Parent or legal guardian of: {{athlete_name}}
 For {{business_name}}: accepted on sending.
 Date: {{today}}`;
 
@@ -33,19 +92,19 @@ Between {{business_name}} ("the Studio") and {{client_name}} ("the Client"). Boo
 The Studio will provide the service "{{service_name}}" as described on the booking, on or around {{session_date}} at {{location}}. Any change to the date, time, place or scope must be agreed in writing (e-mail or WhatsApp is fine).
 
 2. DELIVERABLES
-Edited images are delivered through a private online gallery on Pic-Time. The Client receives a link and may download the images included in the service. Unedited (RAW) files are not delivered. Delivery normally takes place within 14 days of the session unless the booking says otherwise; busy tournament periods may take longer and the Studio will keep the Client informed.
+${DELIVERY_TEXT}
 
 3. COPYRIGHT AND USE
 The Studio owns the copyright in every image and video it creates. The Client receives a personal, non-exclusive, non-transferable licence to use the delivered images for private, non-commercial purposes: sharing with family, friends and on personal social media, and printing for personal use. Commercial use (advertising, sponsorship, merchandise, sale) needs a separate written licence. The Client must not edit, crop out or remove the Studio's credit when images are shared publicly, and should credit {{business_name}} where practical.
 
 4. PORTFOLIO AND SOCIAL MEDIA
-The Studio may use images from this booking in its portfolio, website, social media and printed samples to show its work. If the Client does not want this, the Client can opt out by writing "No portfolio use" next to their name when signing, or by e-mail at any time, and the Studio will stop new publication within a reasonable time.
+${PORTFOLIO_TEXT}
 
 5. FEES AND PAYMENT
-The fee is {{amount}}. A deposit of {{deposit}} is due to confirm the booking and is deducted from the fee. The balance is due before delivery of the gallery unless the booking says otherwise. Payment may be made by card through a secure MyFatoorah link, bank transfer, Fawran or cash. The gallery download is released once the full fee has been received.
+${FEES_TEXT}
 
 6. CANCELLATION AND RESCHEDULING
-If the Client cancels more than 7 days before the session, the deposit is refunded less any costs already incurred. If the Client cancels within 7 days, the deposit is kept. One reschedule is free when requested at least 48 hours in advance. If the Studio has to cancel for reasons within its control, all money paid is refunded in full.
+${CANCELLATION_TEXT}
 
 7. LIABILITY
 The Studio takes care of its equipment and keeps backups, but if images are lost or unusable through equipment failure, accident, illness or events outside its control, the Studio's liability is limited to a refund of the fees paid for this booking. The Studio is not liable for indirect losses.
@@ -57,7 +116,7 @@ ${SIGNATURE_BLOCK}`;
 
 const EVENT_AGREEMENT = `${DRAFT_NOTICE}
 
-COMBAT SPORTS EVENT PHOTOGRAPHY AGREEMENT
+COMBAT SPORT EVENT PHOTOGRAPHY SERVICES AGREEMENT
 
 Between {{business_name}} ("the Studio") and {{client_name}} ("the Client") for coverage of {{athlete_name}} at {{event_name}} on {{event_date}} at {{location}}. Booking reference: {{booking_ref}}. Date: {{today}}.
 
@@ -68,22 +127,22 @@ The Studio will photograph (and, where the booking says so, film) the named athl
 Tournament schedules change without notice, brackets are re-drawn, mats run late and several matches can start at the same time. The Studio will do its best to track the athlete's matches using the bracket information available, but it cannot guarantee that every match, every exchange or a particular moment will be captured. Missing a match for reasons outside the Studio's control (schedule changes, restricted access, overlapping mats, incorrect bracket data) is not a breach of this agreement.
 
 3. DELIVERABLES
-Edited images are delivered through a private Pic-Time gallery, normally within 14 days of the event. Video, where booked, is delivered as an edited highlight or full-match clip as described on the booking. Unedited files are not delivered.
+${DELIVERY_TEXT} Video, where booked, is delivered as an edited highlight or full-match clip as described on the booking.
 
 4. COPYRIGHT AND USE
 The Studio owns the copyright. The Client receives a personal, non-commercial licence to share and print the delivered images. Clubs, sponsors or brands wanting to use images commercially need a separate written licence. Credit to {{business_name}} is appreciated when images are shared.
 
 5. PORTFOLIO AND SOCIAL MEDIA
-The Studio may use images from this event in its portfolio and social media. To opt out, write "No portfolio use" next to your name when signing or e-mail the Studio at any time.
+${PORTFOLIO_TEXT}
 
-6. FEES
-The fee is {{amount}}, with a deposit of {{deposit}} due to confirm the booking. The balance is due before gallery download. Accepted methods: MyFatoorah card link, bank transfer, Fawran or cash.
+6. FEES AND PAYMENT
+${FEES_TEXT}
 
-7. CANCELLATION
-If the athlete withdraws or the event is cancelled more than 7 days before the event date, the deposit is refunded less costs already incurred. Within 7 days the deposit is kept, because the Studio has turned down other work for that date. If the Studio cannot attend, all money paid is refunded.
+7. CANCELLATION AND RESCHEDULING
+${CANCELLATION_TEXT}
 
 8. MINORS
-If the athlete is under 18, this agreement is signed by a parent or legal guardian, who also consents to the athlete being photographed and filmed at the event.
+If the athlete is under 18, this agreement is signed by a parent or legal guardian, who also signs the separate Minor / Guardian Release consenting to the athlete being photographed and filmed at the event.
 
 9. LIABILITY
 The Studio's total liability under this agreement is limited to the fees paid for this booking. The Studio is not responsible for the organiser's decisions, access restrictions or results.
@@ -95,7 +154,7 @@ ${SIGNATURE_BLOCK}`;
 
 const SESSION_AGREEMENT = `${DRAFT_NOTICE}
 
-FIGHTER PORTRAIT / SESSION AGREEMENT
+FIGHTER PORTRAIT SESSION AGREEMENT
 
 Between {{business_name}} ("the Studio") and {{client_name}} ("the Client") for a session with {{athlete_name}}. Service: {{service_name}}. Date and time: {{session_date}}. Place: {{location}}. Booking reference: {{booking_ref}}. Date: {{today}}.
 
@@ -103,22 +162,22 @@ Between {{business_name}} ("the Studio") and {{client_name}} ("the Client") for 
 The Studio will photograph (and film where booked) the athlete during the agreed session. The Client is responsible for arriving on time with the agreed kit (gi, rash guard, belts, gloves, club colours). Time lost to late arrival is deducted from the session. Access to the gym or venue is arranged by the Client unless the booking says otherwise.
 
 2. DELIVERABLES
-A curated set of edited images is delivered through a private Pic-Time gallery, normally within 14 days. The number of images is as described on the booking. Unedited files are not delivered. Additional edits or images can be ordered separately.
+A curated set of edited images is delivered through a private online gallery hosted by the Studio's gallery hosting provider, normally within 14 days. The number of images is as described on the booking. Unedited files are not delivered. Additional edits or images can be ordered separately.
 
 3. COPYRIGHT AND USE
 The Studio owns the copyright in all images. The Client receives a personal, non-commercial licence: personal social media, sharing with family and coaches, and personal prints. Use by a club, sponsor or brand needs a separate written licence. Please credit {{business_name}} when sharing.
 
 4. PORTFOLIO AND SOCIAL MEDIA
-The Studio may use session images in its portfolio and social media. To opt out, write "No portfolio use" next to your name when signing or e-mail the Studio at any time.
+${PORTFOLIO_TEXT}
 
-5. FEES
-The fee is {{amount}}. A deposit of {{deposit}} confirms the booking; the balance is due before gallery download. Accepted methods: MyFatoorah card link, bank transfer, Fawran or cash.
+5. FEES AND PAYMENT
+${FEES_TEXT}
 
 6. CANCELLATION AND RESCHEDULING
-One free reschedule is allowed with at least 48 hours' notice. Cancellation more than 7 days before the session: deposit refunded less costs incurred. Within 7 days: deposit kept. If the Studio cancels, all money paid is refunded.
+${CANCELLATION_TEXT}
 
 7. MINORS
-If the athlete is under 18, a parent or legal guardian signs this agreement, consents to the session and must be present or reachable during it.
+If the athlete is under 18, a parent or legal guardian signs this agreement and the separate Minor / Guardian Release, and must be present or reachable during the session.
 
 8. LIABILITY
 Training and demonstration during the session are at the athlete's own risk. The Studio's liability is limited to the fees paid for this booking.
@@ -152,8 +211,11 @@ Where images are posted publicly, please credit {{business_name}}.
 6. TERM
 This release is ongoing and does not expire. The Studio may withdraw it only if the Client breaches it.
 
-7. GOVERNING LAW
-This release is governed by the laws of the State of Qatar.
+7. MINORS
+If the images show a person under 18, this release is accepted by that person's parent or legal guardian.
+
+8. GOVERNING LAW
+This release is governed by the laws of the State of Qatar. ${CONSUMER_LAW}
 
 ${SIGNATURE_BLOCK}`;
 
@@ -182,9 +244,42 @@ The Studio owns the copyright in the images and video. The Person receives a per
 If the subject is under 18, this release is signed by a parent or legal guardian who confirms they have authority to do so.
 
 7. GOVERNING LAW
-This release is governed by the laws of the State of Qatar.
+This release is governed by the laws of the State of Qatar. ${CONSUMER_LAW}
 
 ${SIGNATURE_BLOCK}`;
+
+const GUARDIAN_RELEASE = `${DRAFT_NOTICE}
+${PLACEHOLDER_NOTICE}
+
+MINOR / GUARDIAN RELEASE
+
+Given by {{guardian_name}} ("the Guardian"), parent or legal guardian of {{athlete_name}} ("the Athlete"), to {{business_name}} ("the Studio"). Booking reference: {{booking_ref}}. Date: {{today}}.
+
+1. WHO SIGNS
+The Athlete is under 18. This release is signed by the Guardian, not by the Athlete. The Guardian confirms that they are the Athlete's parent or legal guardian and have authority to give the consents below. The Studio may ask for proof of that relationship.
+
+2. CONSENT TO PHOTOGRAPH AND FILM
+The Guardian agrees that the Studio may photograph and, where booked, film the Athlete in connection with "{{service_name}}" ({{event_name}} / {{session_date}}) at {{location}}, and may deliver the resulting images to the Guardian and the booking contact through a private online gallery hosted by the Studio's gallery hosting provider.
+
+3. USE OF THE ATHLETE'S IMAGES
+a) The Guardian receives a personal, non-commercial licence to the delivered images: family use, personal social media and personal prints.
+b) The Studio may use images of the Athlete in its portfolio, website and social media to show its work, unless the Guardian opts out by writing "No portfolio use" next to their name when signing or by e-mail at any time. The Studio will stop new publication within a reasonable time.
+c) The Studio will not publish the Athlete's full name, school, home area or contact details alongside an image without the Guardian's written agreement.
+d) Any commercial use by a club, sponsor or brand needs a separate written licence.
+
+4. SAFEGUARDING DURING SESSIONS
+${PLACEHOLDER_NOTICE} The Guardian, or another adult the Guardian names (for example a coach), must be present or reachable during any private session with the Athlete. At tournaments and club training the Studio works in the public competition or training area only.
+
+5. WITHDRAWING CONSENT
+The Guardian may withdraw consent for future use at any time by e-mailing the Studio. Material already delivered or published before the request may remain in place unless the law requires otherwise.
+
+6. COPYRIGHT
+The Studio owns the copyright in the images and video.
+
+7. GOVERNING LAW
+This release is governed by the laws of the State of Qatar. ${CONSUMER_LAW}
+
+${GUARDIAN_SIGNATURE_BLOCK}`;
 
 const CLUB_AGREEMENT = `${DRAFT_NOTICE}
 
@@ -199,22 +294,22 @@ The Studio will provide "{{service_name}}" for the Club: coverage of the Club's 
 Coverage at a tournament depends on the organiser's access rules, mat allocation and schedule. The Studio will cover the listed athletes as fully as the day allows but cannot guarantee every match of every athlete, particularly when matches overlap on different mats.
 
 3. DELIVERABLES
-Edited images are delivered through a private Pic-Time gallery, normally within 14 days, organised so athletes and parents can find their own photos. Video, where booked, is delivered as described on the booking. Unedited files are not delivered.
+Edited images are delivered through a private online gallery hosted by the Studio's gallery hosting provider, normally within 14 days, organised so athletes and parents can find their own photos. Video, where booked, is delivered as described on the booking. Unedited files are not delivered.
 
 4. COPYRIGHT AND LICENCE
 The Studio owns the copyright. The Club receives a licence to use the delivered images on its own website and social media accounts, in its newsletters and on noticeboards, with credit to {{business_name}}. Athletes and parents receive a personal, non-commercial licence to their own images. Use in paid advertising, sponsor material or merchandise needs a separate written licence.
 
 5. ATHLETE CONSENT
-The Club confirms that it has the consent of each listed athlete (or the parent or guardian of each minor) to be photographed and filmed and to have their images shared through the gallery and the Club's channels. The Club will tell the Studio of any athlete who must not be photographed or published.
+The Club confirms that it has the consent of each listed athlete (or the parent or legal guardian of each minor) to be photographed and filmed and to have their images shared through the gallery and the Club's channels. The Club will tell the Studio of any athlete who must not be photographed or published.
 
 6. PORTFOLIO USE
 The Studio may use images from this booking in its own portfolio and social media. To opt out for the Club as a whole, write "No portfolio use" next to the signature.
 
-7. FEES
-The fee is {{amount}}, with a deposit of {{deposit}} due to confirm the booking. The balance is due before gallery download. Accepted methods: MyFatoorah card link, bank transfer, Fawran or cash. Invoices are issued to the Club.
+7. FEES AND PAYMENT
+${FEES_TEXT} Payment requests are issued to the Club.
 
-8. CANCELLATION
-Cancellation more than 14 days before the date: deposit refunded less costs incurred. Within 14 days: deposit kept. If the Studio cannot attend, all money paid is refunded.
+8. CANCELLATION AND RESCHEDULING
+${CANCELLATION_TEXT}
 
 9. LIABILITY
 The Studio's total liability under this agreement is limited to the fees paid for this booking.
@@ -227,13 +322,17 @@ ${SIGNATURE_BLOCK}`;
 export type DefaultTemplate = { kind: DocumentKind; name: string; body: string };
 
 export const DEFAULT_TEMPLATES: readonly DefaultTemplate[] = [
-  { kind: "services_agreement", name: "Photography services agreement", body: SERVICES_AGREEMENT },
-  { kind: "event_agreement", name: "Combat sports event photography agreement", body: EVENT_AGREEMENT },
-  { kind: "session_agreement", name: "Fighter portrait / session agreement", body: SESSION_AGREEMENT },
-  { kind: "print_release", name: "Print release", body: PRINT_RELEASE },
+  { kind: "services_agreement", name: "Photography Services Agreement", body: SERVICES_AGREEMENT },
+  { kind: "event_agreement", name: "Combat Sport Event Photography Services Agreement", body: EVENT_AGREEMENT },
+  { kind: "session_agreement", name: "Fighter Portrait Session Agreement", body: SESSION_AGREEMENT },
+  { kind: "print_release", name: "Print Release", body: PRINT_RELEASE },
+  { kind: "guardian_release", name: "Minor / Guardian Release", body: GUARDIAN_RELEASE },
   { kind: "model_release", name: "Model / image release", body: MODEL_RELEASE },
   { kind: "club_agreement", name: "Club / team coverage agreement", body: CLUB_AGREEMENT },
 ];
+
+/** The five kinds the booking flow relies on; `ensureDefaultTemplates` seeds every kind above, these are the ones it must never miss. */
+export const CORE_TEMPLATE_KINDS: readonly DocumentKind[] = ["services_agreement", "event_agreement", "session_agreement", "print_release", "guardian_release"];
 
 export function defaultTemplateFor(kind: DocumentKind): DefaultTemplate | null {
   return DEFAULT_TEMPLATES.find((t) => t.kind === kind) ?? null;
