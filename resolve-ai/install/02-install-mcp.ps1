@@ -20,6 +20,12 @@
 .PARAMETER Primary   gursky (default) | cipriano | guycochran
 .PARAMETER SkipAlternates  Only install the primary.
 .PARAMETER ReplaceExisting Replace an existing user-scope "davinci-resolve" MCP registration.
+.PARAMETER ResolveBridge   auto (default: install on the Free edition) | yes | no.
+    The samuelgursky server ships an in-app bridge for the FREE edition: a small script that runs
+    from Resolve's own Workspace > Scripts menu (not gated through 21.0.x) and re-exports the live
+    scripting object over an authenticated loopback listener. The server picks it up automatically
+    whenever external scripting refuses. This uses Resolve's supported internal scripting; it does
+    not bypass licensing. Resolve 21.1+ Free removed Python from the Scripts menu entirely.
 #>
 [CmdletBinding()]
 param(
@@ -27,7 +33,8 @@ param(
     [switch]$SkipAlternates,
     [switch]$ReplaceExisting,
     [switch]$SkipIamkewl,
-    [string]$PythonVersion = '3.12'
+    [string]$PythonVersion = '3.12',
+    [ValidateSet('auto','yes','no')][string]$ResolveBridge = 'auto'
 )
 Import-Module (Join-Path $PSScriptRoot 'Common.psm1') -Force
 $ErrorActionPreference = 'Stop'
@@ -104,6 +111,28 @@ if ($Primary -eq 'gursky' -or -not $SkipAlternates) {
     # import smoke test (no Resolve needed)
     Invoke-Native -File $gPy -Arguments @('-c', "import mcp, mcp.server.fastmcp; print('mcp ok')") | ForEach-Object { Write-Log "  $_" }
     if ((Get-LastNativeExitCode) -eq 0) { Write-Log 'gursky: python deps import OK' 'OK' } else { Write-Log 'gursky: import check failed (see lines above)' 'ERROR' }
+
+    # --- Free-edition in-app bridge (see .PARAMETER ResolveBridge)
+    $wantBridge = ($ResolveBridge -eq 'yes') -or ($ResolveBridge -eq 'auto' -and $resolve.installed -and $resolve.edition -eq 'Free')
+    $bridgeScript = Join-Path $gDir 'scripts\install_resolve_bridge.py'
+    if ($wantBridge -and (Test-Path -LiteralPath $bridgeScript)) {
+        $major = 0; try { $major = [int](([string]$resolve.version).Split('.')[0]) } catch { }
+        if ($major -ge 21 -and ([string]$resolve.version) -notmatch '^21\.0\.') {
+            Write-Log "Resolve $($resolve.version) Free: Blackmagic removed Python from the Scripts menu in 21.1+, so the in-app bridge cannot work. MCP control needs Resolve Studio." 'WARN'
+        } else {
+            Write-Log 'Resolve FREE edition: installing the in-app bridge script into Resolve''s per-user Scripts\Utility folder' 'STEP'
+            $bridgeOut = @(Invoke-Native -File $gPy -Arguments @($bridgeScript) -WorkingDirectory $gDir)
+            $bridgeOut | ForEach-Object { Write-Log "  $_" }
+            if ((Get-LastNativeExitCode) -eq 0) {
+                Write-Log 'Bridge installed. In Resolve: restart it, open a project, then Workspace > Scripts > resolve_bridge (leave Resolve open). The MCP server then connects automatically.' 'OK'
+                Write-Log 'Resolve must see a Python 3 (python.org 3.x installed for this user is enough). If "resolve_bridge" is missing from the Scripts menu, see docs\MANUAL-STEPS.md "Free edition".' 'INFO'
+            } else {
+                Write-Log 'Bridge installer reported a problem (lines above). The rest of the install continues; the EDL workflow does not need it.' 'WARN'
+            }
+        }
+    } elseif ($wantBridge) {
+        Write-Log "bridge installer not found at $bridgeScript (upstream layout changed?)" 'WARN'
+    }
 }
 
 # ---------------------------------------------------------------- 2. CiprianSpiridon (alternate, ships the 4 skills)
@@ -115,6 +144,9 @@ if ($Primary -eq 'cipriano' -or -not $SkipAlternates) {
     # Editable install of the package only. Optional extras (transcription=openai-whisper,
     # screenshot=mss+pillow) are NOT installed here; see 04-install-analysis.ps1 -WithWhisper.
     Invoke-Checked -File $uv -Arguments @('pip', 'install', '--python', $cPy, '--quiet', '-e', $cDir)
+    # Upstream declares mcp[cli]>=1.3.0 unpinned; the 2.x SDK removed mcp.server.fastmcp, which this
+    # server imports, so pin back to the 1.x line (same constraint samuelgursky uses).
+    Invoke-Checked -File $uv -Arguments @('pip', 'install', '--python', $cPy, '--quiet', 'mcp[cli]>=1.3,<2')
     # pyautogui is required by the live transition keystroke tool but undeclared upstream.
     Invoke-Checked -File $uv -Arguments @('pip', 'install', '--python', $cPy, '--quiet', 'pyautogui', 'mss', 'pillow')
     $cExe = Join-Path $cDir '.venv\Scripts\davinci-resolve-mcp.exe'

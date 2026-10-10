@@ -97,7 +97,9 @@ User environment variables set: `Path` (+ `C:\AI-Video-Tools\bin`), `BJJ_HYPECUT
 
 ## 7. Manual steps required in DaVinci Resolve
 
-`docs/MANUAL-STEPS.md`. The non-negotiable ones: Resolve **Studio** licence for external scripting; *Preferences > System > General > External scripting using = Local*; a project open; vertical timelines (1080x1920) are duplicates you create; speed ramps and transitions beyond constant speed / dissolves are applied by you (markers show where); rendering is started by you.
+`docs/MANUAL-STEPS.md`. The non-negotiable ones: Resolve **Studio** licence for external scripting (or, on the Free edition through 21.0.x, the in-app bridge started from `Workspace > Scripts > resolve_bridge` every session); *Preferences > System > General > External scripting using = Local*; a project open; vertical timelines (1080x1920) are duplicates you create; speed ramps and transitions beyond constant speed / dissolves are applied by you (markers show where); rendering is started by you.
+
+**Detected on the PC (first run, 2026-10-10):** Windows 11 Pro, RTX 3070 driver 617.14, **DaVinci Resolve 20.3.10006 Free**, Git 2.55, Node 24, uv 0.12, Python 3.13.1 (py launcher), Claude Code CLI not on PATH, a broken `ffmpeg-static` stub first on PATH. Consequences: MCP control depends on the in-app bridge (installed automatically on Free); the `davinci-resolve*` / `resolve-*` skills work only while the bridge is running; Studio-only AI features (Magic Mask, Smart Reframe, Speed Warp, Voice Isolation, IntelliSearch, auto subtitles, face recognition, scene cut detection, AI colour tools, hardware encoders) are unavailable until a Studio licence (USD 295) is bought; the analysis pipeline, plans, EDL/CSV exports and render presets are unaffected.
 
 ## 8. Required API keys (no values stored anywhere)
 

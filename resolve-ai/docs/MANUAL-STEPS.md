@@ -16,6 +16,21 @@ or no internet for `git clone` / `uv`. The inventory step alone never changes an
 
 ## In DaVinci Resolve
 4. **Edition.** `Help > About`. External scripting is a **Studio** feature. On the Free edition every MCP server and `bjj resolve build` will report "Resolve did not accept the connection"; the analysis, plans, EDL/CSV exports and render presets still work and you import the EDL by hand (step 8).
+
+   **Free edition (detected on this PC: Resolve 20.3 Free) — the in-app bridge.** The primary MCP server ships a
+   script that runs *inside* Resolve from its own Scripts menu, which Blackmagic did not gate on the Free
+   edition through 21.0.x, and re-exports the live scripting object to the MCP server over an authenticated
+   localhost listener. The installer puts it in `%APPDATA%\Blackmagic Design\DaVinci Resolve\Support\Fusion\Scripts\Utility\`
+   and writes its secret to `%USERPROFILE%\.config\davinci-resolve-mcp\bridge.json`. To use it, every session:
+   1. start Resolve and open (or create) a project;
+   2. `Workspace > Scripts > resolve_bridge` (a console window may flash; leave Resolve open);
+   3. `claude mcp list` should now show `davinci-resolve … Connected`, and `bjj resolve status` reports the edition.
+   If `resolve_bridge` is missing from the menu, Resolve could not find a Python 3: install python.org Python 3.x
+   for this user (the inventory found 3.13.1, which should work), restart Resolve. If a `.py` never appears but a
+   `.lua` canary does, your build has removed Python from the Free edition (21.1+): Studio is then required.
+   This uses Resolve's supported internal scripting; nothing bypasses licensing. Re-run the bridge installer after
+   a Resolve update: `C:\AI-Video-Tools\mcp\davinci-resolve-mcp-gursky\.venv\Scripts\python.exe scripts\install_resolve_bridge.py`.
+   Step 5 (External scripting = Local) is still worth setting; it is harmless on Free and needed on Studio.
 5. **Enable scripting:** `DaVinci Resolve > Preferences > System > General > External scripting using: Local` → Save → restart Resolve. Keep it *Local* (never *Network*; nothing here needs a network port).
 6. **Open or create a project** before running Claude. `bjj resolve build --project NAME` creates a new project and appends `-2`, `-3`… if the name exists; it never overwrites.
 7. **Project frame rate** is set automatically from the footage when a new project is created; for an existing project check `Project Settings > Master Settings > Timeline frame rate` matches `suggested_timeline_fps` from `bjj probe`. Never let Resolve conform 60p to 60p if you want real-frame slow motion; cut 60p on a 30p (or 25p) timeline.
@@ -24,6 +39,10 @@ or no internet for `git clone` / `uv`. The inventory step alone never changes an
 10. **Vertical reels:** duplicate the timeline (`right-click > Duplicate Timeline`), `Timeline Settings > uncheck Use Project Settings > 1080 × 1920`, then reposition each clip (`Inspector > Transform`) or use **Smart Reframe** (Studio, `Inspector > Retime and Scaling > Smart Reframe`).
 11. **Rendering:** jobs are queued by the tools but never started. Deliver page → check the queue → `Render All`.
 12. **Native AI** (Studio): see `NATIVE-AI.md` for where each tool lives.
+
+## Tools the inventory flagged on this PC
+- **FFmpeg**: the first `ffmpeg.exe` on your PATH is a broken stub from a Node project (`C:\Projects\reddit2shorts\node_modules\ffmpeg-static`), and `ffprobe` there is a 2018 build. The installer now tests candidates and installs `Gyan.FFmpeg` through winget when none runs; `bjj` and `hypecut` are pinned to the working build (`BJJ_FFMPEG` / `BJJ_FFPROBE`), so you do not need to clean your PATH, though removing that node_modules entry from it is a good idea.
+- **Claude Code CLI**: `claude` was not on PATH in the installer's session. The installer also looks in `%USERPROFILE%\.local\bin` and `%APPDATA%\npm`. If it is still not found, install it (`https://code.claude.com/docs/en/setup`) and re-run `install\switch-mcp.ps1 -To gursky` and `install\03-install-skills.ps1 -Overwrite`.
 
 ## Claude Code
 13. Open a **new** Claude Code session after installing (skills and MCP registrations are read at start). Type `/` and confirm `bjj-analyze … resolve-health` appear; run `/resolve-health`.

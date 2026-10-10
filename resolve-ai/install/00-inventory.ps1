@@ -56,6 +56,13 @@ foreach ($t in @(
     $inv.tools[$t.n] = [ordered]@{ path = $path; version = $(if ($path) { Get-CommandVersion -Name $t.n -Arguments $t.a } else { $null }) }
 }
 
+# --- a WORKING ffmpeg (the first on PATH can be a broken npm stub)
+$ff = Find-Ffmpeg
+$inv.tools['ffmpeg_working'] = [ordered]@{ path = $(if ($ff) { $ff.ffmpeg } else { $null }); version = $(if ($ff) { Get-CommandVersion -Name $ff.ffmpeg -Arguments @('-version') } else { $null }) }
+$inv.tools['ffprobe_working'] = [ordered]@{ path = $(if ($ff) { $ff.ffprobe } else { $null }); version = $(if ($ff) { Get-CommandVersion -Name $ff.ffprobe -Arguments @('-version') } else { $null }) }
+$claudeExe = Get-ClaudeCliPath
+$inv.tools['claude'] = [ordered]@{ path = $claudeExe; version = $(if ($claudeExe) { Get-CommandVersion -Name $claudeExe } else { $null }) }
+
 # --- CUDA toolkit / cuDNN (optional; PyTorch wheels bundle their own CUDA runtime)
 $cudaDirs = @()
 $cudaRoot = Join-Path $env:ProgramFiles 'NVIDIA GPU Computing Toolkit\CUDA'
@@ -83,6 +90,7 @@ if (Test-Path -LiteralPath $cp.user_settings) {
 }
 $inv.claude.desktop_config_exists = Test-Path -LiteralPath $cp.claude_desktop_cfg
 if ($inv.claude.cli_installed) {
+    $inv.claude.cli_path = Get-ClaudeCliPath
     $inv.claude.mcp_list = ((Invoke-Native -File (Get-ClaudeCliPath) -Arguments @('mcp', 'list')) -join "`n").Trim()
 }
 
@@ -118,10 +126,11 @@ if ($r.python_module_uses_imp -eq $true) { $inv.notes += 'DaVinciResolveScript.p
 $pyForResolve = Select-PythonForResolve
 if (-not $pyForResolve) { $inv.conflicts += 'No Python found. Install Python 3.12 (x64) from python.org with "py launcher" and "Add to PATH".' }
 elseif ([version]$pyForResolve.version -ge [version]'3.13') { $inv.notes += "Only Python $($pyForResolve.version) found; 3.10-3.12 is the lowest-risk range for Resolve scripting. uv can download 3.12 for the venvs." }
-if (-not $inv.tools.ffmpeg.path) { $inv.conflicts += 'FFmpeg not on PATH: required by the analysis pipeline, HypeCut and the silence-removal skill (winget install Gyan.FFmpeg).' }
+if (-not $ff) { $inv.notes += 'No WORKING FFmpeg found (a broken stub may sit on PATH): 04-install-analysis.ps1 installs Gyan.FFmpeg via winget and pins the pipeline to it.' }
+elseif ($inv.tools.ffmpeg.path -and $inv.tools.ffmpeg.path -ne $ff.ffmpeg) { $inv.notes += "The first ffmpeg on PATH ($($inv.tools.ffmpeg.path)) does not run; the pipeline will use $($ff.ffmpeg) instead." }
 if (-not $inv.tools.git.path) { $inv.conflicts += 'Git not found: required to clone the MCP servers (winget install Git.Git).' }
 if (-not $inv.tools.uv.path) { $inv.notes += 'uv not found: the installer will install it per-user (winget install astral-sh.uv) to create isolated venvs.' }
-if (-not $inv.claude.cli_installed) { $inv.conflicts += 'Claude Code CLI not on PATH: MCP registration and skill verification need it.' }
+if (-not $inv.claude.cli_installed) { $inv.conflicts += 'Claude Code CLI not found (PATH, %USERPROFILE%\.local\bin, %APPDATA%\npm): MCP registration and skill verification need it. Install: https://code.claude.com/docs/en/setup (or `npm install -g @anthropic-ai/claude-code`), then re-run.' }
 if ($inv.claude.user_mcp_servers -contains 'davinci-resolve') { $inv.notes += 'A user-scope MCP server named davinci-resolve already exists; the installer will back it up and ask before replacing it.' }
 if ($inv.gpu.vram_mb -and $inv.gpu.vram_mb -lt 10000) { $inv.notes += "GPU VRAM $($inv.gpu.vram_mb) MB: fine for HypeCut (CPU) and YOLO-pose/whisper-small; avoid running Resolve renders and GPU inference at the same time." }
 $sysDrive = $inv.disks | Where-Object { $_.drive -eq $env:SystemDrive }

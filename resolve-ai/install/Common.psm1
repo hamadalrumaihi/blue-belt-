@@ -242,11 +242,74 @@ function Backup-File {
     return $dest
 }
 
-function Test-ClaudeCli { [bool](Get-CommandPath 'claude') }
-
 function Get-ClaudeCliPath {
-    # npm installs claude as claude.cmd; `Get-Command claude` resolves it. Returns the full path or $null.
-    return (Get-CommandPath 'claude')
+    <#
+    Claude Code may be on PATH (npm: claude.cmd) or installed by the native installer under
+    %USERPROFILE%\.local\bin, which a fresh PowerShell session does not always have on PATH.
+    Returns the full path or $null.
+    #>
+    $p = Get-CommandPath 'claude'
+    if ($p) { return $p }
+    $candidates = @(
+        (Join-PathSafe $env:USERPROFILE '.local\bin\claude.exe'),
+        (Join-PathSafe $env:USERPROFILE '.local\bin\claude.cmd'),
+        (Join-PathSafe $env:APPDATA 'npm\claude.cmd'),
+        (Join-PathSafe $env:LOCALAPPDATA 'Programs\claude\claude.exe'),
+        (Join-PathSafe $env:LOCALAPPDATA 'Microsoft\WinGet\Links\claude.exe')
+    )
+    foreach ($c in $candidates) { if ($c -and (Test-Path -LiteralPath $c)) { return $c } }
+    return $null
+}
+
+function Join-PathSafe {
+    # Join-Path throws on a null base (env vars missing off-Windows); return $null instead.
+    param($Base, [string]$Child)
+    if ([string]::IsNullOrEmpty([string]$Base)) { return $null }
+    return (Join-Path ([string]$Base) $Child)
+}
+
+function Test-ClaudeCli { [bool](Get-ClaudeCliPath) }
+
+function Test-Ffmpeg {
+    # True when this ffmpeg/ffprobe binary actually runs (node_modules ship broken stubs).
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return $false }
+    $out = @(Invoke-Native -File $Path -Arguments @('-version'))
+    return ((Get-LastNativeExitCode) -eq 0 -and $out.Count -gt 0 -and ($out[0] -match '^ff(mpeg|probe) version'))
+}
+
+function Find-Ffmpeg {
+    <#
+    Locate a WORKING ffmpeg + ffprobe pair. Order: BJJ_FFMPEG env var, every ffmpeg.exe on PATH
+    (the first one may be a broken npm stub), winget Gyan.FFmpeg package, common manual folders.
+    Returns @{ ffmpeg; ffprobe; dir } or $null.
+    #>
+    $cands = New-Object System.Collections.ArrayList
+    if ($env:BJJ_FFMPEG) { [void]$cands.Add($env:BJJ_FFMPEG) }
+    foreach ($c in @(Get-Command 'ffmpeg' -All -ErrorAction SilentlyContinue)) { [void]$cands.Add($c.Source) }
+    $exeName = if ($IsWindows -or $env:OS -eq 'Windows_NT') { 'ffmpeg.exe' } else { 'ffmpeg' }
+    $probeName = $exeName -replace 'ffmpeg', 'ffprobe'
+    $links = Join-PathSafe $env:LOCALAPPDATA "Microsoft\WinGet\Links\$exeName"
+    if ($links) { [void]$cands.Add($links) }
+    $pkgRoot = Join-PathSafe $env:LOCALAPPDATA 'Microsoft\WinGet\Packages'
+    if ($pkgRoot -and (Test-Path -LiteralPath $pkgRoot)) {
+        foreach ($f in @(Get-ChildItem -LiteralPath $pkgRoot -Recurse -Filter $exeName -ErrorAction SilentlyContinue | Sort-Object FullName -Descending)) { [void]$cands.Add($f.FullName) }
+    }
+    foreach ($d in @('C:\ffmpeg\bin', 'C:\Program Files\ffmpeg\bin', (Join-PathSafe $env:ProgramData 'chocolatey\bin'))) { if ($d) { [void]$cands.Add([System.IO.Path]::Combine($d, $exeName)) } }
+    foreach ($exe in $cands) {
+        if (-not $exe -or -not (Test-Path -LiteralPath $exe)) { continue }
+        $real = $exe
+        try { $item = Get-Item -LiteralPath $exe; $tgt = Get-Prop $item 'Target'; if ($tgt) { $real = [string]$tgt } } catch { }
+        if (-not (Test-Ffmpeg $exe)) { continue }
+        $dir = Split-Path $real -Parent
+        $probe = Join-Path $dir $probeName
+        if (-not (Test-Ffmpeg $probe)) {
+            $probe = Join-Path (Split-Path $exe -Parent) $probeName
+            if (-not (Test-Ffmpeg $probe)) { continue }
+        }
+        return @{ ffmpeg = $exe; ffprobe = $probe; dir = $dir }
+    }
+    return $null
 }
 
 Export-ModuleMember -Function *
