@@ -11,6 +11,10 @@ Pic-Time remains the gallery, storage and photo-sales platform. MyFatoorah handl
 
 ---
 
+> **Video editing:** the AI-assisted DaVinci Resolve workflow (MCP servers, Claude skills `/bjj-*`,
+> footage pipeline, Windows installers) lives in [`resolve-ai/`](resolve-ai/README.md); report and
+> status table in [`resolve-ai/docs/REPORT.md`](resolve-ai/docs/REPORT.md).
+
 ## Contents
 
 - [Architecture](#architecture)

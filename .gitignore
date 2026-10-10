@@ -50,3 +50,8 @@ agent/agent.env
 # photography originals (large; keep them out of git — see photos/README.md)
 photos/incoming/*
 !photos/incoming/.gitkeep
+# resolve-ai (python toolchain)
+resolve-ai/**/.venv/
+resolve-ai/**/__pycache__/
+resolve-ai/**/*.egg-info/
+resolve-ai/**/.pytest_cache/
