@@ -5,6 +5,7 @@ export default defineConfig({
   test: {
     include: ["tests/**/*.test.ts"],
     environment: "node",
+    mockReset: true,
     restoreMocks: true,
     clearMocks: true,
     coverage: { provider: "v8", include: ["src/lib/**/*.ts"], reporter: ["text", "lcov"] },
