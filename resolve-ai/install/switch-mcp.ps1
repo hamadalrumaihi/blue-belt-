@@ -34,11 +34,12 @@ if ($Status -or -not $To) {
         $c = $current[$Name]
         Write-Host "  $Name -> $($c.command) $($c.args -join ' ')"
     } else { Write-Host "  (none named $Name)" }
-    if (Test-ClaudeCli) { & claude mcp list 2>&1 | ForEach-Object { Write-Host "  $_" } }
+    if (Test-ClaudeCli) { Invoke-Native -File (Get-ClaudeCliPath) -Arguments @('mcp', 'list') | ForEach-Object { Write-Host "  $_" } }
     exit 0
 }
 
 if (-not (Test-ClaudeCli)) { throw 'claude CLI not found on PATH' }
+$claude = Get-ClaudeCliPath
 $srv = $reg.servers.$To
 if (-not $srv) { throw "server '$To' is not installed (run 02-install-mcp.ps1)" }
 
@@ -52,20 +53,22 @@ if ($existing.ContainsKey($Name)) {
     }
     & (Join-Path $PSScriptRoot '01-backup-config.ps1') | Out-Null
     Write-Log "removing current '$Name' registration"
-    & claude mcp remove $Name --scope user 2>&1 | ForEach-Object { Write-Log "  $_" }
+    Invoke-Native -File $claude -Arguments @('mcp', 'remove', $Name, '--scope', 'user') | ForEach-Object { Write-Log "  $_" }
 }
 
-$args = @('mcp', 'add', '--transport', 'stdio', '--scope', 'user')
-foreach ($k in $srv.env.PSObject.Properties.Name) { $args += @('-e', "$k=$($srv.env.$k)") }
-$args += @($Name, '--', $srv.command)
-if ($srv.args) { $args += @($srv.args) }
-Write-Log ("claude " + ($args -join ' ')) 'STEP'
-& claude @args 2>&1 | ForEach-Object { Write-Log "  $_" }
-if ($LASTEXITCODE -ne 0) { throw "claude mcp add failed ($LASTEXITCODE)" }
+$cliArgs = @('mcp', 'add', '--transport', 'stdio', '--scope', 'user')
+foreach ($k in $srv.env.PSObject.Properties.Name) { $cliArgs += @('-e', "$k=$($srv.env.$k)") }
+$cliArgs += @($Name, '--', $srv.command)
+$srvArgs = @(Get-Prop $srv 'args' @())
+if ($srvArgs.Count) { $cliArgs += $srvArgs }
+Write-Log ("claude " + ($cliArgs -join ' ')) 'STEP'
+Invoke-Native -File $claude -Arguments $cliArgs | ForEach-Object { Write-Log "  $_" }
+$code = Get-LastNativeExitCode
+if ($code -ne 0) { throw "claude mcp add failed (exit $code)" }
 
 $reg.primary = $To
 $reg | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $regPath -Encoding UTF8
 Write-Log "active server: $To ($($srv.tools))" 'OK'
 Write-Log 'Verifying connection (needs Resolve Studio running with External scripting = Local for a green check):'
-& claude mcp get $Name 2>&1 | ForEach-Object { Write-Log "  $_" }
+Invoke-Native -File $claude -Arguments @('mcp', 'get', $Name) | ForEach-Object { Write-Log "  $_" }
 exit 0

@@ -30,7 +30,7 @@ $uv = Get-CommandPath 'uv'
 if (-not $uv) { throw 'uv not found; run 02-install-mcp.ps1 first (it installs uv) or winget install astral-sh.uv' }
 if (-not (Get-CommandPath 'ffmpeg')) {
     Write-Log 'ffmpeg not on PATH; installing Gyan.FFmpeg via winget (per-user). Open a new terminal afterwards if ffmpeg is still missing.' 'WARN'
-    if (Get-CommandPath 'winget') { & winget install --id Gyan.FFmpeg -e --accept-source-agreements --accept-package-agreements | Out-Null }
+    if (Get-CommandPath 'winget') { Invoke-Native -File 'winget' -Arguments @('install', '--id', 'Gyan.FFmpeg', '-e', '--accept-source-agreements', '--accept-package-agreements') | Out-Null }
 }
 
 # ---------------------------------------------------------------- bjj-pipeline
@@ -54,7 +54,7 @@ if ($WithGpuExtras) {
     if (-not $gpu.name) { Write-Log 'No NVIDIA GPU detected; GPU extras will run on CPU (slow).' 'WARN' }
     Invoke-Checked -File $uv -Arguments @('pip', 'install', '--python', $bPy, '--quiet', 'torch', 'torchvision', '--index-url', $TorchIndex)
     Invoke-Checked -File $uv -Arguments @('pip', 'install', '--python', $bPy, '--quiet', 'ultralytics', 'opencv-python-headless', 'openai-whisper')
-    & $bPy -c "import torch; print('torch', torch.__version__, 'cuda', torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else '-')" 2>&1 | ForEach-Object { Write-Log "  $_" }
+    Invoke-Native -File $bPy -Arguments @('-c', "import torch; print('torch', torch.__version__, 'cuda', torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else '-')") | ForEach-Object { Write-Log "  $_" }
 }
 
 # ---------------------------------------------------------------- HypeCut
@@ -73,13 +73,21 @@ Invoke-Checked -File $uv -Arguments @('pip', 'install', '--python', $hPy, '--qui
 @echo off
 "$hVenv\Scripts\hypecut.exe" %*
 "@ | Set-Content -LiteralPath (Join-Path $binDir 'hypecut.cmd') -Encoding ASCII
-& (Join-Path $hVenv 'Scripts\hypecut.exe') --version 2>&1 | ForEach-Object { Write-Log "  $_" }
+$hExe = Join-Path $hVenv 'Scripts\hypecut.exe'
+Invoke-Native -File $hExe -Arguments @('--version') | ForEach-Object { Write-Log "  $_" }
 # Smoke test on a synthetic clip (HypeCut's own suite is 240 tests / ~2 min; run with -Verbose to include it)
 $tmp = New-DirectorySafe (Join-Path $root 'tmp')
 $clip = Join-Path $tmp 'hypecut-smoke.mp4'
-& ffmpeg -v error -y -f lavfi -i 'testsrc=s=640x360:r=30:d=12' -f lavfi -i 'sine=f=440:d=12' -filter_complex "[1:a]volume='if(between(t,6,8),8.0,0.05)':eval=frame[a]" -map 0:v -map '[a]' -c:v libx264 -preset ultrafast -pix_fmt yuv420p -c:a aac $clip
-& (Join-Path $hVenv 'Scripts\hypecut.exe') analyze $clip --json (Join-Path $tmp 'hypecut-smoke.json') -q --profile (Join-Path $hDir 'configs\sports-field.yaml')
-if ($LASTEXITCODE -eq 0 -and (Test-Path (Join-Path $tmp 'hypecut-smoke.json'))) { Write-Log 'HypeCut smoke test OK (sports-field profile)' 'OK' } else { Write-Log 'HypeCut smoke test failed' 'ERROR' }
+$ffmpeg = Get-CommandPath 'ffmpeg'
+if ($ffmpeg) {
+    Invoke-Native -File $ffmpeg -Arguments @('-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc=s=640x360:r=30:d=12', '-f', 'lavfi', '-i', 'sine=f=440:d=12',
+        '-filter_complex', "[1:a]volume='if(between(t,6,8),8.0,0.05)':eval=frame[a]", '-map', '0:v', '-map', '[a]',
+        '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', $clip) | Out-Null
+    Invoke-Native -File $hExe -Arguments @('analyze', $clip, '--json', (Join-Path $tmp 'hypecut-smoke.json'), '-q', '--profile', (Join-Path $hDir 'configs\sports-field.yaml')) | ForEach-Object { Write-Log "  $_" }
+    if ((Get-LastNativeExitCode) -eq 0 -and (Test-Path (Join-Path $tmp 'hypecut-smoke.json'))) { Write-Log 'HypeCut smoke test OK (sports-field profile)' 'OK' } else { Write-Log 'HypeCut smoke test failed' 'ERROR' }
+} else {
+    Write-Log 'ffmpeg still not on PATH in this session: HypeCut smoke test skipped (open a new terminal and run 06-verify.ps1)' 'WARN'
+}
 if ($VerbosePreference -eq 'Continue') { Invoke-Checked -File $hPy -Arguments @('-m', 'pytest', '-q', '-p', 'no:cacheprovider', '-p', 'no:warnings') -WorkingDirectory $hDir }
 
 # ---------------------------------------------------------------- user PATH (per-user, no admin)
@@ -88,7 +96,7 @@ if ($userPath -notlike "*$binDir*") {
     [Environment]::SetEnvironmentVariable('Path', ($userPath.TrimEnd(';') + ";$binDir"), 'User')
     Write-Log "added $binDir to the user PATH (new terminals only)" 'OK'
 }
-[Environment]::SetEnvironmentVariable('BJJ_HYPECUT', (Join-Path $hVenv 'Scripts\hypecut.exe'), 'User')
+[Environment]::SetEnvironmentVariable('BJJ_HYPECUT', $hExe, 'User')
 
 @{ updated = (Get-Date).ToString('s'); bjj_pipeline = @{ dir = $bDir; python = $bPy; gpu_extras = [bool]$WithGpuExtras }
    hypecut = @{ dir = $hDir; python = $hPy; exe = (Join-Path $hVenv 'Scripts\hypecut.exe'); profile = (Join-Path $hDir 'configs\sports-field.yaml') }

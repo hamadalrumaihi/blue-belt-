@@ -92,7 +92,7 @@ $report = [ordered]@{ generated = (Get-Date).ToString('s'); skills_dir = $dest; 
 if (Test-ClaudeCli) {
     # Non-interactive discovery check: ask Claude to list its skills (cheap prompt). Needs a signed-in CLI.
     try {
-        $probe = & claude -p 'List the names of the skills available to you that start with "bjj-" or "resolve-" or "davinci-resolve". Output only the names, one per line.' --max-turns 1 2>&1 | Out-String
+        $probe = (Invoke-Native -File (Get-ClaudeCliPath) -Arguments @('-p', 'List the names of the skills available to you that start with "bjj-" or "resolve-" or "davinci-resolve". Output only the names, one per line.', '--max-turns', '1')) -join "`n"
         $report['claude_probe'] = $probe.Trim()
         $seen = @($installed | Where-Object { $probe -match [regex]::Escape($_.name) } | ForEach-Object { $_.name })
         $report['probe_confirmed'] = $seen
