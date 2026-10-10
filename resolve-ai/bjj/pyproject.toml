@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bjj-pipeline"
+version = "0.1.0"
+description = "Blue Belt Media - AI-assisted Brazilian jiu-jitsu tournament footage pipeline for DaVinci Resolve (organize, analyze, rank, plan, export EDL, build timelines, render presets)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+  "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+# Deep-learning assisted detectors (pose / person detection). Installed in the
+# SAME venv only when the user opts in; the heuristic analyzer never needs them.
+detect = [
+  "ultralytics>=8.3",
+  "opencv-python-headless>=4.9",
+]
+dev = [
+  "pytest>=8",
+]
+
+[project.scripts]
+bjj = "bjj_pipeline.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["bjj_pipeline*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

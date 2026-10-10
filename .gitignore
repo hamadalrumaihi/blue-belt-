@@ -46,3 +46,9 @@ worker/node_modules
 supabase/.temp
 agent/node_modules
 agent/agent.env
+
+# resolve-ai (python toolchain)
+resolve-ai/**/.venv/
+resolve-ai/**/__pycache__/
+resolve-ai/**/*.egg-info/
+resolve-ai/**/.pytest_cache/
