@@ -1,0 +1,19 @@
+{
+  "_comment": "Stage C ranking weights (sum is normalised). Pass with: bjj analyze|rank|plan --weights resolve-ai/config/scoring.json. Low scores never discard footage; they only add review flags.",
+  "weights": {
+    "focus": 0.16,
+    "motion_blur": 0.10,
+    "stability": 0.12,
+    "composition": 0.10,
+    "subject_visibility": 0.10,
+    "action_intensity": 0.14,
+    "lighting": 0.10,
+    "narrative_importance": 0.10,
+    "usability": 0.08
+  },
+  "profiles": {
+    "cinematic": { "focus": 0.20, "stability": 0.16, "lighting": 0.14, "action_intensity": 0.08, "narrative_importance": 0.14 },
+    "high_energy": { "action_intensity": 0.24, "motion_blur": 0.06, "stability": 0.08 },
+    "club_recap": { "narrative_importance": 0.18, "subject_visibility": 0.14 }
+  }
+}
