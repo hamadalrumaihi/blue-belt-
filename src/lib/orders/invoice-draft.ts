@@ -116,8 +116,13 @@ export function buildInvoiceDraft(order: DraftOrder): InvoiceDraft {
 
 const money = (n: number, cur: string) => `${n.toFixed(2)} ${cur}`;
 
-/** Plain text the owner can review, edit and paste to the buyer themselves. */
-export function invoiceDraftText(d: InvoiceDraft): string {
+/**
+ * Plain text the owner can review, edit and paste to the buyer themselves.
+ * When the order carries an online payment link (created by the owner on the
+ * order page), the text offers it; the link is still only ever sent by the
+ * owner's own hand.
+ */
+export function invoiceDraftText(d: InvoiceDraft, opts: { payUrl?: string | null } = {}): string {
   const out = ["Invoice — Blue Belt Media", `Bill to: ${d.billTo.name}`];
   const contact = [d.billTo.email, d.billTo.phone].filter(Boolean).join(" · ");
   if (contact) out.push(contact);
@@ -127,8 +132,16 @@ export function invoiceDraftText(d: InvoiceDraft): string {
   for (const l of d.lines) out.push(`${l.quantity} × ${l.description}${l.amount !== null ? ` — ${money(l.amount, d.currency)}` : ""}`);
   if (d.lines.length) out.push("");
   out.push(`Total due: ${money(d.total, d.currency)}`);
-  if (d.paymentMethod !== "unknown" && d.paymentMethod !== "card") out.push(`Payment by ${METHOD_LABEL[d.paymentMethod]}`);
+  if (d.paymentMethod === "photographer") out.push("Payment directly to Blue Belt Media (Fawran, bank transfer or cash).");
+  else if (d.paymentMethod !== "unknown" && d.paymentMethod !== "card") out.push(`Payment by ${METHOD_LABEL[d.paymentMethod]}`);
+  if (opts.payUrl) out.push(`Pay online: ${opts.payUrl}`);
   return out.join("\n");
+}
+
+/** Short message the owner can paste to a buyer with the order's online payment link. */
+export function paymentLinkText(input: { customerName: string; reference: string | null; amount: number; currency: string; payUrl: string }): string {
+  const what = input.reference ? `your Pic-Time order ${input.reference}` : "your order";
+  return [`Hello ${input.customerName},`, "", `Here is the secure online payment link for ${what} (${money(input.amount, input.currency)}):`, input.payUrl, "", "Thank you,", "Blue Belt Media"].join("\n");
 }
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");

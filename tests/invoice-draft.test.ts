@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildInvoiceDraft, invoiceDraftText, invoiceNeed, invoiceSentAt, invoiceTelegramLines, matchClient, phoneKey, type DraftOrder } from "@/lib/orders/invoice-draft";
+import { buildInvoiceDraft, invoiceDraftText, invoiceNeed, invoiceSentAt, invoiceTelegramLines, matchClient, paymentLinkText, phoneKey, type DraftOrder } from "@/lib/orders/invoice-draft";
 
 const order = (over: Partial<DraftOrder> = {}): DraftOrder => ({
   customer_name: "Khalid <Al-Thani>",
@@ -72,6 +72,18 @@ describe("buildInvoiceDraft / invoiceDraftText", () => {
     expect(text).toContain("2 × Digital download — 100.00 QAR");
     expect(text).toContain("Total due: 150.00 QAR");
     expect(text).toContain("Payment by Fawran");
+    expect(text).not.toContain("Pay online");
+  });
+
+  it("drafts for an order paid to the photographer directly and offers the online link only when the owner created one", () => {
+    expect(invoiceNeed(order({ payment_method: "photographer" }), null)).toEqual({ kind: "draft" });
+    const text = invoiceDraftText(buildInvoiceDraft(order({ payment_method: "photographer" })), { payUrl: "https://pay.example/abc" });
+    expect(text).toContain("Payment directly to Blue Belt Media (Fawran, bank transfer or cash).");
+    expect(text).toContain("Pay online: https://pay.example/abc");
+    const note = paymentLinkText({ customerName: "Khalid", reference: "PT-7", amount: 150, currency: "QAR", payUrl: "https://pay.example/abc" });
+    expect(note).toContain("Hello Khalid,");
+    expect(note).toContain("your Pic-Time order PT-7 (150.00 QAR)");
+    expect(note).toContain("https://pay.example/abc");
   });
 });
 

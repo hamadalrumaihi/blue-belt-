@@ -1,0 +1,13 @@
+{
+  "_fixture": "REAL SHAPE — the field names, value types and formats are exactly what the Pic-Time → Zapier → POST Zap sent on 2026-10-04; the buyer details are replaced",
+  "total": "240",
+  "currency": "QAR",
+  "placedAt": "/Date(1790606628667)/",
+  "buyerName": "Test Buyer",
+  "buyerEmail": "buyer@example.com",
+  "buyerPhone": "55550102",
+  "externalRef": "1475080675",
+  "paymentMethod": "photographer",
+  "paymentStatus": "approved",
+  "placedAt_Date": "1790606628667"
+}

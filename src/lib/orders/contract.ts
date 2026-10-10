@@ -1,25 +1,34 @@
 import { isPlainObject } from "@/lib/validation";
 
 /**
- * Pic-Time order intake contract (PROPOSED — no real Pic-Time payload was
- * available while building; see docs/orders-intake.md for the Zapier mapping
- * and the labelled synthetic fixtures under tests/fixtures/orders/).
+ * Pic-Time order intake contract. The shape was proposed before any real
+ * payload existed and confirmed against the first real order the Zap sent
+ * on 4 October 2026 (see docs/orders-intake.md, "What Pic-Time really
+ * sends"): flat Zapier field names, every value a string, the ASP.NET
+ * `/Date(ms)/` form for the order date, `paymentMethod: "photographer"` for
+ * an order the buyer pays to the photographer directly and
+ * `paymentStatus: "approved"` for an order the photographer approved.
  *
  * A Zap ("Pic-Time → New order" trigger → "Webhooks by Zapier: POST JSON")
- * sends this shape to POST /api/orders/intake with an orders intake
- * credential. Everything optional is nullable; amounts are never invented:
- * an order without an amount is refused. Buyers are customers, not tracked
- * athletes — `athleteNameHint` is free text for the photographer's eyes only.
+ * sends this to POST /api/orders/intake with an orders intake credential.
+ * Everything optional is nullable; amounts are never invented: an order
+ * without an amount is refused. Buyers are customers, not tracked athletes —
+ * `athleteNameHint` is free text for the photographer's eyes only.
  */
 
-export type PaymentMethod = "card" | "fawran" | "bank_transfer" | "cash" | "unknown";
+export type PaymentMethod = "card" | "fawran" | "bank_transfer" | "cash" | "photographer" | "unknown";
 export type PaymentState = "unknown" | "pending" | "paid" | "failed" | "refunded";
 export type OrderStatus = "placed" | "fulfilled" | "cancelled";
 
-export const PAYMENT_METHODS: readonly PaymentMethod[] = ["card", "fawran", "bank_transfer", "cash", "unknown"];
+export const PAYMENT_METHODS: readonly PaymentMethod[] = ["card", "fawran", "bank_transfer", "cash", "photographer", "unknown"];
 export const PAYMENT_STATES: readonly PaymentState[] = ["unknown", "pending", "paid", "failed", "refunded"];
-/** Methods settled outside Pic-Time: the owner confirms receipt by hand. */
-export const OFFLINE_METHODS: readonly PaymentMethod[] = ["fawran", "bank_transfer", "cash"];
+/**
+ * Methods settled outside Pic-Time: the owner confirms receipt by hand.
+ * `photographer` is Pic-Time's own "pay the photographer directly" option
+ * (the buyer then pays by Fawran, bank transfer or cash; Pic-Time does not
+ * know which), so it is offline too.
+ */
+export const OFFLINE_METHODS: readonly PaymentMethod[] = ["fawran", "bank_transfer", "cash", "photographer"];
 
 export type OrderItem = { name: string; quantity: number; unitAmount: number | null; sku: string | null };
 
@@ -64,6 +73,8 @@ function methodOf(v: unknown): PaymentMethod {
   if (/fawran|fawri|offline_transfer/.test(s)) return "fawran";
   if (/bank|transfer|iban|wire/.test(s)) return "bank_transfer";
   if (/cash/.test(s)) return "cash";
+  // Pic-Time: "photographer" = the buyer settles with the photographer directly.
+  if (/photographer|direct|manual|offline|in_person|pay_later|invoice/.test(s)) return "photographer";
   if (/card|visa|master|stripe|credit|debit|apple|google|online/.test(s)) return "card";
   return "unknown";
 }
@@ -71,11 +82,38 @@ function methodOf(v: unknown): PaymentMethod {
 function stateOf(v: unknown): PaymentState | null {
   const s = (str(v) ?? "").toLowerCase();
   if (!s) return null;
-  if (/paid|succe|complete|captured|settled/.test(s)) return "paid";
+  // "unpaid" and "pending approval" must not fall into the paid / approved buckets.
+  if (/unpaid|pend|await|open|process/.test(s)) return "pending";
   if (/refund/.test(s)) return "refunded";
-  if (/fail|declin|error/.test(s)) return "failed";
-  if (/pend|await|unpaid|open|process/.test(s)) return "pending";
+  if (/fail|declin|error|cancel/.test(s)) return "failed";
+  // Pic-Time reports "approved" once the photographer approves the order; a
+  // card order has been charged by then. Offline methods are forced to
+  // pending below regardless, so this never marks hand-collected money paid.
+  if (/paid|succe|complete|captured|settled|approv/.test(s)) return "paid";
   return "unknown";
+}
+
+/**
+ * Order dates arrive as ISO text, as epoch milliseconds or seconds (number
+ * or numeric string) or, straight from Pic-Time through Zapier, in the
+ * ASP.NET form `/Date(1790606628667)/`. Anything else is dropped, never guessed.
+ */
+export function parsePlacedAt(v: unknown): string | null {
+  if (typeof v === "number" && Number.isFinite(v)) return epochToIso(v);
+  const s = str(v, 60);
+  if (!s) return null;
+  const aspNet = /^\/Date\((-?\d+)(?:[+-]\d{4})?\)\/$/.exec(s);
+  if (aspNet) return epochToIso(Number(aspNet[1]));
+  if (/^-?\d{9,14}$/.test(s)) return epochToIso(Number(s));
+  const t = new Date(s).getTime();
+  return Number.isFinite(t) ? new Date(t).toISOString() : null;
+}
+
+function epochToIso(n: number): string | null {
+  // Seconds before the year 2100 fit in 10 digits; milliseconds need 12+.
+  const ms = Math.abs(n) < 1e11 ? n * 1000 : n;
+  const t = new Date(ms).getTime();
+  return Number.isFinite(t) && t > 0 ? new Date(t).toISOString() : null;
 }
 
 /** Validates and normalises an intake body. Never throws. */
@@ -117,8 +155,8 @@ export function parseOrderIntake(body: unknown): OrderParse {
   // the money is confirmed by the owner, not by the order notification.
   const state: PaymentState = OFFLINE_METHODS.includes(method) ? (reportedState === "refunded" ? "refunded" : "pending") : (reportedState ?? "unknown");
 
-  const placedRaw = str(body.placedAt ?? body.createdAt ?? body.orderDate, 40);
-  const placedAt = placedRaw && Number.isFinite(new Date(placedRaw).getTime()) ? new Date(placedRaw).toISOString() : null;
+  // Zapier adds a parsed `<field>_Date` (epoch ms) next to a date field it recognised; prefer the original, fall back to it.
+  const placedAt = parsePlacedAt(body.placedAt ?? body.createdAt ?? body.orderDate) ?? parsePlacedAt(body.placedAt_Date ?? body.createdAt_Date ?? body.orderDate_Date);
   const galleryRaw = isPlainObject(body.gallery) ? body.gallery : { name: body.galleryName, id: body.galleryId };
 
   return {
@@ -140,15 +178,20 @@ export function parseOrderIntake(body: unknown): OrderParse {
 
 /** Owner-facing label for the payment situation of an order. */
 export function paymentLabel(method: PaymentMethod, state: PaymentState): string {
-  if (state === "paid") return method === "card" ? "Paid (card, reported by Pic-Time)" : "Paid (confirmed by you)";
+  if (state === "paid") {
+    if (method === "card") return "Paid (card, reported by Pic-Time)";
+    if (OFFLINE_METHODS.includes(method)) return "Paid (confirmed by you)";
+    return "Paid (reported by Pic-Time)";
+  }
   if (state === "refunded") return "Refunded";
   if (state === "failed") return "Payment failed";
+  if (method === "photographer") return "Order placed — to be paid to you directly, not yet confirmed";
   if (OFFLINE_METHODS.includes(method)) return `Order placed — ${METHOD_LABEL[method]} payment not yet confirmed`;
   if (state === "pending") return "Payment pending";
   return "Payment status unknown";
 }
 
-export const METHOD_LABEL: Record<PaymentMethod, string> = { card: "Card", fawran: "Fawran", bank_transfer: "Bank transfer", cash: "Cash", unknown: "Unknown method" };
+export const METHOD_LABEL: Record<PaymentMethod, string> = { card: "Card", fawran: "Fawran", bank_transfer: "Bank transfer", cash: "Cash", photographer: "Direct to photographer", unknown: "Unknown method" };
 
 /** Telegram text for a new order ([Orders] prefix is added by the runner). */
 export function orderMessage(o: NormalizedOrder): string {

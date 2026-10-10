@@ -1,12 +1,38 @@
-# Orders intake — Pic-Time orders via Zapier (proposed contract)
+# Orders intake — Pic-Time orders via Zapier
 
-Status: **implemented and locally verified, feature-flagged, not live.** No
-real Pic-Time payload was available while building; the contract below is a
-proposal shaped so that a Zap can fill it from Pic-Time's "New order" trigger
-fields. The fixtures under `tests/fixtures/orders/` are **synthetic** and say
-so in a `_fixture` field. Before relying on it, send one real order through
-Zapier's test step, compare the fields, and adjust the mapping (not the
-guarantees).
+Status: **live in production** (`ORDERS_INTAKE_ENABLED=1`, Zap connected).
+The first real order arrived on 4 October 2026 and the contract was checked
+against it; see "What Pic-Time really sends" below. The older fixtures under
+`tests/fixtures/orders/` are **synthetic** and say so in a `_fixture` field;
+`pictime-photographer-approved.json` has the real shape with the buyer
+details replaced.
+
+## What Pic-Time really sends (confirmed 2026-10-04)
+
+The Zap posts a flat JSON object; every value is a string:
+
+```json
+{
+  "externalRef": "1475080675",
+  "buyerName": "…", "buyerEmail": "…", "buyerPhone": "33301192",
+  "total": "240", "currency": "QAR",
+  "placedAt": "/Date(1790606628667)/", "placedAt_Date": "1790606628667",
+  "paymentMethod": "photographer",
+  "paymentStatus": "approved"
+}
+```
+
+| Pic-Time value | Meaning | Stored as |
+| --- | --- | --- |
+| `paymentMethod: "photographer"` | The buyer chose *pay the photographer directly* at checkout; Pic-Time collected nothing and does not know whether it will be Fawran, bank transfer or cash. | `payment_method = photographer` (an **offline** method: shown as "Order placed — to be paid to you directly, not yet confirmed", counted under *Needs payment confirmation*, gets an invoice draft, eligible for a MyFatoorah invoice). |
+| `paymentMethod` naming a card / Apple Pay / Google Pay | Paid online inside Pic-Time. | `card`; never invoiced again. |
+| `paymentStatus: "approved"` | The order was approved (by you, or automatically). It is **not** proof of money for a direct-payment order. | `payment_reported_state = paid`; `payment_state` is `paid` only for card orders and forced to `pending` for every offline method. |
+| `paymentStatus: "pending approval"` / `"unpaid"` | Not yet approved / not paid. | `pending`. |
+| `placedAt: "/Date(ms)/"` | ASP.NET date. Zapier also adds `placedAt_Date` with the epoch milliseconds. | Both are parsed; an unreadable date is dropped, never guessed. |
+| no `items`, no `galleryName` | The current Zap does not map line items or the gallery. | Empty items; the invoice draft shows the total only. Add the fields in the Zap when Pic-Time exposes them. |
+
+Phone numbers come without a country code (8 digits); the client match uses
+the last 8 digits, and the WhatsApp buttons treat 8 digits as Qatar (+974).
 
 ## What it is — and is not
 
@@ -68,8 +94,8 @@ Flat aliases are accepted for Zapier's one-level field mapping:
 | `buyer.email` | no | must look like an email when present; lower-cased |
 | `amount.value` | **yes** | number ≥ 0; rounded to 2 dp |
 | `amount.currency` | no (default `QAR`) | 3-letter code |
-| `payment.method` | no | words mapped: card/visa/apple… → `card`; fawran → `fawran`; bank/transfer/iban → `bank_transfer`; cash → `cash`; else `unknown` |
-| `payment.state` | no | paid/succeeded → `paid`; pending/awaiting → `pending`; failed/declined → `failed`; refund… → `refunded`; **forced to `pending` for offline methods** (reported value kept in `payment_reported_state`) |
+| `payment.method` | no | words mapped: fawran → `fawran`; bank/transfer/iban → `bank_transfer`; cash → `cash`; photographer/direct/manual/offline → `photographer`; card/visa/apple… → `card`; else `unknown` |
+| `payment.state` | no | unpaid/pending/awaiting → `pending`; refund… → `refunded`; failed/declined/cancelled → `failed`; paid/succeeded/approved → `paid`; **forced to `pending` for offline methods** (reported value kept in `payment_reported_state`) |
 | `items[]` | no | up to 50; `name` required per item |
 
 Responses: `201` recorded, `200` replayed, `400` `INVALID_JSON` / `INVALID_ORDER`
@@ -144,8 +170,21 @@ WhatsApp** (your own app opens with the text filled in), and **Mark invoice
 sent** (stored as `metadata.invoice_sent_at`). Nothing is sent to the buyer,
 charged or created at a payment provider by any of this.
 
+## Online payment link for an order (owner-sent)
+
+With MyFatoorah configured, **Create MyFatoorah payment invoice** on the order
+page creates an invoice carrying the order id and stores its link on the order
+(`docs/payments.md`, "Order ↔ invoice lifecycle"). The link is then shown in
+the Payment card with **Copy link**, **Open in email** and **Open in WhatsApp**
+(a short message with the amount and the link, filled into your own app), and
+the invoice draft text gains a "Pay online: …" line. The link is never sent
+automatically; the buyer pays on MyFatoorah's page and the signed webhook (or
+reconciliation) marks the order paid.
+
 ## Tests
 
-`tests/orders-contract.test.ts` (normalisation, Fawran rule, refusals,
-redaction), `tests/api-orders-intake.test.ts` (flag, credential kind,
-owner from credential, atomic RPC call, replay 200), `supabase/tests/orders_rls.test.sql`.
+`tests/orders-contract.test.ts` (real payload shape, date forms, method and
+state words, Fawran rule, refusals, redaction), `tests/invoice-draft.test.ts`
+(drafts, direct-payment wording, payment-link message), `tests/api-orders-intake.test.ts`
+(flag, credential kind, owner from credential, atomic RPC call, replay 200),
+`supabase/tests/orders_rls.test.sql`.

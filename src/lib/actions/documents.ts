@@ -86,9 +86,10 @@ async function seedMissingTemplates(supabase: Supabase, ownerId: string): Promis
 export async function ensureDefaultTemplates(): Promise<Result<{ created: number }>> {
   const { supabase, user } = await owner();
   if (!user) return { ok: false, error: "You are signed out." };
-  const res = await seedMissingTemplates(supabase, user.id);
-  if (res.ok && res.created > 0) revalidatePath("/documents/templates");
-  return res;
+  // No revalidatePath here: this runs while the Templates and New document
+  // pages render (both force-dynamic and re-read after seeding), and Next.js
+  // rejects revalidation during a render.
+  return seedMissingTemplates(supabase, user.id);
 }
 
 export async function createTemplate(_prev: ActionState, formData: FormData): Promise<ActionState> {
