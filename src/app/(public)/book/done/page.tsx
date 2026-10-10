@@ -38,8 +38,8 @@ export default async function BookingDonePage({ searchParams }: PageProps<"/book
   }
 
   const steps = [
-    `${name} checks availability and confirms within 24 hours, by e-mail or WhatsApp.`,
-    "You sign your agreement online and pay the 50% deposit on our secure payment page. That secures the date.",
+    `${name} checks the date and confirms within 24 hours, by e-mail or WhatsApp. Team days and custom work come back with a quote first.`,
+    "Once the price is confirmed you sign your agreement online and pay the 50% deposit on our secure payment page. That is when the booking is confirmed.",
     "After the shoot your edited photos and video arrive in your private online gallery. The remaining 50% is due after delivery.",
   ];
 

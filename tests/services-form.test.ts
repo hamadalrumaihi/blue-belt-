@@ -19,13 +19,13 @@ describe("parseServiceForm", () => {
   it("parses a priced package and fills the code from the name", () => {
     const r = parseServiceForm(fd({ name: "Tournament photo", booking_type: "tournament_athlete", description: "All matches", price_qr: "350", deposit_qr: "100", duration_minutes: "", includes_photo: "on", active: "on", public: "on", sort_order: "10" }));
     expect(r.fieldErrors).toEqual({});
-    expect(r.values).toEqual({ code: "tournament-photo", name: "Tournament photo", booking_type: "tournament_athlete", description: "All matches", price_qr: 350, deposit_qr: 100, currency: "QAR", duration_minutes: null, includes_photo: true, includes_video: false, active: true, public: true, sort_order: 10 });
+    expect(r.values).toEqual({ code: "tournament-photo", name: "Tournament photo", booking_type: "tournament_athlete", description: "All matches", price_qr: 350, price_mode: "from", deposit_qr: 100, currency: "QAR", duration_minutes: null, includes_photo: true, includes_video: false, active: true, public: true, sort_order: 10 });
   });
 
   it("treats an empty price as quote on request and keeps an explicit code", () => {
     const r = parseServiceForm(fd({ name: "Club day", code: "CLUB-DAY", booking_type: "club", includes_video: "on" }));
     expect(r.fieldErrors).toEqual({});
-    expect(r.values).toMatchObject({ code: "club-day", price_qr: null, deposit_qr: null, includes_photo: false, includes_video: true, active: false, public: false, sort_order: 0 });
+    expect(r.values).toMatchObject({ code: "club-day", price_qr: null, price_mode: "quote", deposit_qr: null, includes_photo: false, includes_video: true, active: false, public: false, sort_order: 0 });
   });
 
   it("rejects a missing name, a bad type, a bad code, a negative price, a deposit above the price and no includes", () => {
@@ -53,5 +53,18 @@ describe("DEFAULT_SERVICES", () => {
       expect(s.includes_photo || s.includes_video).toBe(true);
     }
     expect(new Set(DEFAULT_SERVICES.map((s) => s.booking_type))).toEqual(new Set(["tournament_athlete", "club", "training_session", "private_session", "custom"]));
+  });
+});
+
+describe("price modes", () => {
+  it("parses fixed, from and quote, and refuses a fixed or starting price without an amount", () => {
+    const fixed = parseServiceForm(fd({ name: "Portrait hour", booking_type: "private_session", price_mode: "fixed", price_qr: "600", includes_photo: "on" }));
+    expect(fixed.values).toMatchObject({ price_mode: "fixed", price_qr: 600 });
+    const quote = parseServiceForm(fd({ name: "Club day", booking_type: "club", price_mode: "quote", price_qr: "1200", includes_photo: "on" }));
+    expect(quote.values).toMatchObject({ price_mode: "quote", price_qr: 1200 });
+    const missing = parseServiceForm(fd({ name: "Session", booking_type: "training_session", price_mode: "from", includes_photo: "on" }));
+    expect(missing.values).toBeNull();
+    expect(missing.fieldErrors.price_qr).toMatch(/quote on request/);
+    expect(DEFAULT_SERVICES.every((s) => s.price_mode === "quote")).toBe(true);
   });
 });

@@ -133,7 +133,7 @@ class FakeService {
   }
 }
 
-const serviceRow = (id: string, name: string, price: number) => ({ id, owner_id: OWNER, code: name.slice(0, 2), name, booking_type: "tournament_athlete", description: null, price_qr: price, deposit_qr: null, currency: "QAR", duration_minutes: null, includes_photo: true, includes_video: false, active: true, public: true, sort_order: 0, created_at: "", updated_at: "" });
+const serviceRow = (id: string, name: string, price: number) => ({ id, owner_id: OWNER, code: name.slice(0, 2), name, booking_type: "tournament_athlete", description: null, price_qr: price, price_mode: "from", deposit_qr: null, currency: "QAR", duration_minutes: null, includes_photo: true, includes_video: false, active: true, public: true, sort_order: 0, created_at: "", updated_at: "" });
 const studio = {
   studio: { owner_id: OWNER, business_name: "Blue Belt Media", tagline: null, about: null, city: "Doha", email: null, phone: null, whatsapp: null, instagram: null, public_booking: true, settings: {}, created_at: "", updated_at: "" },
   services: [serviceRow(SERVICE_ID, "Tournament photo", 350), serviceRow(BIG_SERVICE, "Tournament full day", 1000)],

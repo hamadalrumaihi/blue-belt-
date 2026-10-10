@@ -49,6 +49,7 @@ export const SIDEBAR_ITEMS: NavItem[] = [
   { href: "/people", label: "Clients", icon: UsersIcon, group: "studio", ownerOnly: true },
   { href: "/clubs", label: "Teams & clubs", icon: BuildingIcon, group: "studio", ownerOnly: true },
   { href: "/pricing", label: "Pricing", icon: TagIcon, group: "studio", ownerOnly: true },
+  { href: "/featured-work", label: "Featured work", icon: ImageIcon, group: "studio", ownerOnly: true },
   { href: "/documents", label: "Contracts", icon: FileTextIcon, group: "delivery", ownerOnly: true },
   { href: "/payments", label: "Payments", icon: CreditCardIcon, group: "delivery", ownerOnly: true },
   { href: "/galleries", label: "Galleries", icon: ImageIcon, group: "delivery", ownerOnly: true },
@@ -79,6 +80,7 @@ export const MORE_ITEMS: NavItem[] = [
   { href: "/clubs", label: "Teams & clubs", icon: BuildingIcon, group: "studio", ownerOnly: true },
   { href: "/pricing", label: "Pricing", icon: TagIcon, group: "studio", ownerOnly: true },
   { href: "/packages", label: "Services & packages", icon: ReceiptIcon, group: "studio", ownerOnly: true },
+  { href: "/featured-work", label: "Featured work (website photos)", icon: ImageIcon, group: "studio", ownerOnly: true },
   { href: "/documents", label: "Contracts & releases", icon: FileTextIcon, group: "delivery", ownerOnly: true },
   { href: "/payments", label: "Payments", icon: CreditCardIcon, group: "delivery", ownerOnly: true },
   { href: "/galleries", label: "Galleries", icon: ImageIcon, group: "delivery", ownerOnly: true },
@@ -116,7 +118,7 @@ export function bottomGridClass(count: number): string {
 }
 
 /** Routes that live under "More" on the phone (not in the bottom bar). */
-const MORE_ROUTES = ["/more", "/history", "/settings", "/orders", "/leads", "/people", "/clubs", "/pricing", "/packages", "/documents", "/payments", "/galleries", "/events", "/clients", "/issues", "/import", "/notifications"];
+const MORE_ROUTES = ["/more", "/history", "/settings", "/orders", "/leads", "/people", "/clubs", "/pricing", "/packages", "/featured-work", "/documents", "/payments", "/galleries", "/events", "/clients", "/issues", "/import", "/notifications"];
 
 export function isActivePath(pathname: string, href: string): boolean {
   if (href === "/more") return MORE_ROUTES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
