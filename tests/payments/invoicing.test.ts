@@ -87,6 +87,8 @@ describe("eligibleForAutoInvoice", () => {
     expect(eligibleForAutoInvoice(order())).toBe(true);
     expect(eligibleForAutoInvoice(order({ payment_method: "bank_transfer" }))).toBe(true);
     expect(eligibleForAutoInvoice(order({ payment_method: "cash" }))).toBe(true);
+    // Pic-Time's "pay the photographer directly" option is offline too.
+    expect(eligibleForAutoInvoice(order({ payment_method: "photographer" }))).toBe(true);
   });
   it("is false for a card order (already paid in Pic-Time)", () => {
     expect(eligibleForAutoInvoice(order({ payment_method: "card" }))).toBe(false);

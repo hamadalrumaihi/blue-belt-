@@ -2,9 +2,42 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-import { orderMessage, parseOrderIntake, paymentLabel, redactRawOrder } from "@/lib/orders/contract";
+import { OFFLINE_METHODS, orderMessage, parseOrderIntake, parsePlacedAt, paymentLabel, redactRawOrder } from "@/lib/orders/contract";
 
 const fixture = (name: string) => JSON.parse(readFileSync(fileURLToPath(new URL(`./fixtures/orders/${name}.json`, import.meta.url)), "utf8")) as unknown;
+
+describe("parseOrderIntake (real Pic-Time payload shape)", () => {
+  it("reads what the Zap really sends: strings everywhere, ASP.NET date, 'photographer' method, 'approved' status", () => {
+    const r = parseOrderIntake(fixture("pictime-photographer-approved"));
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error(r.error);
+    expect(r.order).toMatchObject({
+      externalRef: "1475080675",
+      placedAt: "2026-09-28T14:43:48.667Z",
+      buyer: { name: "Test Buyer", email: "buyer@example.com", phone: "55550102" },
+      amount: { value: 240, currency: "QAR" },
+      // Paid to the photographer directly: offline, so never "paid" at intake however Pic-Time words it.
+      payment: { method: "photographer", state: "pending", reportedState: "paid", reference: null },
+    });
+    expect(OFFLINE_METHODS).toContain("photographer");
+    expect(paymentLabel("photographer", "pending")).toBe("Order placed — to be paid to you directly, not yet confirmed");
+    expect(paymentLabel("photographer", "paid")).toBe("Paid (confirmed by you)");
+    expect(orderMessage(r.order)).toContain("240.00 QAR · Order placed — to be paid to you directly, not yet confirmed");
+  });
+
+  it("falls back to Zapier's parsed epoch when the original date is unreadable, and never guesses", () => {
+    expect(parsePlacedAt("/Date(1790606628667)/")).toBe("2026-09-28T14:43:48.667Z");
+    expect(parsePlacedAt("/Date(1790606628667+0300)/")).toBe("2026-09-28T14:43:48.667Z");
+    expect(parsePlacedAt("1790606628667")).toBe("2026-09-28T14:43:48.667Z");
+    expect(parsePlacedAt(1790606628)).toBe("2026-09-28T14:43:48.000Z");
+    expect(parsePlacedAt("2026-03-14T06:12:00Z")).toBe("2026-03-14T06:12:00.000Z");
+    expect(parsePlacedAt("last Tuesday")).toBeNull();
+    expect(parsePlacedAt(null)).toBeNull();
+    const r = parseOrderIntake({ source: "pictime", externalRef: "r", buyerName: "B", total: "10", placedAt: "garbage", placedAt_Date: "1790606628667" });
+    if (!r.ok) throw new Error(r.error);
+    expect(r.order.placedAt).toBe("2026-09-28T14:43:48.667Z");
+  });
+});
 
 describe("parseOrderIntake (proposed Pic-Time contract, synthetic fixtures)", () => {
   it("normalises a card order reported paid by Pic-Time", () => {
@@ -60,6 +93,12 @@ describe("parseOrderIntake (proposed Pic-Time contract, synthetic fixtures)", ()
     expect(parse({ method: "card", state: "Declined" })).toMatchObject({ method: "card", state: "failed" });
     expect(parse({})).toMatchObject({ method: "unknown", state: "unknown" });
     expect(parse({ method: "card" })).toMatchObject({ method: "card", state: "unknown" });
+    // "unpaid" and "pending approval" are not paid; "approved" on a card order is.
+    expect(parse({ method: "card", state: "unpaid" })).toMatchObject({ method: "card", state: "pending" });
+    expect(parse({ method: "card", state: "pending approval" })).toMatchObject({ method: "card", state: "pending" });
+    expect(parse({ method: "card", state: "approved" })).toMatchObject({ method: "card", state: "paid" });
+    expect(parse({ method: "Pay photographer directly", state: "approved" })).toMatchObject({ method: "photographer", state: "pending", reportedState: "paid" });
+    expect(paymentLabel("unknown", "paid")).toBe("Paid (reported by Pic-Time)");
   });
 
   it("builds the Telegram text and a redacted raw copy without card data", () => {

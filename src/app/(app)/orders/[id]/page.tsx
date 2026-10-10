@@ -4,12 +4,13 @@ import { BrandHeader } from "@/components/BrandHeader";
 import { PageBody } from "@/components/AppShell";
 import { METHOD_LABEL, OFFLINE_METHODS, paymentLabel, type PaymentMethod, type PaymentState } from "@/lib/orders/contract";
 import { isPaymentsEnabled } from "@/lib/payments/config";
-import { buildInvoiceDraft, draftOrderOf, invoiceDraftText, invoiceNeed, invoiceSentAt, matchClient } from "@/lib/orders/invoice-draft";
+import { buildInvoiceDraft, draftOrderOf, invoiceDraftText, invoiceNeed, invoiceSentAt, matchClient, paymentLinkText } from "@/lib/orders/invoice-draft";
 import { getOrder, listClientContacts } from "@/lib/orders/queries";
 import { formatStamp } from "@/lib/time";
 import { isUuid } from "@/lib/validation";
 import { InvoicePanel } from "./InvoicePanel";
 import { OrderActions } from "./OrderActions";
+import { PaymentLinkShare } from "./PaymentLinkShare";
 
 export const dynamic = "force-dynamic";
 
@@ -40,6 +41,9 @@ export default async function OrderDetailPage({ params }: PageProps<"/orders/[id
   const need = invoiceNeed(draftInput, client);
   const draft = need.kind === "draft" ? buildInvoiceDraft(draftInput) : null;
   const providerConfirmed = state === "paid" && metadata.payment_confirmed_source === "MYFATOORAH";
+  // An online payment link exists only after the owner created it; it is shown (and shareable) while something is still owed.
+  const payUrl = order.payment_url && state !== "paid" && state !== "refunded" && order.status !== "cancelled" ? order.payment_url : null;
+  const reference = order.external_ref ?? order.pictime_order_id;
 
   return (
     <>
@@ -59,16 +63,19 @@ export default async function OrderDetailPage({ params }: PageProps<"/orders/[id
           {offline && state !== "paid" && order.status !== "cancelled" && (
             <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">This order is paid outside Pic-Time ({METHOD_LABEL[method]}). The order notification is not proof of payment. Confirm below once the money has arrived.</p>
           )}
-          {order.payment_url && (
-            <p className="mt-3 rounded-lg bg-page px-3 py-2 text-xs text-muted">
-              Payment link: <a href={order.payment_url} target="_blank" rel="noopener noreferrer" className="break-all font-semibold text-primary underline">{order.payment_url}</a>
-              <span className="mt-1 block">Share this with the buyer yourself; it is not sent automatically.</span>
-            </p>
+          {payUrl && (
+            <PaymentLinkShare
+              payUrl={payUrl}
+              email={order.customer_email}
+              phone={order.customer_phone}
+              subject={reference ? `Payment link: Pic-Time order ${reference}` : "Payment link for your order"}
+              text={paymentLinkText({ customerName: order.customer_name, reference, amount: Number(order.amount_qr), currency: order.currency, payUrl })}
+            />
           )}
           <OrderActions orderId={order.id} paymentState={state} status={order.status} offline={offline} paymentsEnabled={isPaymentsEnabled()} hasInvoice={Boolean(order.provider_invoice_id)} />
         </section>
 
-        <InvoicePanel orderId={order.id} need={need} draft={draft} draftText={draft ? invoiceDraftText(draft) : ""} sentAt={invoiceSentAt(order.metadata)} clientCheckFailed={metadata.client_check === "failed"} />
+        <InvoicePanel orderId={order.id} need={need} draft={draft} draftText={draft ? invoiceDraftText(draft, { payUrl }) : ""} sentAt={invoiceSentAt(order.metadata)} clientCheckFailed={metadata.client_check === "failed"} />
 
         <section className="card p-4">
           <p className="eyebrow">Buyer</p>
