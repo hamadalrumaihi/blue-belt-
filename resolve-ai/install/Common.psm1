@@ -61,12 +61,15 @@ function Invoke-Native {
     try {
         if ($WorkingDirectory) { Set-Location -LiteralPath $WorkingDirectory }
         $global:LASTEXITCODE = 0
-        $out = & $File @Arguments 2>&1 | ForEach-Object { if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.Exception.Message } else { [string]$_ } }
+        $out = @(& $File @Arguments 2>&1 |
+                 ForEach-Object { if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.Exception.Message } else { [string]$_ } } |
+                 Where-Object { $null -ne $_ })
         $script:LastExit = if ($null -eq $LASTEXITCODE) { 0 } else { $LASTEXITCODE }
-        return @($out)
+        # Emits the lines one by one (callers that need a count wrap the call in @(...)).
+        return $out
     } catch {
         $script:LastExit = 1
-        return @("$($_.Exception.Message)")
+        return "$($_.Exception.Message)"
     } finally {
         Set-Location $prev
         foreach ($k in $old.Keys) { [Environment]::SetEnvironmentVariable($k, $old[$k]) }
@@ -77,7 +80,9 @@ function Get-CommandVersion {
     param([Parameter(Mandatory)][string]$Name, [string[]]$Arguments = @('--version'))
     $p = Get-CommandPath $Name
     if (-not $p) { return $null }
-    $out = Invoke-Native -File $p -Arguments $Arguments
+    # @() matters: a program that prints nothing (e.g. the Microsoft Store "python" placeholder)
+    # would otherwise leave $out as $null and strict mode rejects $null.Count.
+    $out = @(Invoke-Native -File $p -Arguments $Arguments)
     if ($out.Count -eq 0) { return $null }
     return ([string]$out[0]).Trim()
 }
@@ -154,9 +159,9 @@ function Get-NvidiaInfo {
     if ($smi) {
         $r.nvidia_smi = $smi
         try {
-            $q = Invoke-Native -File $smi -Arguments @('--query-gpu=name,driver_version,memory.total', '--format=csv,noheader')
+            $q = @(Invoke-Native -File $smi -Arguments @('--query-gpu=name,driver_version,memory.total', '--format=csv,noheader'))
             if ($q.Count -gt 0 -and $q[0] -match ',') { $parts = $q[0] -split ','; $r.name = $parts[0].Trim(); $r.driver = $parts[1].Trim(); $r.vram_mb = [int]($parts[2] -replace '[^\d]','') }
-            $full = (Invoke-Native -File $smi) -join "`n"
+            $full = (@(Invoke-Native -File $smi)) -join "`n"
             if ($full -match 'CUDA Version:\s*([\d\.]+)') { $r.cuda_version = $Matches[1] }
         } catch { }
     } else {
@@ -174,7 +179,7 @@ function Get-PythonCandidates {
     $seen = @{}
     $py = Get-CommandPath 'py'
     if ($py) {
-        foreach ($line in (Invoke-Native -File $py -Arguments @('-0p'))) {
+        foreach ($line in @(Invoke-Native -File $py -Arguments @('-0p'))) {
             if ($line -match '^\s*-V:(\d+\.\d+)[^\s]*\s+\*?\s*(.+\.exe)\s*$' -or $line -match '^\s*-(\d+\.\d+)-\d+\s+\*?\s*(.+\.exe)\s*$') {
                 $path = $Matches[2].Trim()
                 if (-not $seen.ContainsKey($path)) { $seen[$path] = 1; [void]$out.Add([pscustomobject]@{ version = $Matches[1]; path = $path; via = 'py' }) }
