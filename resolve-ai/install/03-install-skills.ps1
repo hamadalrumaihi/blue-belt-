@@ -37,12 +37,12 @@ function Install-Skill {
     if (-not (Test-Path -LiteralPath (Join-Path $Src 'SKILL.md'))) { $script:skipped += "$Name (no SKILL.md at $Src)"; return }
     # safety review: refuse skills that declare hooks or that carry executable install hooks
     $fm = (Get-Content -LiteralPath (Join-Path $Src 'SKILL.md') -Raw)
-    if ($fm -match '(?m)^hooks:') { $script:skipped += "$Name (declares hooks: review manually)"; Write-Log "skip $Name: declares hooks" 'WARN'; return }
+    if ($fm -match '(?m)^hooks:') { $script:skipped += "$Name (declares hooks: review manually)"; Write-Log "skip ${Name}: declares hooks" 'WARN'; return }
     $target = Join-Path $dest $Name
     if (Test-Path -LiteralPath $target) {
         $same = (Get-Content -LiteralPath (Join-Path $target 'SKILL.md') -Raw -ErrorAction SilentlyContinue) -eq $fm
         if (-not $Overwrite -and -not $same -and -not ((Get-Content -LiteralPath (Join-Path $target 'SKILL.md') -Raw -ErrorAction SilentlyContinue) -match 'Upstream docs root')) {
-            $script:skipped += "$Name (exists with different content; use -Overwrite)"; Write-Log "skip $Name: exists and differs" 'WARN'; return
+            $script:skipped += "$Name (exists with different content; use -Overwrite)"; Write-Log "skip ${Name}: exists and differs" 'WARN'; return
         }
         New-DirectorySafe $backupDir | Out-Null
         Copy-Item -LiteralPath $target -Destination (Join-Path $backupDir $Name) -Recurse -Force
