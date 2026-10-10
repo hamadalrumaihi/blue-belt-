@@ -17,7 +17,8 @@ param(
     [switch]$WithGpuExtras,
     [switch]$ReplaceExisting,
     [switch]$SkipAlternates,
-    [switch]$InventoryOnly
+    [switch]$InventoryOnly,
+    [ValidateSet('auto','yes','no')][string]$ResolveBridge = 'auto'
 )
 Import-Module (Join-Path $PSScriptRoot 'Common.psm1') -Force
 $ErrorActionPreference = 'Stop'
@@ -40,7 +41,7 @@ try {
         }
 
         & (Join-Path $PSScriptRoot '01-backup-config.ps1') | Out-Null
-        & (Join-Path $PSScriptRoot '02-install-mcp.ps1') -Primary $Primary -ReplaceExisting:$ReplaceExisting -SkipAlternates:$SkipAlternates
+        & (Join-Path $PSScriptRoot '02-install-mcp.ps1') -Primary $Primary -ReplaceExisting:$ReplaceExisting -SkipAlternates:$SkipAlternates -ResolveBridge $ResolveBridge
         & (Join-Path $PSScriptRoot '03-install-skills.ps1')
         & (Join-Path $PSScriptRoot '04-install-analysis.ps1') -WithGpuExtras:$WithGpuExtras
         & (Join-Path $PSScriptRoot '05-install-video-ad-editor.ps1')

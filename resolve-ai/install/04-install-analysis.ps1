@@ -28,10 +28,24 @@ $binDir = New-DirectorySafe (Join-Path $root 'bin')
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $uv = Get-CommandPath 'uv'
 if (-not $uv) { throw 'uv not found; run 02-install-mcp.ps1 first (it installs uv) or winget install astral-sh.uv' }
-if (-not (Get-CommandPath 'ffmpeg')) {
-    Write-Log 'ffmpeg not on PATH; installing Gyan.FFmpeg via winget (per-user). Open a new terminal afterwards if ffmpeg is still missing.' 'WARN'
-    if (Get-CommandPath 'winget') { Invoke-Native -File 'winget' -Arguments @('install', '--id', 'Gyan.FFmpeg', '-e', '--accept-source-agreements', '--accept-package-agreements') | Out-Null }
+
+# ---------------------------------------------------------------- a WORKING ffmpeg
+# The first ffmpeg on PATH can be a broken stub (e.g. node_modules\ffmpeg-static), so test, do not trust.
+$ff = Find-Ffmpeg
+if (-not $ff) {
+    Write-Log 'No working ffmpeg/ffprobe found; installing Gyan.FFmpeg via winget (per-user, ~100 MB)' 'WARN'
+    if (Get-CommandPath 'winget') {
+        Invoke-Native -File 'winget' -Arguments @('install', '--id', 'Gyan.FFmpeg', '-e', '--accept-source-agreements', '--accept-package-agreements') | ForEach-Object { Write-Log "  $_" }
+    }
+    $ff = Find-Ffmpeg
 }
+if (-not $ff) { throw 'ffmpeg still not available. Install it from https://www.gyan.dev/ffmpeg/builds/ (full build), unzip to C:\ffmpeg, and re-run.' }
+Write-Log ("ffmpeg : {0}`n                      ffprobe: {1}" -f $ff.ffmpeg, $ff.ffprobe) 'OK'
+# The pipeline honours BJJ_FFMPEG / BJJ_FFPROBE; the shims below also put the good folder first on PATH for HypeCut.
+[Environment]::SetEnvironmentVariable('BJJ_FFMPEG', $ff.ffmpeg, 'User')
+[Environment]::SetEnvironmentVariable('BJJ_FFPROBE', $ff.ffprobe, 'User')
+$env:BJJ_FFMPEG = $ff.ffmpeg; $env:BJJ_FFPROBE = $ff.ffprobe
+$env:PATH = "$($ff.dir);$env:PATH"
 
 # ---------------------------------------------------------------- bjj-pipeline
 Write-Log 'Installing bjj-pipeline (resolve-ai\bjj) into its own venv' 'STEP'
@@ -39,13 +53,18 @@ $bDir = New-DirectorySafe (Join-Path $aRoot 'bjj-pipeline')
 $bVenv = Join-Path $bDir '.venv'
 $bPy = Join-Path $bVenv 'Scripts\python.exe'
 if (-not (Test-Path -LiteralPath $bPy)) { Invoke-Checked -File $uv -Arguments @('venv', $bVenv, '--python', $PythonVersion, '--quiet') }
-Invoke-Checked -File $uv -Arguments @('pip', 'install', '--python', $bPy, '--quiet', '-e', (Join-Path $repoRoot 'resolve-ai\bjj') + '[dev]')
-# shim so `bjj` works from any terminal without activating the venv
+$bjjSrc = Join-Path $repoRoot 'resolve-ai\bjj'
+$bjjSpec = "${bjjSrc}[dev]"       # braces: "$var[...]" would otherwise be parsed as an index expression
+Invoke-Checked -File $uv -Arguments @('pip', 'install', '--python', $bPy, '--quiet', '-e', $bjjSpec)
+# shim so `bjj` works from any terminal without activating the venv (and always sees the good ffmpeg)
 @"
 @echo off
+set "PATH=$($ff.dir);%PATH%"
+set "BJJ_FFMPEG=$($ff.ffmpeg)"
+set "BJJ_FFPROBE=$($ff.ffprobe)"
 "$bVenv\Scripts\bjj.exe" %*
 "@ | Set-Content -LiteralPath (Join-Path $binDir 'bjj.cmd') -Encoding ASCII
-Invoke-Checked -File $bPy -Arguments @('-m', 'pytest', '-q', '-p', 'no:cacheprovider') -WorkingDirectory (Join-Path $repoRoot 'resolve-ai\bjj')
+Invoke-Checked -File $bPy -Arguments @('-m', 'pytest', '-q', '-p', 'no:cacheprovider') -WorkingDirectory $bjjSrc
 Write-Log 'bjj-pipeline tests passed' 'OK'
 
 if ($WithGpuExtras) {
@@ -68,26 +87,24 @@ if (-not (Test-Path -LiteralPath (Join-Path $hDir '.git'))) {
 $hVenv = Join-Path $hDir '.venv'
 $hPy = Join-Path $hVenv 'Scripts\python.exe'
 if (-not (Test-Path -LiteralPath $hPy)) { Invoke-Checked -File $uv -Arguments @('venv', $hVenv, '--python', $PythonVersion, '--quiet') }
-Invoke-Checked -File $uv -Arguments @('pip', 'install', '--python', $hPy, '--quiet', '-e', "$hDir[web,dev]")
+$hSpec = "${hDir}[web,dev]"
+Invoke-Checked -File $uv -Arguments @('pip', 'install', '--python', $hPy, '--quiet', '-e', $hSpec)
+$hExe = Join-Path $hVenv 'Scripts\hypecut.exe'
+# HypeCut finds ffmpeg via PATH, so the shim puts the working build first.
 @"
 @echo off
-"$hVenv\Scripts\hypecut.exe" %*
+set "PATH=$($ff.dir);%PATH%"
+"$hExe" %*
 "@ | Set-Content -LiteralPath (Join-Path $binDir 'hypecut.cmd') -Encoding ASCII
-$hExe = Join-Path $hVenv 'Scripts\hypecut.exe'
 Invoke-Native -File $hExe -Arguments @('--version') | ForEach-Object { Write-Log "  $_" }
 # Smoke test on a synthetic clip (HypeCut's own suite is 240 tests / ~2 min; run with -Verbose to include it)
 $tmp = New-DirectorySafe (Join-Path $root 'tmp')
 $clip = Join-Path $tmp 'hypecut-smoke.mp4'
-$ffmpeg = Get-CommandPath 'ffmpeg'
-if ($ffmpeg) {
-    Invoke-Native -File $ffmpeg -Arguments @('-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc=s=640x360:r=30:d=12', '-f', 'lavfi', '-i', 'sine=f=440:d=12',
-        '-filter_complex', "[1:a]volume='if(between(t,6,8),8.0,0.05)':eval=frame[a]", '-map', '0:v', '-map', '[a]',
-        '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', $clip) | Out-Null
-    Invoke-Native -File $hExe -Arguments @('analyze', $clip, '--json', (Join-Path $tmp 'hypecut-smoke.json'), '-q', '--profile', (Join-Path $hDir 'configs\sports-field.yaml')) | ForEach-Object { Write-Log "  $_" }
-    if ((Get-LastNativeExitCode) -eq 0 -and (Test-Path (Join-Path $tmp 'hypecut-smoke.json'))) { Write-Log 'HypeCut smoke test OK (sports-field profile)' 'OK' } else { Write-Log 'HypeCut smoke test failed' 'ERROR' }
-} else {
-    Write-Log 'ffmpeg still not on PATH in this session: HypeCut smoke test skipped (open a new terminal and run 06-verify.ps1)' 'WARN'
-}
+Invoke-Native -File $ff.ffmpeg -Arguments @('-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc=s=640x360:r=30:d=12', '-f', 'lavfi', '-i', 'sine=f=440:d=12',
+    '-filter_complex', "[1:a]volume='if(between(t,6,8),8.0,0.05)':eval=frame[a]", '-map', '0:v', '-map', '[a]',
+    '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', $clip) | ForEach-Object { Write-Log "  $_" }
+Invoke-Native -File (Join-Path $binDir 'hypecut.cmd') -Arguments @('analyze', $clip, '--json', (Join-Path $tmp 'hypecut-smoke.json'), '-q', '--profile', (Join-Path $hDir 'configs\sports-field.yaml')) | ForEach-Object { Write-Log "  $_" }
+if ((Get-LastNativeExitCode) -eq 0 -and (Test-Path (Join-Path $tmp 'hypecut-smoke.json'))) { Write-Log 'HypeCut smoke test OK (sports-field profile)' 'OK' } else { Write-Log 'HypeCut smoke test failed (see lines above)' 'WARN' }
 if ($VerbosePreference -eq 'Continue') { Invoke-Checked -File $hPy -Arguments @('-m', 'pytest', '-q', '-p', 'no:cacheprovider', '-p', 'no:warnings') -WorkingDirectory $hDir }
 
 # ---------------------------------------------------------------- user PATH (per-user, no admin)
@@ -96,9 +113,9 @@ if ($userPath -notlike "*$binDir*") {
     [Environment]::SetEnvironmentVariable('Path', ($userPath.TrimEnd(';') + ";$binDir"), 'User')
     Write-Log "added $binDir to the user PATH (new terminals only)" 'OK'
 }
-[Environment]::SetEnvironmentVariable('BJJ_HYPECUT', $hExe, 'User')
+[Environment]::SetEnvironmentVariable('BJJ_HYPECUT', (Join-Path $binDir 'hypecut.cmd'), 'User')
 
-@{ updated = (Get-Date).ToString('s'); bjj_pipeline = @{ dir = $bDir; python = $bPy; gpu_extras = [bool]$WithGpuExtras }
+@{ updated = (Get-Date).ToString('s'); ffmpeg = $ff; bjj_pipeline = @{ dir = $bDir; python = $bPy; gpu_extras = [bool]$WithGpuExtras }
    hypecut = @{ dir = $hDir; python = $hPy; exe = (Join-Path $hVenv 'Scripts\hypecut.exe'); profile = (Join-Path $hDir 'configs\sports-field.yaml') }
    not_installed = @('Yutao-Yang/LumenSport (cloud LLM upload)', 'Pragyanstha/auto-highlight (non-functional scaffold)', 'AkhilNam/Sports-Highlight-Detector (runtime NameError, not BJJ)') } |
    ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $aRoot 'analysis.json') -Encoding UTF8
