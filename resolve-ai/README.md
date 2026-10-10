@@ -20,10 +20,15 @@ resolve-ai/
 ## Quick start (on the Windows PC)
 
 ```powershell
-git clone https://github.com/hamadalrumaihi/blue-belt- C:\BlueBelt\blue-belt      # or pull this branch
+git clone https://github.com/hamadalrumaihi/blue-belt- C:\BlueBelt\blue-belt      # or pull main
+# easiest: double-click  C:\BlueBelt\blue-belt\resolve-ai\install\install.cmd   (window stays open)
+# or, from an open PowerShell window:
 powershell -ExecutionPolicy Bypass -File C:\BlueBelt\blue-belt\resolve-ai\install\install-all.ps1
 # optional GPU extras (CUDA torch + YOLO pose + whisper, ~3 GB):  ... install-all.ps1 -WithGpuExtras
 ```
+
+If the installer stops with red text, the window now stays open and the same text is in
+`C:\AI-Video-Tools\logs\install-<date>.log`. Paste the red lines to Claude (`/resolve-health` reads the log).
 
 Then open DaVinci Resolve **Studio**, set *Preferences > System > General > External scripting using = Local*,
 open a new terminal and run `bbm-video` (launcher) or start Claude Code and type `/resolve-health`.

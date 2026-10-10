@@ -5,9 +5,11 @@ Set-StrictMode -Version Latest
 
 $script:ToolsRoot = if ($env:AI_VIDEO_TOOLS) { $env:AI_VIDEO_TOOLS } else { 'C:\AI-Video-Tools' }
 $script:LogDir    = Join-Path $script:ToolsRoot 'logs'
+$script:LastExit  = 0
 
 function Get-ToolsRoot { $script:ToolsRoot }
 function Get-LogDir    { $script:LogDir }
+function Get-LastNativeExitCode { $script:LastExit }
 
 function New-DirectorySafe {
     param([Parameter(Mandatory)][string]$Path)
@@ -27,6 +29,15 @@ function Write-Log {
     } catch { }
 }
 
+function Get-Prop {
+    # Safe property read that never throws under Set-StrictMode (registry entries, JSON objects).
+    param($Object, [string]$Name, $Default = $null)
+    if ($null -eq $Object) { return $Default }
+    if ($Object -is [System.Collections.IDictionary]) { if ($Object.Contains($Name)) { return $Object[$Name] } else { return $Default } }
+    $p = $Object.PSObject.Properties[$Name]
+    if ($p) { return $p.Value } else { return $Default }
+}
+
 function Get-CommandPath {
     param([Parameter(Mandatory)][string]$Name)
     $c = Get-Command $Name -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -34,32 +45,51 @@ function Get-CommandPath {
     return $null
 }
 
+function Invoke-Native {
+    <#
+    Run an external program and return its stdout+stderr as plain strings.
+    Windows PowerShell 5.1 turns native stderr into ErrorRecords when redirected with 2>&1 and,
+    with $ErrorActionPreference = 'Stop', aborts the script on the first stderr line (git, uv and
+    pip all write normal progress to stderr). This wrapper runs with 'Continue' in its own scope,
+    flattens everything to strings and records the exit code in Get-LastNativeExitCode.
+    #>
+    param([Parameter(Mandatory)][string]$File, [string[]]$Arguments = @(), [string]$WorkingDirectory = $null, [hashtable]$Env = @{})
+    $ErrorActionPreference = 'Continue'
+    $old = @{}
+    foreach ($k in $Env.Keys) { $old[$k] = [Environment]::GetEnvironmentVariable($k); [Environment]::SetEnvironmentVariable($k, $Env[$k]) }
+    $prev = Get-Location
+    try {
+        if ($WorkingDirectory) { Set-Location -LiteralPath $WorkingDirectory }
+        $global:LASTEXITCODE = 0
+        $out = & $File @Arguments 2>&1 | ForEach-Object { if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.Exception.Message } else { [string]$_ } }
+        $script:LastExit = if ($null -eq $LASTEXITCODE) { 0 } else { $LASTEXITCODE }
+        return @($out)
+    } catch {
+        $script:LastExit = 1
+        return @("$($_.Exception.Message)")
+    } finally {
+        Set-Location $prev
+        foreach ($k in $old.Keys) { [Environment]::SetEnvironmentVariable($k, $old[$k]) }
+    }
+}
+
 function Get-CommandVersion {
-    param([Parameter(Mandatory)][string]$Name, [string[]]$Args = @('--version'))
+    param([Parameter(Mandatory)][string]$Name, [string[]]$Arguments = @('--version'))
     $p = Get-CommandPath $Name
     if (-not $p) { return $null }
-    try {
-        $out = & $p @Args 2>&1 | Select-Object -First 1
-        return ($out | Out-String).Trim()
-    } catch { return $null }
+    $out = Invoke-Native -File $p -Arguments $Arguments
+    if ($out.Count -eq 0) { return $null }
+    return ([string]$out[0]).Trim()
 }
 
 function Invoke-Checked {
     # Run an external command, stream its output to the console + log, throw on non-zero exit.
     param([Parameter(Mandatory)][string]$File, [string[]]$Arguments = @(), [string]$WorkingDirectory = $null, [hashtable]$Env = @{})
-    $old = @{}
-    foreach ($k in $Env.Keys) { $old[$k] = [Environment]::GetEnvironmentVariable($k); [Environment]::SetEnvironmentVariable($k, $Env[$k]) }
-    try {
-        Write-Log ("> {0} {1}" -f $File, ($Arguments -join ' '))
-        $prev = Get-Location
-        if ($WorkingDirectory) { Set-Location -LiteralPath $WorkingDirectory }
-        try {
-            & $File @Arguments 2>&1 | ForEach-Object { Write-Host "    $_" }
-            if ($LASTEXITCODE -ne 0) { throw "exit code $LASTEXITCODE from $File" }
-        } finally { Set-Location $prev }
-    } finally {
-        foreach ($k in $old.Keys) { [Environment]::SetEnvironmentVariable($k, $old[$k]) }
-    }
+    Write-Log ("> {0} {1}" -f $File, ($Arguments -join ' '))
+    $out = Invoke-Native -File $File -Arguments $Arguments -WorkingDirectory $WorkingDirectory -Env $Env
+    foreach ($line in $out) { if ($line) { Write-Host "    $line" } }
+    $code = Get-LastNativeExitCode
+    if ($code -ne 0) { throw "exit code $code from $File $($Arguments -join ' ')" }
 }
 
 function Get-ResolveInstall {
@@ -76,13 +106,14 @@ function Get-ResolveInstall {
               'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*',
               'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*')
     $entry = Get-ItemProperty $keys -ErrorAction SilentlyContinue |
-             Where-Object { $_.DisplayName -like 'DaVinci Resolve*' } | Select-Object -First 1
+             Where-Object { (Get-Prop $_ 'DisplayName' '') -like 'DaVinci Resolve*' } | Select-Object -First 1
     $dir = Join-Path $env:ProgramFiles 'Blackmagic Design\DaVinci Resolve'
     if ($entry) {
         $result.installed = $true
-        $result.version = $entry.DisplayVersion
-        $result.edition = if ($entry.DisplayName -match 'Studio') { 'Studio' } else { 'Free' }
-        if ($entry.InstallLocation) { $dir = $entry.InstallLocation.TrimEnd('\') }
+        $result.version = Get-Prop $entry 'DisplayVersion'
+        $result.edition = if ((Get-Prop $entry 'DisplayName' '') -match 'Studio') { 'Studio' } else { 'Free' }
+        $loc = Get-Prop $entry 'InstallLocation' ''
+        if ($loc) { $dir = $loc.TrimEnd('\') }
     }
     $exe = Join-Path $dir 'Resolve.exe'
     if (Test-Path -LiteralPath $exe) {
@@ -123,9 +154,9 @@ function Get-NvidiaInfo {
     if ($smi) {
         $r.nvidia_smi = $smi
         try {
-            $q = & $smi --query-gpu=name,driver_version,memory.total --format=csv,noheader 2>$null | Select-Object -First 1
-            if ($q) { $parts = $q -split ','; $r.name = $parts[0].Trim(); $r.driver = $parts[1].Trim(); $r.vram_mb = [int]($parts[2] -replace '[^\d]','') }
-            $full = & $smi 2>$null | Out-String
+            $q = Invoke-Native -File $smi -Arguments @('--query-gpu=name,driver_version,memory.total', '--format=csv,noheader')
+            if ($q.Count -gt 0 -and $q[0] -match ',') { $parts = $q[0] -split ','; $r.name = $parts[0].Trim(); $r.driver = $parts[1].Trim(); $r.vram_mb = [int]($parts[2] -replace '[^\d]','') }
+            $full = (Invoke-Native -File $smi) -join "`n"
             if ($full -match 'CUDA Version:\s*([\d\.]+)') { $r.cuda_version = $Matches[1] }
         } catch { }
     } else {
@@ -138,31 +169,31 @@ function Get-NvidiaInfo {
 }
 
 function Get-PythonCandidates {
-    # Returns ordered list of python launchers/interpreters with versions, newest-first but preferring 3.10-3.12 for Resolve.
-    $out = @()
+    # Returns ordered list of python launchers/interpreters with versions.
+    $out = New-Object System.Collections.ArrayList
+    $seen = @{}
     $py = Get-CommandPath 'py'
     if ($py) {
-        try {
-            $list = & $py -0p 2>$null
-            foreach ($line in $list) {
-                if ($line -match '^\s*-V:(\d+\.\d+)[^\s]*\s+\*?\s*(.+\.exe)\s*$') { $out += [pscustomobject]@{ version = $Matches[1]; path = $Matches[2].Trim(); via = 'py' } }
-                elseif ($line -match '^\s*-(\d+\.\d+)-\d+\s+\*?\s*(.+\.exe)\s*$') { $out += [pscustomobject]@{ version = $Matches[1]; path = $Matches[2].Trim(); via = 'py' } }
+        foreach ($line in (Invoke-Native -File $py -Arguments @('-0p'))) {
+            if ($line -match '^\s*-V:(\d+\.\d+)[^\s]*\s+\*?\s*(.+\.exe)\s*$' -or $line -match '^\s*-(\d+\.\d+)-\d+\s+\*?\s*(.+\.exe)\s*$') {
+                $path = $Matches[2].Trim()
+                if (-not $seen.ContainsKey($path)) { $seen[$path] = 1; [void]$out.Add([pscustomobject]@{ version = $Matches[1]; path = $path; via = 'py' }) }
             }
-        } catch { }
+        }
     }
     foreach ($n in 'python','python3') {
         $p = Get-CommandPath $n
-        if ($p -and -not ($out.path -contains $p)) {
+        if ($p -and -not $seen.ContainsKey($p)) {
             $v = Get-CommandVersion $n
-            if ($v -match '(\d+\.\d+)') { $out += [pscustomobject]@{ version = $Matches[1]; path = $p; via = $n } }
+            if ($v -and $v -match '(\d+\.\d+)') { $seen[$p] = 1; [void]$out.Add([pscustomobject]@{ version = $Matches[1]; path = $p; via = $n }) }
         }
     }
-    return $out
+    return @($out.ToArray())
 }
 
 function Select-PythonForResolve {
     param([string[]]$Preferred = @('3.12','3.11','3.10'))
-    $c = Get-PythonCandidates
+    $c = @(Get-PythonCandidates)
     foreach ($v in $Preferred) { $hit = $c | Where-Object { $_.version -eq $v } | Select-Object -First 1; if ($hit) { return $hit } }
     return ($c | Sort-Object version -Descending | Select-Object -First 1)
 }
@@ -186,7 +217,8 @@ function Get-ClaudeMcpServers {
     try {
         $j = Get-Content -LiteralPath $p -Raw | ConvertFrom-Json
         $servers = @{}
-        if ($j.PSObject.Properties['mcpServers']) { foreach ($k in $j.mcpServers.PSObject.Properties.Name) { $servers[$k] = $j.mcpServers.$k } }
+        $mcp = Get-Prop $j 'mcpServers'
+        if ($mcp) { foreach ($k in $mcp.PSObject.Properties.Name) { $servers[$k] = $mcp.$k } }
         return $servers
     } catch { return @{} }
 }
@@ -206,5 +238,10 @@ function Backup-File {
 }
 
 function Test-ClaudeCli { [bool](Get-CommandPath 'claude') }
+
+function Get-ClaudeCliPath {
+    # npm installs claude as claude.cmd; `Get-Command claude` resolves it. Returns the full path or $null.
+    return (Get-CommandPath 'claude')
+}
 
 Export-ModuleMember -Function *

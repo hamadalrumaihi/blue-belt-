@@ -40,7 +40,7 @@ if (-not (Get-CommandPath 'git')) { throw 'git not found. Install with: winget i
 $uv = Get-CommandPath 'uv'
 if (-not $uv) {
     Write-Log 'uv not found; installing per-user via winget (astral-sh.uv)' 'WARN'
-    if (Get-CommandPath 'winget') { & winget install --id astral-sh.uv -e --accept-source-agreements --accept-package-agreements | Out-Null }
+    if (Get-CommandPath 'winget') { Invoke-Native -File 'winget' -Arguments @('install', '--id', 'astral-sh.uv', '-e', '--accept-source-agreements', '--accept-package-agreements') | Out-Null }
     $env:PATH = "$env:USERPROFILE\.local\bin;$env:PATH"
     $uv = Get-CommandPath 'uv'
     if (-not $uv) { throw 'uv still not found after install. Open a new terminal or install from https://docs.astral.sh/uv/' }
@@ -102,10 +102,8 @@ if ($Primary -eq 'gursky' -or -not $SkipAlternates) {
     $registry['gursky'] = @{ dir = $gDir; python = $gPy; command = $gPy; args = @((Join-Path $gDir 'src\server.py')); env = $gEnv
                              tools = '37 compound (use --full for 389 granular)'; upstream = 'https://github.com/samuelgursky/davinci-resolve-mcp' }
     # import smoke test (no Resolve needed)
-    try {
-        & $gPy -c "import mcp, mcp.server.fastmcp; print('mcp', mcp.__version__ if hasattr(mcp,'__version__') else 'ok')" 2>&1 | ForEach-Object { Write-Log "  $_" }
-        Write-Log 'gursky: python deps import OK' 'OK'
-    } catch { Write-Log "gursky: import check failed: $_" 'ERROR' }
+    Invoke-Native -File $gPy -Arguments @('-c', "import mcp, mcp.server.fastmcp; print('mcp ok')") | ForEach-Object { Write-Log "  $_" }
+    if ((Get-LastNativeExitCode) -eq 0) { Write-Log 'gursky: python deps import OK' 'OK' } else { Write-Log 'gursky: import check failed (see lines above)' 'ERROR' }
 }
 
 # ---------------------------------------------------------------- 2. CiprianSpiridon (alternate, ships the 4 skills)
@@ -125,7 +123,7 @@ if ($Primary -eq 'cipriano' -or -not $SkipAlternates) {
     $registry['cipriano'] = @{ dir = $cDir; python = $cPy; command = $cExe; args = @(); env = $cEnv
                                tools = '334 (316 live + 18 offline)'; upstream = 'https://github.com/CiprianSpiridon/davinci-resolve-mcp' }
     try {
-        & $cPy -c "import davinci_resolve_mcp.server; print('ok')" 2>&1 | ForEach-Object { Write-Log "  $_" }
+        Invoke-Native -File $cPy -Arguments @('-c', "import davinci_resolve_mcp.server; print('ok')") | ForEach-Object { Write-Log "  $_" }
         if (Test-Path -LiteralPath (Join-Path $cDir 'tests\test_tool_exposure.py')) {
             Invoke-Checked -File $uv -Arguments @('pip', 'install', '--python', $cPy, '--quiet', 'pytest')
             Invoke-Checked -File $cPy -Arguments @('-m', 'pytest', '-q', '-p', 'no:cacheprovider', 'tests\test_tool_exposure.py') -WorkingDirectory $cDir
@@ -145,9 +143,7 @@ if ($Primary -eq 'guycochran' -or -not $SkipAlternates) {
     Write-ServerEnvFile $qDir $qEnv
     $registry['guycochran'] = @{ dir = $qDir; python = $qPy; command = $qPy; args = @('-m', 'resolve_mcp'); env = $qEnv
                                  tools = '77 + 16 resources + 5 prompts'; upstream = 'https://github.com/guycochran/resolve-mcp-server' }
-    try {
-        & $qPy -m resolve_mcp --doctor 2>&1 | Select-Object -First 15 | ForEach-Object { Write-Log "  $_" }
-    } catch { Write-Log "guycochran --doctor: $_" 'WARN' }
+    Invoke-Native -File $qPy -Arguments @('-m', 'resolve_mcp', '--doctor') | Select-Object -First 15 | ForEach-Object { Write-Log "  $_" }
 }
 
 # ---------------------------------------------------------------- 4. Iamkewl (reference only, never registered)

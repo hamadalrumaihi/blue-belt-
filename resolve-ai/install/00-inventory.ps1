@@ -53,7 +53,7 @@ foreach ($t in @(
     @{n='nvcc'; a=@('--version')}, @{n='hypecut'; a=@('--version')}
 )) {
     $path = Get-CommandPath $t.n
-    $inv.tools[$t.n] = [ordered]@{ path = $path; version = $(if ($path) { Get-CommandVersion $t.n $t.a } else { $null }) }
+    $inv.tools[$t.n] = [ordered]@{ path = $path; version = $(if ($path) { Get-CommandVersion -Name $t.n -Arguments $t.a } else { $null }) }
 }
 
 # --- CUDA toolkit / cuDNN (optional; PyTorch wheels bundle their own CUDA runtime)
@@ -83,7 +83,7 @@ if (Test-Path -LiteralPath $cp.user_settings) {
 }
 $inv.claude.desktop_config_exists = Test-Path -LiteralPath $cp.claude_desktop_cfg
 if ($inv.claude.cli_installed) {
-    try { $inv.claude.mcp_list = (& claude mcp list 2>&1 | Out-String).Trim() } catch { $inv.claude.mcp_list = "claude mcp list failed: $_" }
+    $inv.claude.mcp_list = ((Invoke-Native -File (Get-ClaudeCliPath) -Arguments @('mcp', 'list')) -join "`n").Trim()
 }
 
 # --- existing video / AI projects (shallow, name-based, read-only)

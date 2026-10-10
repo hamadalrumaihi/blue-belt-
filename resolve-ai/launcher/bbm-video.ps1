@@ -25,7 +25,7 @@ $sessionLog = Join-Path $logDir ("launcher-{0}.log" -f (Get-Date -Format 'yyyyMM
 
 function Say { param($t, $c = 'Gray') Write-Host $t -ForegroundColor $c; Add-Content $sessionLog "$(Get-Date -Format 'HH:mm:ss') $t" }
 function Have-Bjj { if (-not (Test-Path $bjj)) { Say "bjj-pipeline not installed: run install\04-install-analysis.ps1" 'Yellow'; return $false }; return $true }
-function Run-Bjj { param([string[]]$Args) Say ("> bjj " + ($Args -join ' ')) 'DarkGray'; & $bjj @Args 2>&1 | Tee-Object -FilePath $sessionLog -Append }
+function Run-Bjj { param([string[]]$Arguments) Say ("> bjj " + ($Arguments -join ' ')) 'DarkGray'; Invoke-Native -File $bjj -Arguments $Arguments | Tee-Object -FilePath $sessionLog -Append }
 
 function Show-Status {
     Say '--- Integrations ---' 'Cyan'
@@ -53,7 +53,7 @@ function Show-Status {
 
 function Show-Health {
     Say '--- Health ---' 'Cyan'
-    if (Test-ClaudeCli) { & claude mcp list 2>&1 | ForEach-Object { Say "  $_" } } else { Say '  claude CLI not found' 'Yellow' }
+    if (Test-ClaudeCli) { Invoke-Native -File (Get-ClaudeCliPath) -Arguments @('mcp', 'list') | ForEach-Object { Say "  $_" } } else { Say '  claude CLI not found' 'Yellow' }
     if (Have-Bjj) { Run-Bjj @('doctor') }
     & (Join-Path $installDir '06-verify.ps1') | Out-Null
     Say ("full table: {0}" -f (Join-Path $root 'inventory\verify-latest.md'))
@@ -72,9 +72,9 @@ function Do-Plan {
     if (-not (Have-Bjj)) { return }
     if (-not $Path) { $Path = Read-Host 'Analysis folder (the --out of analyze)' }
     $review = Join-Path $Path 'review.csv'
-    $args = @('plan', '--analysis', $Path, '--template', $Template, '--name', $Name)
-    if (Test-Path $review) { $args += @('--review', $review) }
-    Run-Bjj $args
+    $planArgs = @('plan', '--analysis', $Path, '--template', $Template, '--name', $Name)
+    if (Test-Path $review) { $planArgs += @('--review', $review) }
+    Run-Bjj $planArgs
 }
 
 function Do-Build {

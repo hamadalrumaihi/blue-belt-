@@ -30,8 +30,8 @@ if ($InstallPlugin) {
     if (-not (Test-ClaudeCli)) { throw 'claude CLI not found' }
     & (Join-Path $PSScriptRoot '01-backup-config.ps1') | Out-Null
     Write-Log 'Installing the majed-video plugin via the Claude plugin marketplace (user scope). Do NOT run its scripts/00_setup.sh --extras in the bjj-pipeline venv.' 'WARN'
-    & claude plugin marketplace add majedphotos/video-ad-editor 2>&1 | ForEach-Object { Write-Log "  $_" }
-    & claude plugin install majed-video@majed-video 2>&1 | ForEach-Object { Write-Log "  $_" }
+    Invoke-Native -File (Get-ClaudeCliPath) -Arguments @('plugin', 'marketplace', 'add', 'majedphotos/video-ad-editor') | ForEach-Object { Write-Log "  $_" }
+    Invoke-Native -File (Get-ClaudeCliPath) -Arguments @('plugin', 'install', 'majed-video@majed-video') | ForEach-Object { Write-Log "  $_" }
     Write-Log 'Installed. Expect skill-trigger overlap with resolve-* / davinci-resolve* skills on "DaVinci" prompts.' 'WARN'
     exit 0
 }

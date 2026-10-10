@@ -6,6 +6,14 @@
    `powershell -ExecutionPolicy Bypass -File C:\BlueBelt\blue-belt\resolve-ai\install\install-all.ps1`.
 3. Read `C:\AI-Video-Tools\inventory\inventory-latest.md`. Fix listed conflicts.
 
+### If the installer window shows red text and closes
+Run `resolve-ai\install\install.cmd` (double-click) or run `install-all.ps1` from an already-open PowerShell
+window, so the message stays on screen; it is also written to `C:\AI-Video-Tools\logs\install-<date>.log`.
+Common causes: Git or Python missing (install them, re-run), Windows PowerShell blocking scripts downloaded
+as a ZIP (right-click each `.ps1` > Properties > *Unblock*, or clone with git instead of downloading a ZIP),
+or no internet for `git clone` / `uv`. The inventory step alone never changes anything:
+`install-all.ps1 -InventoryOnly`.
+
 ## In DaVinci Resolve
 4. **Edition.** `Help > About`. External scripting is a **Studio** feature. On the Free edition every MCP server and `bjj resolve build` will report "Resolve did not accept the connection"; the analysis, plans, EDL/CSV exports and render presets still work and you import the EDL by hand (step 8).
 5. **Enable scripting:** `DaVinci Resolve > Preferences > System > General > External scripting using: Local` → Save → restart Resolve. Keep it *Local* (never *Network*; nothing here needs a network port).

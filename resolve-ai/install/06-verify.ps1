@@ -35,7 +35,7 @@ if ($reg) {
 } else { Add-Row 'MCP servers' 'skipped' 'servers.json missing: run 02-install-mcp.ps1' }
 
 if (Test-ClaudeCli) {
-    $list = (& claude mcp list 2>&1 | Out-String)
+    $list = (Invoke-Native -File (Get-ClaudeCliPath) -Arguments @('mcp', 'list')) -join "`n"
     $line = ($list -split "`n" | Where-Object { $_ -match 'davinci-resolve' } | Select-Object -First 1)
     if ($line -match 'Connected') { Add-Row 'MCP: live connection' 'verified' $line.Trim() }
     elseif ($line) { Add-Row 'MCP: live connection' $(if ($running -and $resolve.edition -eq 'Studio') {'requires-manual-setup'} else {'requires-manual-setup'}) ($line.Trim() + ' | needs Resolve Studio running + Preferences > System > General > External scripting using = Local') }
@@ -55,11 +55,12 @@ if (Test-Path $aPath) {
     $a = Get-Content $aPath -Raw | ConvertFrom-Json
     $bjj = Join-Path $root 'bin\bjj.cmd'
     if (Test-Path $bjj) {
-        $doc = (& $bjj doctor --no-resolve 2>&1 | Out-String)
-        Add-Row 'bjj-pipeline' $(if ($LASTEXITCODE -eq 0) {'verified'} else {'installed'}) ($doc -replace '\s+', ' ').Substring(0, [Math]::Min(200, $doc.Length))
+        $doc = (Invoke-Native -File $bjj -Arguments @('doctor', '--no-resolve')) -join ' '
+        $doc = $doc -replace '\s+', ' '
+        Add-Row 'bjj-pipeline' $(if ((Get-LastNativeExitCode) -eq 0) {'verified'} else {'installed'}) $doc.Substring(0, [Math]::Min(200, $doc.Length))
     } else { Add-Row 'bjj-pipeline' 'skipped' 'bin\bjj.cmd missing: run 04-install-analysis.ps1' }
     if (Test-Path $a.hypecut.exe) {
-        $v = (& $a.hypecut.exe --version 2>&1 | Out-String).Trim()
+        $v = ((Invoke-Native -File $a.hypecut.exe -Arguments @('--version')) -join ' ').Trim()
         Add-Row 'HypeCut' 'verified' "$v (CPU, local; EDL + JSON output)"
     } else { Add-Row 'HypeCut' 'skipped' 'not installed' }
     Add-Row 'GPU extras (torch/ultralytics/whisper)' $(if ($a.bjj_pipeline.gpu_extras) {'installed'} else {'skipped'}) 'opt-in via 04-install-analysis.ps1 -WithGpuExtras'
@@ -69,7 +70,7 @@ Add-Row 'video-ad-editor' 'skipped' 'evaluated; adapter available (bjj adapters 
 
 # --- Resolve bridge (direct scripting API) live check
 if (Test-Path (Join-Path $root 'bin\bjj.cmd')) {
-    $st = (& (Join-Path $root 'bin\bjj.cmd') resolve status 2>&1 | Out-String)
+    $st = (Invoke-Native -File (Join-Path $root 'bin\bjj.cmd') -Arguments @('resolve', 'status')) -join "`n"
     if ($st -match '"connected":\s*true') { Add-Row 'Resolve scripting bridge' 'verified' 'connected to running Resolve' }
     else { Add-Row 'Resolve scripting bridge' 'requires-manual-setup' 'not connected (Resolve Studio running + External scripting = Local)' }
 }
