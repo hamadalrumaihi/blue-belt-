@@ -1,5 +1,6 @@
 import type { Metadata, MetadataRoute } from "next";
 import { PUBLIC_BOOKING_TYPES } from "@/lib/bookings/public-form";
+import { publicPrice } from "@/lib/services/pricing";
 import { businessIdentity, type BusinessIdentity } from "@/lib/studio/business";
 import type { PhotoServiceRow, PhotoStudioRow } from "@/lib/supabase/database.types";
 
@@ -34,6 +35,8 @@ export const ROBOTS_DISALLOW = [
   "/notifications",
   "/settings",
   "/pricing",
+  "/packages",
+  "/featured-work",
   "/client",
   "/sign",
   "/pay",
@@ -56,12 +59,19 @@ export function siteMetadata(base: string): Metadata {
       url: "/",
       title: DEFAULT_TITLE,
       description: DEFAULT_DESCRIPTION,
-      images: [{ url: "/brand/logo.png", alt: SITE_NAME }],
+      images: [SOCIAL_IMAGE],
     },
-    twitter: { card: "summary_large_image", title: DEFAULT_TITLE, description: DEFAULT_DESCRIPTION, images: ["/brand/logo.png"] },
+    twitter: { card: "summary_large_image", title: DEFAULT_TITLE, description: DEFAULT_DESCRIPTION, images: [SOCIAL_IMAGE.url] },
     robots: { index: true, follow: true },
   };
 }
+
+/**
+ * The social card is the file-based route src/app/opengraph-image.tsx. A
+ * page that sets its own openGraph block replaces the inherited one and
+ * would lose the image, so every page lists it explicitly.
+ */
+export const SOCIAL_IMAGE = { url: "/opengraph-image", width: 1200, height: 630, alt: SITE_NAME };
 
 export type PageMeta = { title: string; description: string; path: string; index?: boolean };
 
@@ -76,8 +86,8 @@ export function pageMetadata({ title, description, path, index = true }: PageMet
     title: path === "/" ? { absolute: title } : title,
     description,
     alternates: { canonical: path },
-    openGraph: { title: fullTitle, description, url: path, type: "website", siteName: SITE_NAME, locale: "en_QA" },
-    twitter: { card: "summary_large_image", title: fullTitle, description },
+    openGraph: { title: fullTitle, description, url: path, type: "website", siteName: SITE_NAME, locale: "en_QA", images: [SOCIAL_IMAGE] },
+    twitter: { card: "summary_large_image", title: fullTitle, description, images: [SOCIAL_IMAGE.url] },
     ...(index ? {} : { robots: { index: false, follow: true } }),
   };
 }
@@ -154,7 +164,7 @@ export function buildHomeJsonLd({ base, studio, services, identity = businessIde
   if (sameAs.length) business.sameAs = sameAs;
 
   const serviceEntries: JsonLdService[] = PUBLIC_BOOKING_TYPES.map((t) => {
-    const prices = services.filter((s) => s.booking_type === t.value && s.price_qr !== null && Number(s.price_qr) > 0).map((s) => Number(s.price_qr));
+    const prices = services.filter((s) => s.booking_type === t.value).map((s) => publicPrice(s).amount).filter((a): a is number => a !== null);
     const entry: JsonLdService = {
       "@type": "Service",
       "@id": `${origin}/services#${t.value}`,
@@ -169,6 +179,30 @@ export function buildHomeJsonLd({ base, studio, services, identity = businessIde
   });
 
   return { "@context": "https://schema.org", "@graph": [business, ...serviceEntries] };
+}
+
+export type FaqItem = { question: string; answer: string };
+
+/**
+ * The questions people ask before booking, answered without promises the
+ * studio cannot keep (no turnaround times, no guaranteed match counts).
+ * Rendered on the home page and exposed as FAQPage structured data.
+ */
+export const FAQ_ITEMS: readonly FaqItem[] = [
+  { question: "When should I book tournament coverage?", answer: "Before the brackets are published, so we have your athlete's name, academy and division in advance and can be at the right mat when the first match is called." },
+  { question: "How do you know which matches are mine?", answer: "We match the athlete on the day from the organiser's bracket and follow it live. A link to the athlete's profile or bracket helps; the booking form has a field for it." },
+  { question: "How does payment work?", answer: "For commissioned coverage you pay a 50% deposit online once we have confirmed the date and price. That secures the booking. The remaining 50% is due after your gallery is delivered. Buying photos from a public event gallery is separate and paid in the gallery." },
+  { question: "How are the photos delivered?", answer: "In a private online gallery sent to the e-mail you booked with. You can view, download and share from there, and order prints if you want them." },
+  { question: "Can I buy photos if I did not book?", answer: "Yes. Public event galleries are published in the same gallery, where anyone can view and buy their photos." },
+  { question: "Can I use the photos for my academy or a sponsor?", answer: "Personal use is included. Club, team, brand or commercial use needs a licence, which we include in the quote when you tell us on the booking form." },
+];
+
+export function buildFaqJsonLd(items: readonly FaqItem[] = FAQ_ITEMS): Record<string, unknown> {
+  return {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: items.map((i) => ({ "@type": "Question", name: i.question, acceptedAnswer: { "@type": "Answer", text: i.answer } })),
+  };
 }
 
 /** JSON for a `<script type="application/ld+json">`: our own data, with `<` escaped so it can never close the tag. */

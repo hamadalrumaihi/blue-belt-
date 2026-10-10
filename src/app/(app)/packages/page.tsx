@@ -5,6 +5,7 @@ import { PageBody } from "@/components/AppShell";
 import { EmptyState } from "@/components/EmptyState";
 import { CameraIcon, EditIcon, PlusIcon, ReceiptIcon, VideoIcon } from "@/components/icons";
 import { BOOKING_TYPES, BOOKING_TYPE_LABEL, formatQr } from "@/lib/bookings/state";
+import { publicPrice } from "@/lib/services/pricing";
 import { listServices } from "@/lib/studio/queries";
 import { cn } from "@/lib/utils";
 import { SeedServicesButton, ServiceRowActions } from "./ServiceActions";
@@ -17,7 +18,7 @@ export default async function PackagesPage() {
   const groups = BOOKING_TYPES.map((t) => ({ type: t, items: services.filter((s) => s.booking_type === t) })).filter((g) => g.items.length);
   return (
     <>
-      <BrandHeader title="Services & packages" subtitle="What the website offers and at what price. Empty price = quote on request." actions={<Link href="/packages/new" className="btn-primary min-h-10"><PlusIcon size={18} /> New</Link>} />
+      <BrandHeader title="Services & packages" subtitle="What the website offers and how each price is shown: fixed, starting from, or quote on request." actions={<Link href="/packages/new" className="btn-primary min-h-10"><PlusIcon size={18} /> New</Link>} />
       <PageBody>
         {services.length === 0 ? (
           <EmptyState
@@ -45,10 +46,10 @@ export default async function PackagesPage() {
                         </div>
                       </div>
                       <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-                        {s.price_qr === null ? (
-                          <span className="rounded-md bg-warning-soft px-2 py-0.5 font-bold uppercase tracking-wider text-warning">Set your price · quote</span>
+                        {publicPrice(s).mode === "quote" ? (
+                          <span className="rounded-md bg-warning-soft px-2 py-0.5 font-bold uppercase tracking-wider text-warning">Quote on request{s.price_qr !== null ? ` · ${formatQr(Number(s.price_qr))} default` : ""}</span>
                         ) : (
-                          <span className="rounded-md bg-lightblue px-2 py-0.5 font-bold text-primary">{formatQr(Number(s.price_qr))}</span>
+                          <span className="rounded-md bg-lightblue px-2 py-0.5 font-bold text-primary">{publicPrice(s).label}</span>
                         )}
                         {s.deposit_qr !== null && <span className="text-muted">Deposit {formatQr(Number(s.deposit_qr))}</span>}
                         {s.duration_minutes && <span className="text-muted">{s.duration_minutes} min</span>}

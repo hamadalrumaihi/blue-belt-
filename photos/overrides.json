@@ -1,0 +1,16 @@
+{
+  "$comment": "Hand overrides for the automatic photo selection. Reference a photo by its id (public/photos/<id>.jpg) or by its path under photos/incoming. Edit, then run `npm run photos:select`. No code change needed.",
+  "exclude": [],
+  "pin": {
+    "hero": null,
+    "services": {
+      "tournament_athlete": [],
+      "club": [],
+      "training_session": [],
+      "private_session": [],
+      "custom": []
+    },
+    "showcase": []
+  },
+  "alt": {}
+}

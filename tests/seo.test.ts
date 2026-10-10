@@ -40,6 +40,7 @@ function service(over: Partial<PhotoServiceRow> = {}): PhotoServiceRow {
     booking_type: "tournament_athlete",
     description: null,
     price_qr: null,
+    price_mode: "quote",
     deposit_qr: null,
     currency: "QAR",
     duration_minutes: null,
@@ -66,7 +67,7 @@ describe("siteMetadata", () => {
     expect(m.description).toBe(DEFAULT_DESCRIPTION);
     expect(m.alternates).toEqual({ canonical: "/" });
     expect(m.openGraph).toMatchObject({ siteName: "Blue Belt Media", type: "website", locale: "en_QA", url: "/" });
-    expect(m.openGraph?.images).toEqual([{ url: "/brand/logo.png", alt: "Blue Belt Media" }]);
+    expect(m.openGraph?.images).toEqual([{ url: "/opengraph-image", width: 1200, height: 630, alt: "Blue Belt Media" }]);
     expect(m.twitter).toMatchObject({ card: "summary_large_image" });
     expect(m.robots).toEqual({ index: true, follow: true });
   });
@@ -121,7 +122,7 @@ describe("robots", () => {
     expect(rules.userAgent).toBe("*");
     expect(rules.allow).toBe("/");
     const disallow = rules.disallow as string[];
-    for (const p of ["/studio", "/dashboard", "/events", "/clients", "/watcher", "/bookings", "/people", "/clubs", "/documents", "/galleries", "/payments", "/orders", "/notifications", "/settings", "/pricing", "/client", "/sign", "/pay", "/api"]) {
+    for (const p of ["/studio", "/dashboard", "/events", "/clients", "/watcher", "/bookings", "/people", "/clubs", "/documents", "/galleries", "/payments", "/orders", "/notifications", "/settings", "/pricing", "/packages", "/featured-work", "/client", "/sign", "/pay", "/api"]) {
       expect(disallow).toContain(p);
     }
     expect(disallow).toEqual([...ROBOTS_DISALLOW]);
@@ -159,7 +160,7 @@ describe("buildHomeJsonLd", () => {
   });
 
   it("adds a QAR offer only for a type with a real price, and contact details only when present", () => {
-    const rows = [service({ price_qr: 450 }), service({ id: "b", price_qr: 350 }), service({ id: "c", booking_type: "private_session", price_qr: 0 })];
+    const rows = [service({ price_qr: 450, price_mode: "from" }), service({ id: "b", price_qr: 350, price_mode: "fixed" }), service({ id: "c", booking_type: "private_session", price_qr: 0, price_mode: "fixed" })];
     const ld = buildHomeJsonLd({ base: BASE, studio: studio({ phone: "+974 5555 5555", email: "hello@bluebelt.media", instagram: "@bluebeltmedia", city: "Doha" }), services: rows });
     const [business, tournament, club, training, priv] = ld["@graph"];
     expect(business).toMatchObject({ email: "hello@bluebelt.media", sameAs: ["https://instagram.com/bluebeltmedia"] });

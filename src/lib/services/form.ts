@@ -3,7 +3,8 @@
  * "use server", so validation lives here and is unit-tested directly.
  */
 import { isBookingType } from "@/lib/bookings/state";
-import type { BookingType } from "@/lib/supabase/database.types";
+import { isPriceMode } from "@/lib/services/pricing";
+import type { BookingType, PriceMode } from "@/lib/supabase/database.types";
 import { trimOrNull } from "@/lib/utils";
 
 export const SERVICE_MAX = { name: 80, code: 40, description: 1000, price: 1_000_000, duration: 24 * 60 } as const;
@@ -14,6 +15,8 @@ export type ServiceValues = {
   booking_type: BookingType;
   description: string | null;
   price_qr: number | null;
+  /** How the price reads on the website: fixed, "from", or quote on request. */
+  price_mode: PriceMode;
   deposit_qr: number | null;
   currency: string;
   duration_minutes: number | null;
@@ -68,6 +71,11 @@ export function parseServiceForm(fd: FormData): ParsedServiceForm {
   const price_qr = money(trimOrNull(fd.get("price_qr")), "price_qr", fieldErrors);
   const deposit_qr = money(trimOrNull(fd.get("deposit_qr")), "deposit_qr", fieldErrors);
   if (price_qr !== null && deposit_qr !== null && deposit_qr > price_qr) fieldErrors.deposit_qr = "The deposit cannot exceed the price.";
+  // Pricing mode: a missing field keeps the old behaviour (price = "from", no price = quote); fixed or "from" need a price.
+  const modeRaw = trimOrNull(fd.get("price_mode"));
+  let price_mode: PriceMode = isPriceMode(modeRaw) ? modeRaw : price_qr === null ? "quote" : "from";
+  if (price_mode !== "quote" && price_qr === null) fieldErrors.price_qr = "Enter the price, or choose quote on request.";
+  if (price_mode === "quote" && !modeRaw) price_mode = "quote";
 
   let duration_minutes: number | null = null;
   if (durationRaw) {
@@ -94,6 +102,7 @@ export function parseServiceForm(fd: FormData): ParsedServiceForm {
       booking_type: bookingType as BookingType,
       description,
       price_qr,
+      price_mode,
       deposit_qr,
       currency: "QAR",
       duration_minutes,
@@ -112,10 +121,10 @@ export function parseServiceForm(fd: FormData): ParsedServiceForm {
  * real prices on the Packages page.
  */
 export const DEFAULT_SERVICES: ServiceValues[] = [
-  { code: "tournament-photo", name: "Tournament photo coverage", booking_type: "tournament_athlete", description: "All of one athlete's matches photographed, from warm-up to podium. Set your price.", price_qr: null, deposit_qr: null, currency: "QAR", duration_minutes: null, includes_photo: true, includes_video: false, active: true, public: true, sort_order: 10 },
-  { code: "tournament-photo-video", name: "Tournament photo + video", booking_type: "tournament_athlete", description: "Photos plus full-match video of every bout. Set your price.", price_qr: null, deposit_qr: null, currency: "QAR", duration_minutes: null, includes_photo: true, includes_video: true, active: true, public: true, sort_order: 20 },
-  { code: "club-day", name: "Club day coverage", booking_type: "club", description: "A photographer and/or videographer for the whole team at an event. Quoted per day.", price_qr: null, deposit_qr: null, currency: "QAR", duration_minutes: null, includes_photo: true, includes_video: true, active: true, public: true, sort_order: 30 },
-  { code: "training-60", name: "Training session (60 min)", booking_type: "training_session", description: "One hour at your academy during class or open mat. Set your price.", price_qr: null, deposit_qr: null, currency: "QAR", duration_minutes: 60, includes_photo: true, includes_video: false, active: true, public: true, sort_order: 40 },
-  { code: "private-session", name: "Private athlete session", booking_type: "private_session", description: "A dedicated shoot for one athlete: portraits, technique or sponsor material. Set your price.", price_qr: null, deposit_qr: null, currency: "QAR", duration_minutes: 90, includes_photo: true, includes_video: false, active: true, public: true, sort_order: 50 },
-  { code: "custom", name: "Custom coverage", booking_type: "custom", description: "Seminars, gradings, promotions and anything else. Quoted individually.", price_qr: null, deposit_qr: null, currency: "QAR", duration_minutes: null, includes_photo: true, includes_video: true, active: true, public: true, sort_order: 60 },
+  { code: "tournament-photo", name: "Tournament photo coverage", booking_type: "tournament_athlete", description: "All of one athlete's matches photographed, from warm-up to podium. Set your price.", price_qr: null, price_mode: "quote", deposit_qr: null, currency: "QAR", duration_minutes: null, includes_photo: true, includes_video: false, active: true, public: true, sort_order: 10 },
+  { code: "tournament-photo-video", name: "Tournament photo + video", booking_type: "tournament_athlete", description: "Photos plus full-match video of every bout. Set your price.", price_qr: null, price_mode: "quote", deposit_qr: null, currency: "QAR", duration_minutes: null, includes_photo: true, includes_video: true, active: true, public: true, sort_order: 20 },
+  { code: "club-day", name: "Club day coverage", booking_type: "club", description: "A photographer and/or videographer for the whole team at an event. Quoted per day.", price_qr: null, price_mode: "quote", deposit_qr: null, currency: "QAR", duration_minutes: null, includes_photo: true, includes_video: true, active: true, public: true, sort_order: 30 },
+  { code: "training-60", name: "Training session (60 min)", booking_type: "training_session", description: "One hour at your academy during class or open mat. Set your price.", price_qr: null, price_mode: "quote", deposit_qr: null, currency: "QAR", duration_minutes: 60, includes_photo: true, includes_video: false, active: true, public: true, sort_order: 40 },
+  { code: "private-session", name: "Private athlete session", booking_type: "private_session", description: "A dedicated shoot for one athlete: portraits, technique or sponsor material. Set your price.", price_qr: null, price_mode: "quote", deposit_qr: null, currency: "QAR", duration_minutes: 90, includes_photo: true, includes_video: false, active: true, public: true, sort_order: 50 },
+  { code: "custom", name: "Custom coverage", booking_type: "custom", description: "Seminars, gradings, promotions and anything else. Quoted individually.", price_qr: null, price_mode: "quote", deposit_qr: null, currency: "QAR", duration_minutes: null, includes_photo: true, includes_video: true, active: true, public: true, sort_order: 60 },
 ];

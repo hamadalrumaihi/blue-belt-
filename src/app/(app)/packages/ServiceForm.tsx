@@ -6,6 +6,7 @@ import { FormError, FormField } from "@/components/FormField";
 import type { ActionState } from "@/lib/actions/types";
 import { BOOKING_TYPES, BOOKING_TYPE_LABEL } from "@/lib/bookings/state";
 import { SERVICE_MAX, slugify } from "@/lib/services/form";
+import { PRICE_MODE_LABEL, PRICE_MODES } from "@/lib/services/pricing";
 import type { PhotoServiceRow } from "@/lib/supabase/database.types";
 
 type Props = {
@@ -21,6 +22,7 @@ export function ServiceForm({ action, initial, submitLabel = "Save package" }: P
   const [code, setCode] = useState(initial?.code ?? "");
   const [codeTouched, setCodeTouched] = useState(Boolean(initial?.code));
   const [price, setPrice] = useState(initial?.price_qr === null || initial?.price_qr === undefined ? "" : String(initial.price_qr));
+  const [mode, setMode] = useState<string>(initial?.price_mode ?? (initial?.price_qr === null || initial?.price_qr === undefined ? "quote" : "from"));
 
   return (
     <form action={formAction} className="card space-y-5 p-5" noValidate>
@@ -59,10 +61,19 @@ export function ServiceForm({ action, initial, submitLabel = "Save package" }: P
         <textarea id="description" name="description" className="input min-h-24 py-3" defaultValue={initial?.description ?? ""} maxLength={SERVICE_MAX.description} />
       </FormField>
 
-      <div className="grid gap-5 sm:grid-cols-3">
-        <FormField label="Price (QAR)" htmlFor="price_qr" error={fe.price_qr} hint={price.trim() ? "Shown as “from … QAR”." : "Empty = quote on request."}>
-          <input id="price_qr" name="price_qr" className="input" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="Quote" />
+      <div className="grid gap-5 sm:grid-cols-2">
+        <FormField label="How the price is shown" htmlFor="price_mode" error={fe.price_mode} hint={mode === "fixed" ? "Shown as “350 QAR”." : mode === "from" ? "Shown as “from 350 QAR”; the final price is confirmed with the client." : "No public price; you send a quote after the request."}>
+          <select id="price_mode" name="price_mode" className="input" value={mode} onChange={(e) => setMode(e.target.value)}>
+            {PRICE_MODES.map((m) => (
+              <option key={m} value={m}>{PRICE_MODE_LABEL[m]}</option>
+            ))}
+          </select>
         </FormField>
+        <FormField label="Price (QAR)" htmlFor="price_qr" error={fe.price_qr} hint={mode === "quote" ? "Optional for a quote: used only as the default booking amount." : "Required for a fixed or starting price."}>
+          <input id="price_qr" name="price_qr" className="input" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} placeholder={mode === "quote" ? "Optional" : "350"} />
+        </FormField>
+      </div>
+      <div className="grid gap-5 sm:grid-cols-2">
         <FormField label="Deposit (QAR)" htmlFor="deposit_qr" error={fe.deposit_qr} hint="Optional.">
           <input id="deposit_qr" name="deposit_qr" className="input" inputMode="decimal" defaultValue={initial?.deposit_qr ?? ""} />
         </FormField>

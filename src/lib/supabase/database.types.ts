@@ -617,6 +617,8 @@ export type PhotoServiceRow = {
   description: string | null;
   /** null = quote on request. */
   price_qr: number | null;
+  /** fixed = "350 QAR", from = "from 350 QAR", quote = no public price (see src/lib/services/pricing.ts). */
+  price_mode: PriceMode;
   deposit_qr: number | null;
   currency: string;
   duration_minutes: number | null;
@@ -628,6 +630,8 @@ export type PhotoServiceRow = {
   created_at: string;
   updated_at: string;
 };
+
+export type PriceMode = "fixed" | "from" | "quote";
 
 export type LeadStatus = "new" | "contacted" | "quoted" | "converted" | "lost";
 
@@ -1209,7 +1213,7 @@ export type Database = {
       };
       photo_services: {
         Row: PhotoServiceRow;
-        Insert: Optional<PhotoServiceRow, GeneratedCols | "description" | "price_qr" | "deposit_qr" | "currency" | "duration_minutes" | "includes_photo" | "includes_video" | "active" | "public" | "sort_order">;
+        Insert: Optional<PhotoServiceRow, GeneratedCols | "description" | "price_qr" | "price_mode" | "deposit_qr" | "currency" | "duration_minutes" | "includes_photo" | "includes_video" | "active" | "public" | "sort_order">;
         Update: Partial<PhotoServiceRow>;
         Relationships: [];
       };

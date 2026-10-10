@@ -46,3 +46,7 @@ worker/node_modules
 supabase/.temp
 agent/node_modules
 agent/agent.env
+
+# photography originals (large; keep them out of git — see photos/README.md)
+photos/incoming/*
+!photos/incoming/.gitkeep

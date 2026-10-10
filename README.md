@@ -444,6 +444,35 @@ detail pages; buyers stay apart from tracked athletes; collaborators cannot
 read orders (RLS test). Proposed contract, Zapier field mapping and synthetic
 fixtures: [docs/orders-intake.md](docs/orders-intake.md).
 
+## Website photography and featured work
+
+The public site's photographs come from the owner's own archive through a
+repeatable pipeline (`scripts/photos/`, documented in
+[photos/README.md](photos/README.md)): `scan` inventories a drive such as
+`H:\` without copying it, `analyze` measures every frame (sharpness, noise,
+exposure, resolution, SHA-256 and perceptual hash), collapses bursts and sends
+one or two representatives per burst to Claude for an editorial assessment
+(category, composition, peak action, emotion, subject clarity, brand fit,
+placements, minors / sensitive / third-party-branding flags), and `select`
+builds a diverse shortlist, a hero with alternates, the home-page featured set
+and the per-service images, writing stripped sRGB web copies to
+`public/photos/` plus `public/photos/manifest.json` and a review report. Runs
+are batched and resumable; vision results are cached by content hash.
+
+Nothing is shown to visitors until the owner approves and publishes it on
+**Studio → Featured work** (`/featured-work`): approve, reject, pick the hero,
+reorder the featured set and the service images, publish or unpublish. The
+decisions live in `photo_studio.settings.featuredWork`;
+`src/lib/photos/featured.ts` combines them with the manifest, and studio users
+see the pending selection on the public pages as a preview. Images render
+through `next/image` (AVIF/WebP, responsive widths, blur placeholder, the
+pipeline's focal point as the crop anchor).
+
+Packages carry a **pricing mode** (`photo_services.price_mode`: `fixed`,
+`from`, `quote`), set per package under Services & packages and read by the
+home page, the services page, the booking wizard and the structured data
+through `src/lib/services/pricing.ts`.
+
 ## Notifications and payments
 
 - **Telegram** (grammY) is implemented behind `TELEGRAM_ENABLED=1` + `TELEGRAM_BOT_TOKEN`; see [docs/telegram.md](docs/telegram.md). In-app alerts are independent of it.
