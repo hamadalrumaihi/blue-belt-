@@ -1,55 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
 import { createLogger, setLogSink } from "@/lib/log";
 import type { CreateInvoiceInput, CreateInvoiceOutput, PaymentProvider, PaymentStatusOutput, ProviderResult } from "@/lib/payments/myfatoorah/client";
-import { autoInvoiceOrders, createInvoiceForOrder, createStandaloneInvoice, eligibleForAutoInvoice, INVOICE_CLAIM_TTL_MS, invoiceInputForOrder, MAX_AUTO_INVOICE_ATTEMPTS, type InvoiceDeps } from "@/lib/payments/invoicing";
+import { createInvoiceForOrder, createStandaloneInvoice, eligibleForAutoInvoice, INVOICE_CLAIM_TTL_MS, invoiceInputForOrder, MAX_AUTO_INVOICE_ATTEMPTS, type InvoiceDeps } from "@/lib/payments/invoicing";
 import type { PhotoOrderRow } from "@/lib/supabase/database.types";
 import { FakeSupabase } from "./fake-supabase";
 import { OWNER } from "./fixtures";
+import { orderRow } from "../helpers/order-row";
 
 vi.mock("server-only", () => ({}));
 setLogSink(() => {});
 
 const ORDER_ID = "33333333-3333-4333-8333-333333333333";
 
-function order(overrides: Partial<PhotoOrderRow> = {}): PhotoOrderRow {
-  return {
-    id: ORDER_ID,
-    owner_id: OWNER,
-    pictime_order_id: "PT-1",
-    customer_name: "Buyer One",
-    customer_email: "buyer@example.com",
-    customer_phone: null,
-    gallery_name: "Doha Open",
-    amount_qr: 120,
-    currency: "QAR",
-    status: "placed",
-    provider: null,
-    provider_invoice_id: null,
-    payment_url: null,
-    paid_at: null,
-    approved_in_pictime_at: null,
-    metadata: {},
-    source: "pictime",
-    external_ref: "PT-1",
-    payment_method: "fawran",
-    payment_state: "pending",
-    payment_reference: null,
-    payment_reported_state: null,
-    items: [],
-    placed_at: null,
-    received_at: "2026-10-02T10:00:00.000Z",
-    buyer_note: null,
-    athlete_name_hint: null,
-    raw: {},
-    payment_confirmed_at: null,
-    payment_confirmed_by: null,
-    fulfilled_at: null,
-    invoice_claimed_at: null, client_id: null, gallery_id: null,
-    created_at: "2026-10-02T10:00:00.000Z",
-    updated_at: "2026-10-02T10:00:00.000Z",
-    ...overrides,
-  };
-}
+const BASE: Partial<PhotoOrderRow> = { payment_method: "fawran", payment_reported_state: null };
+const order = (overrides: Partial<PhotoOrderRow> = {}) => orderRow({ id: ORDER_ID, owner_id: OWNER, ...BASE, ...overrides });
 
 function fakeProvider(
   createInvoice?: (input: CreateInvoiceInput) => Promise<ProviderResult<CreateInvoiceOutput>>,
@@ -219,22 +183,6 @@ describe("createInvoiceForOrder", () => {
     expect(saved.provider_invoice_id ?? null).toBeNull();
     expect(saved.invoice_claimed_at).toBeNull();
     expect(saved.metadata).toMatchObject({ invoice_attempts: 1, invoice_last_error: "provider" });
-  });
-});
-
-describe("autoInvoiceOrders", () => {
-  it("invoices only the eligible unpaid offline orders", async () => {
-    const eligible = order({ id: "a1", external_ref: "a1", payment_method: "fawran", payment_state: "pending" });
-    const card = order({ id: "a2", external_ref: "a2", payment_method: "card", payment_state: "pending" });
-    const paid = order({ id: "a3", external_ref: "a3", payment_method: "fawran", payment_state: "paid" });
-    const invoiced = order({ id: "a4", external_ref: "a4", payment_method: "fawran", provider_invoice_id: "INV-X" });
-    const { db, deps } = setup([eligible, card, paid, invoiced]);
-    const provider = fakeProvider();
-    const out = await autoInvoiceOrders(provider, deps, { limit: 25 });
-    expect(out.invoiced).toBe(1);
-    expect(provider.calls.map((c) => c.customerReference)).toEqual(["a1"]);
-    expect(db.tables.photo_orders.find((o) => o.id === "a1")!.provider_invoice_id).toBe("INV-NEW");
-    expect(db.tables.photo_orders.find((o) => o.id === "a2")!.provider_invoice_id ?? null).toBeNull();
   });
 });
 

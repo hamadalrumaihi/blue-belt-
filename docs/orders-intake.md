@@ -148,10 +148,13 @@ needs.
 
 ## Owner actions (Orders pages)
 
-`/orders` lists orders (filters: needs payment confirmation / paid /
-fulfilled); `/orders/<id>` shows payment, buyer, items and record data with:
-**Payment received — confirm** (offline methods; sets `payment_state=paid`,
-`payment_confirmed_at/by`, optional note), **Mark fulfilled** / undo, and
+`/orders` lists orders (filters: unpaid / needs attention / paid /
+fulfilled, with invoicing chips and the mode / queue / runner cards);
+`/orders/<id>` shows payment, buyer, items and record data with:
+**Paid by hand** (offline methods; sets `payment_state=paid`,
+`payment_confirmed_at/by`, optional note), the **Payment link** card (Send
+invoice, Resend / Retry e-mail, Check payment, Done; see
+[orders-invoicing.md](orders-invoicing.md)), **Mark fulfilled** / undo, and
 **Cancel order** (record only; nothing is sent to Pic-Time).
 
 ## Invoice drafts for new buyers (owner review only)
@@ -170,21 +173,33 @@ WhatsApp** (your own app opens with the text filled in), and **Mark invoice
 sent** (stored as `metadata.invoice_sent_at`). Nothing is sent to the buyer,
 charged or created at a payment provider by any of this.
 
-## Online payment link for an order (owner-sent)
+## Payment link, invoice and e-mail (Review / Automatic)
 
-With MyFatoorah configured, **Create MyFatoorah payment invoice** on the order
-page creates an invoice carrying the order id and stores its link on the order
-(`docs/payments.md`, "Order ↔ invoice lifecycle"). The link is then shown in
-the Payment card with **Copy link**, **Open in email** and **Open in WhatsApp**
-(a short message with the amount and the link, filled into your own app), and
-the invoice draft text gains a "Pay online: …" line. The link is never sent
-automatically; the buyer pays on MyFatoorah's page and the signed webhook (or
-reconciliation) marks the order paid.
+The full workflow lives in [orders-invoicing.md](orders-invoicing.md). What
+the intake itself does with it:
+
+- Every recorded order gets an **invoice plan** (`planInvoice`): skip (paid,
+  card, free, cancelled, refunded), exception (no / invalid e-mail, unknown
+  method, payments off), review (wait for **Send invoice**) or auto. The plan
+  is written to `metadata.invoice_plan` and its words appear on the
+  `[Orders]` card ("Invoice: waiting for you…", "Invoice: queued automatically",
+  "Invoice: not needed, already paid.").
+- In **Automatic** mode, an eligible order received after the activation time
+  is recorded with `invoice_requested_at` / `invoice_requested_by = auto` in
+  the same `photo_record_order` call, and the route runs the invoice job once
+  before answering (8 s provider budget). The response carries
+  `invoice: { plan, reason, queued, kicked, outcome }`. A Zap retry is a 200
+  replay that neither re-queues nor re-runs anything.
+- Nothing in the intake can repair or verify Zapier's trigger subscription: a
+  manual POST and a Zap POST are indistinguishable here. The Settings card
+  shows the credential's last use so a silent Zap is visible.
 
 ## Tests
 
 `tests/orders-contract.test.ts` (real payload shape, date forms, method and
 state words, Fawran rule, refusals, redaction), `tests/invoice-draft.test.ts`
 (drafts, direct-payment wording, payment-link message), `tests/api-orders-intake.test.ts`
-(flag, credential kind, owner from credential, atomic RPC call, replay 200),
+(flag, credential kind, owner from credential, atomic RPC call, replay 200,
+plans: card skip, review, exception, auto queued + kicked once, historical
+cutoff, spoofed owner), `tests/orders-eligibility.test.ts`,
 `supabase/tests/orders_rls.test.sql`.

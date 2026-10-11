@@ -9,6 +9,14 @@ export type TelegramSettingsState = {
   linked: boolean;
   enabled: boolean;
   chatTitle: string | null;
+  /** "private", "group", "supergroup" or "channel" once known (links made before the order buttons shipped have null). */
+  chatType: string | null;
+  /**
+   * True when the Telegram user who ran /start is recorded on the link. Order
+   * buttons (Send invoice, Check payment, …) only work for that user; a link
+   * made before this was recorded needs one more /start to enable them.
+   */
+  userLinked: boolean;
   /** Pending (unexpired) link code, if the user generated one. */
   code: string | null;
   codeExpiresAt: string | null;
@@ -20,6 +28,8 @@ export const EMPTY_TELEGRAM_STATE: TelegramSettingsState = {
   linked: false,
   enabled: true,
   chatTitle: null,
+  chatType: null,
+  userLinked: false,
   code: null,
   codeExpiresAt: null,
   kinds: [...TELEGRAM_ALERT_KINDS],
@@ -37,6 +47,8 @@ export async function loadTelegramSettings(supabase: SupabaseClient<Database>, o
     linked: Boolean(link?.chat_id),
     enabled: link?.enabled ?? true,
     chatTitle: link?.chat_title ?? null,
+    chatType: link?.chat_type ?? null,
+    userLinked: Boolean(link?.chat_id && link?.user_id),
     code: codeValid ? link!.link_code : null,
     codeExpiresAt: codeValid ? link!.link_code_expires_at : null,
     kinds: normalizeKinds(sub?.kinds) ?? [...TELEGRAM_ALERT_KINDS],

@@ -1,21 +1,28 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { Bot, type Context } from "grammy";
+import type { InlineKeyboardMarkup } from "grammy/types";
 import { createLogger } from "@/lib/log";
+import { getPaymentsConfig, isPaymentsEnabled } from "@/lib/payments/config";
+import { createMyFatoorahClient } from "@/lib/payments/myfatoorah/client";
+import { siteUrl } from "@/lib/studio/queries";
 import type { Database, PhotoTelegramLinkRow } from "@/lib/supabase/database.types";
 import { createServiceClient } from "@/lib/supabase/service";
+import { buildInlineKeyboard, callbackSecret } from "./callbacks";
 import { telegramBotToken } from "./config";
+import { ACK_TEXT, authorizeOrderCallback, performOrderAction, type CallbackDeps } from "./order-callbacks";
 
 /**
- * grammY bot in webhook mode. Commands only manage the chat ↔ account link;
- * notifications are sent by the notifier through `bot.api.sendMessage`.
- * The command handlers run without a user session (Telegram calls the
- * webhook), so they go through the service-role client via `LinkStore`.
+ * grammY bot in webhook mode. Commands manage the chat ↔ account link;
+ * inline buttons under [Orders] cards run the order actions; notifications
+ * are sent by the delivery runner through `bot.api`. Handlers run without a
+ * user session (Telegram calls the webhook), so they use the service-role
+ * client via `LinkStore` and check ownership themselves.
  */
 export type LinkStore = {
   findByCode(code: string): Promise<PhotoTelegramLinkRow | null>;
   findByChat(chatId: number): Promise<PhotoTelegramLinkRow | null>;
-  link(id: string, chatId: number, chatTitle: string | null, now: Date): Promise<void>;
+  link(id: string, chat: { chatId: number; chatTitle: string | null; userId: number | null; chatType: string | null }, now: Date): Promise<void>;
   setEnabled(id: string, enabled: boolean): Promise<void>;
 };
 
@@ -33,10 +40,10 @@ export function createLinkStore(supabase: SupabaseClient<Database>): LinkStore {
       if (error) throw new Error(error.message);
       return data ?? null;
     },
-    async link(id, chatId, chatTitle, now) {
+    async link(id, chat, now) {
       const { error } = await supabase
         .from("photo_telegram_links")
-        .update({ chat_id: chatId, chat_title: chatTitle, linked_at: now.toISOString(), link_code: null, link_code_expires_at: null, enabled: true, updated_at: now.toISOString() })
+        .update({ chat_id: chat.chatId, chat_title: chat.chatTitle, user_id: chat.userId, chat_type: chat.chatType, linked_at: now.toISOString(), link_code: null, link_code_expires_at: null, enabled: true, updated_at: now.toISOString() })
         .eq("id", id);
       if (error) throw new Error(error.message);
     },
@@ -57,7 +64,14 @@ function chatTitleOf(ctx: Context): string | null {
   return chat.title?.slice(0, 120) ?? null;
 }
 
-export function createTelegramBot(token: string, store: LinkStore, now: () => Date = () => new Date()): Bot {
+export type BotDeps = {
+  now?: () => Date;
+  /** Order-button handling; omit to leave buttons unanswered (tests of the link commands). */
+  callbacks?: () => CallbackDeps;
+};
+
+export function createTelegramBot(token: string, store: LinkStore, deps: BotDeps = {}): Bot {
+  const now = deps.now ?? (() => new Date());
   const bot = new Bot(token);
   const log = createLogger({ route: "telegram/bot" });
 
@@ -83,9 +97,9 @@ export function createTelegramBot(token: string, store: LinkStore, now: () => Da
       await ctx.reply("That code has expired. Generate a new one in Settings.");
       return;
     }
-    await store.link(row.id, chatId, chatTitleOf(ctx), now());
-    log.info("telegram.linked", { linkId: row.id });
-    await ctx.reply("Linked. You will get match alerts here. Send /stop to pause them.");
+    await store.link(row.id, { chatId, chatTitle: chatTitleOf(ctx), userId: ctx.from?.id ?? null, chatType: ctx.chat?.type ?? null }, now());
+    log.info("telegram.linked", { linkId: row.id, chatType: ctx.chat?.type });
+    await ctx.reply(ctx.chat?.type === "private" ? "Linked. You will get match alerts and order cards here; the buttons under order cards work for you. Send /stop to pause alerts." : "Linked. This group gets match alerts and order cards. Only you (the person who sent the code) can use the buttons under order cards. Send /stop to pause alerts.");
   });
 
   const stop = async (ctx: Context) => {
@@ -111,8 +125,39 @@ export function createTelegramBot(token: string, store: LinkStore, now: () => Da
       await ctx.reply("Not linked. Generate a code in Settings and send /start CODE.");
       return;
     }
-    await ctx.reply(row.enabled ? "Linked. Alerts are on." : "Linked, but alerts are paused. Turn Telegram on in Settings to resume.");
+    const actions = row.user_id !== null ? (ctx.from?.id === Number(row.user_id) ? "Order buttons: enabled for you." : "Order buttons: enabled for the person who linked this chat.") : ctx.chat?.type === "private" ? "Order buttons: enabled." : "Order buttons: send /start CODE again (from Settings) to enable them in this group.";
+    await ctx.reply(`${row.enabled ? "Linked. Alerts are on." : "Linked, but alerts are paused. Turn Telegram on in Settings to resume."}\n${actions}`);
   });
+
+  if (deps.callbacks) {
+    const getDeps = deps.callbacks;
+    bot.on("callback_query:data", async (ctx) => {
+      const chat = ctx.chat;
+      const from = ctx.from;
+      if (!chat || !from) {
+        await ctx.answerCallbackQuery({ text: "This button cannot be used here." }).catch(() => undefined);
+        return;
+      }
+      const cb = getDeps();
+      const auth = await authorizeOrderCallback({ data: ctx.callbackQuery.data, chatId: chat.id, chatType: chat.type, fromId: from.id, now: now() }, cb);
+      if (!auth.ok) {
+        await ctx.answerCallbackQuery({ text: auth.answer, show_alert: auth.reason === "not_authorized" }).catch(() => undefined);
+        if (auth.reason === "expired" || auth.reason === "invalid") await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => undefined);
+        return;
+      }
+      // Acknowledge at once so the button stops spinning, then do the work and update the card.
+      await ctx.answerCallbackQuery({ text: ACK_TEXT[auth.action] }).catch(() => undefined);
+      const done = await performOrderAction(auth, cb);
+      const markup: InlineKeyboardMarkup = { inline_keyboard: buildInlineKeyboard(done.card.buttons, { orderId: auth.order.id, secret: cb.secret, now: now() }) as InlineKeyboardMarkup["inline_keyboard"] };
+      try {
+        await ctx.editMessageText(done.card.text, { parse_mode: "HTML", reply_markup: markup, link_preview_options: { is_disabled: true } });
+      } catch (err) {
+        // "message is not modified" or too old: say it in a reply instead of failing the update.
+        log.info("telegram.callback_edit_failed", { error: err instanceof Error ? err.message.slice(0, 120) : String(err) });
+        await ctx.reply(done.answer).catch(() => undefined);
+      }
+    });
+  }
 
   bot.catch((err) => {
     // Never log the update body: it carries chat ids and names.
@@ -126,6 +171,22 @@ let singleton: Bot | null = null;
 
 /** Process-wide bot built from the environment and the service-role client. */
 export function getBot(): Bot {
-  if (!singleton) singleton = createTelegramBot(telegramBotToken(), createLinkStore(createServiceClient()));
+  if (!singleton) {
+    const token = telegramBotToken();
+    singleton = createTelegramBot(token, createLinkStore(createServiceClient()), {
+      callbacks: () => {
+        const enabled = isPaymentsEnabled();
+        const config = getPaymentsConfig();
+        return {
+          supabase: createServiceClient(),
+          secret: callbackSecret(token),
+          siteUrl: siteUrl(),
+          provider: enabled ? createMyFatoorahClient({ apiKey: config.apiKey, baseUrl: config.baseUrl }) : null,
+          log: createLogger({ route: "telegram/callbacks" }),
+          now: () => new Date(),
+        };
+      },
+    });
+  }
   return singleton;
 }

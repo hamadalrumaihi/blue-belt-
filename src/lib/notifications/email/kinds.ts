@@ -15,6 +15,8 @@ export const CLIENT_NOTIFICATION_KINDS = [
   "DELIVERY_COMPLETE",
   "BOOKING_CHANGED",
   "BOOKING_CANCELLED",
+  "ORDER_PAYMENT_LINK",
+  "ORDER_PAYMENT_RECEIVED",
   "PORTAL_SIGN_IN",
 ] as const;
 
@@ -32,6 +34,8 @@ export const CLIENT_NOTIFICATION_LABEL: Record<ClientNotificationKind, string> =
   DELIVERY_COMPLETE: "Delivery complete",
   BOOKING_CHANGED: "Booking changed",
   BOOKING_CANCELLED: "Booking cancelled",
+  ORDER_PAYMENT_LINK: "Photo order payment link",
+  ORDER_PAYMENT_RECEIVED: "Photo order payment received",
   PORTAL_SIGN_IN: "Portal sign-in link (always on)",
 };
 
@@ -47,6 +51,8 @@ export const CLIENT_NOTIFICATION_HELP: Record<ClientNotificationKind, string> = 
   DELIVERY_COMPLETE: "Sent when you mark a booking delivered from its status buttons.",
   BOOKING_CHANGED: "Sent when you change the date, time or place of a confirmed booking.",
   BOOKING_CANCELLED: "Sent when a booking is cancelled.",
+  ORDER_PAYMENT_LINK: "The private payment link for a gallery photo order paid to you directly: sent automatically in Automatic mode, or when you press Send invoice. Switching it off puts every new order in the exception queue.",
+  ORDER_PAYMENT_RECEIVED: "Sent once when an online payment for a photo order is verified.",
   PORTAL_SIGN_IN: "Magic links are sent by Supabase Auth, not by this switch.",
 };
 

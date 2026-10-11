@@ -26,9 +26,9 @@ describe("owner studio notifications", () => {
     const calls: unknown[] = [];
     const supabase = {
       from: () => ({
-        upsert: async (row: unknown, opts: unknown) => {
+        upsert: (row: unknown, opts: unknown) => {
           calls.push([row, opts]);
-          return { error: { message: "boom" } };
+          return { select: async () => ({ data: null, error: { message: "boom" } }) };
         },
       }),
     } as unknown as Parameters<typeof enqueueOwnerTelegram>[0];

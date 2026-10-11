@@ -111,11 +111,15 @@ class FakeQuery {
   private op: Op = "select";
   private payload: Row | null = null;
   private upsertRows: Row[] = [];
+  private upsertIgnore = true;
+  private upsertConflict: string[] | null = null;
   private filters: Filter[] = [];
   private returning = false;
   private mode: "many" | "single" | "maybeSingle" = "many";
   private orderBy: { col: string; asc: boolean } | null = null;
   private limitN: number | null = null;
+  /** `select(cols, { count: "exact" })`: the result also carries `count`. */
+  private counting = false;
 
   constructor(
     private db: FakeSupabase,
@@ -127,10 +131,11 @@ class FakeQuery {
     this.payload = row;
     return this;
   }
-  /** Only `ignoreDuplicates: true` is modelled: rows that clash on a unique key are skipped. */
+  /** `ignoreDuplicates: true` skips clashing rows; without it a clash on `onConflict` replaces the row (merge). */
   upsert(rows: Row | Row[], opts?: { onConflict?: string; ignoreDuplicates?: boolean }) {
-    if (!opts?.ignoreDuplicates) throw new Error("FakeSupabase.upsert only models ignoreDuplicates: true");
     this.op = "upsert";
+    this.upsertIgnore = Boolean(opts?.ignoreDuplicates);
+    this.upsertConflict = opts?.onConflict ? opts.onConflict.split(",").map((c) => c.trim()) : null;
     this.upsertRows = Array.isArray(rows) ? rows : [rows];
     return this;
   }
@@ -139,8 +144,9 @@ class FakeQuery {
     this.payload = patch;
     return this;
   }
-  select(cols?: string) {
+  select(cols?: string, opts?: { count?: "exact"; head?: boolean }) {
     void cols; // column projection is not modelled; rows come back whole
+    if (opts?.count) this.counting = true;
     if (this.op === "select") return this;
     this.returning = true;
     return this;
@@ -163,6 +169,36 @@ class FakeQuery {
   }
   in(col: string, vals: unknown[]) {
     this.filters.push((r) => vals.includes(r[col]));
+    return this;
+  }
+  /** PostgREST `or` filter: `a.is.null,b.lt.2026-...` (is/eq/neq/lt/lte/gt/gte). */
+  or(expr: string) {
+    const clauses = expr.split(",").map((c) => {
+      const [col, op, ...rest] = c.split(".");
+      const val = rest.join(".");
+      return (r: Row) => {
+        const v = readColumn(r, col);
+        switch (op) {
+          case "is":
+            return val === "null" ? v === null || v === undefined : val === "true" ? v === true : v === false;
+          case "eq":
+            return String(v) === val;
+          case "neq":
+            return String(v) !== val;
+          case "lt":
+            return v !== null && v !== undefined && String(v) < val;
+          case "lte":
+            return v !== null && v !== undefined && String(v) <= val;
+          case "gt":
+            return v !== null && v !== undefined && String(v) > val;
+          case "gte":
+            return v !== null && v !== undefined && String(v) >= val;
+          default:
+            throw new Error(`FakeSupabase.or: unsupported operator ${op}`);
+        }
+      };
+    });
+    this.filters.push((r) => clauses.some((f) => f(r)));
     return this;
   }
   lt(col: string, val: unknown) {
@@ -195,7 +231,7 @@ class FakeQuery {
   }
 
   // Supabase builders are thenables; awaiting one runs the query.
-  then<T>(resolve: (v: { data: unknown; error: { code: string; message: string } | null }) => T, reject?: (e: unknown) => T) {
+  then<T>(resolve: (v: { data: unknown; error: { code: string; message: string } | null; count?: number }) => T, reject?: (e: unknown) => T) {
     try {
       return Promise.resolve(this.exec()).then(resolve, reject);
     } catch (e) {
@@ -214,7 +250,14 @@ class FakeQuery {
       const inserted: Row[] = [];
       for (const input of this.upsertRows) {
         const row = { id: this.db.nextId(), ...input } as Row;
-        if (!clashes(this.table, rows, row)) {
+        const conflict = this.upsertConflict;
+        const existing = conflict ? rows.find((r) => conflict.every((c) => r[c] === row[c])) : undefined;
+        if (existing && !this.upsertIgnore) {
+          Object.assign(existing, input);
+          inserted.push(existing);
+          continue;
+        }
+        if (!clashes(this.table, rows, row) && !existing) {
           rows.push(row);
           inserted.push(row);
         }
@@ -248,8 +291,9 @@ class FakeQuery {
 
   private shape(hit: Row[]) {
     const copy = hit.map((r) => ({ ...r }));
-    if (this.mode === "single") return copy.length === 1 ? { data: copy[0], error: null } : { data: null, error: { code: "PGRST116", message: `expected 1 row, got ${copy.length}` } };
-    if (this.mode === "maybeSingle") return { data: copy[0] ?? null, error: null };
-    return { data: copy, error: null };
+    const count = this.counting ? { count: copy.length } : {};
+    if (this.mode === "single") return copy.length === 1 ? { data: copy[0], error: null, ...count } : { data: null, error: { code: "PGRST116", message: `expected 1 row, got ${copy.length}` }, ...count };
+    if (this.mode === "maybeSingle") return { data: copy[0] ?? null, error: null, ...count };
+    return { data: copy, error: null, ...count };
   }
 }

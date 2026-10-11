@@ -59,17 +59,33 @@ export function eligibleForAutoInvoice(order: PhotoOrderRow): boolean {
   return OFFLINE_METHODS.includes(order.payment_method as (typeof OFFLINE_METHODS)[number]);
 }
 
-/** Builds the provider invoice request for an order; the order id is the shared reference. */
-export function invoiceInputForOrder(order: PhotoOrderRow): CreateInvoiceInput {
+export type OrderInvoiceOptions = {
+  /** Where the hosted payment page sends the buyer back (our order pay page). */
+  callbackUrl?: string;
+  errorUrl?: string;
+  /** Provider-side expiry ("yyyy-MM-ddTHH:mm:ss"); defaults to the provider's own setting. */
+  expiryDate?: string;
+};
+
+/** Builds the provider invoice request for an order; the order id is the shared reference and the amount is the order's exact total. */
+export function invoiceInputForOrder(order: PhotoOrderRow, opts: OrderInvoiceOptions = {}): CreateInvoiceInput {
   return {
-    amount: order.amount_qr,
+    amount: Math.round(Number(order.amount_qr) * 100) / 100,
     customerName: order.customer_name,
     customerReference: order.id,
     customerEmail: order.customer_email ?? undefined,
     displayCurrencyIso: order.currency,
     language: "EN",
     userDefinedField: order.external_ref ?? order.pictime_order_id ?? undefined,
+    callbackUrl: opts.callbackUrl,
+    errorUrl: opts.errorUrl,
+    expiryDate: opts.expiryDate,
   };
+}
+
+/** Provider expiry string for `now + days`, in the documented "yyyy-MM-ddTHH:mm:ss" form (UTC). */
+export function invoiceExpiryDate(now: Date, days: number): string {
+  return new Date(now.getTime() + days * 86_400_000).toISOString().slice(0, 19);
 }
 
 /**
@@ -90,9 +106,9 @@ export function invoiceInputForOrder(order: PhotoOrderRow): CreateInvoiceInput {
  *   4. A provider failure releases the claim and counts an attempt.
  * The caller must have checked `isPaymentsEnabled()`. Never messages the buyer.
  */
-export async function createInvoiceForOrder(order: PhotoOrderRow, provider: PaymentProvider, deps: InvoiceDeps): Promise<CreateInvoiceForOrderResult> {
+export async function createInvoiceForOrder(order: PhotoOrderRow, provider: PaymentProvider, deps: InvoiceDeps, opts: OrderInvoiceOptions = {}): Promise<CreateInvoiceForOrderResult> {
   if (order.provider_invoice_id) {
-    return { ok: true, orderId: order.id, invoiceId: order.provider_invoice_id, paymentUrl: order.payment_url, alreadyInvoiced: true };
+    return { ok: true, orderId: order.id, invoiceId: order.provider_invoice_id, paymentUrl: providerPaymentUrl(order), alreadyInvoiced: true };
   }
   if (order.status === "cancelled") return { ok: false, orderId: order.id, reason: "cancelled" };
   if (order.payment_state === "paid" || order.payment_state === "refunded") return { ok: false, orderId: order.id, reason: "already_paid" };
@@ -127,7 +143,7 @@ export async function createInvoiceForOrder(order: PhotoOrderRow, provider: Paym
   if (!claimed?.length) return { ok: false, orderId: order.id, reason: "in_progress" };
 
   // (3) Create at the provider.
-  const created = await provider.createInvoice(invoiceInputForOrder(order));
+  const created = await provider.createInvoice(invoiceInputForOrder(order, opts));
   if (!created.ok) {
     deps.log.warn("payments.order_invoice_failed", { orderId: order.id, code: created.error.code, httpStatus: created.error.httpStatus });
     // (4) Release the claim and count the attempt so the automatic path backs off.
@@ -150,7 +166,20 @@ function isNotFound(error: { code: string; httpStatus?: number }): boolean {
   return error.code === "provider" || (error.code === "http" && (error.httpStatus === 400 || error.httpStatus === 404));
 }
 
-/** Records an invoice on the order, only if the order still has none (never overwrites another invoice). */
+/** The provider's own hosted payment URL for the order's current invoice (kept in metadata; `payment_url` is the customer's link, usually our page). */
+export function providerPaymentUrl(order: Pick<PhotoOrderRow, "metadata" | "payment_url" | "pay_token_hash">): string | null {
+  const inv = metadataOf(order).invoice;
+  if (isRecord(inv) && typeof inv.provider_payment_url === "string" && inv.provider_payment_url) return inv.provider_payment_url;
+  // Orders invoiced before the website pay page existed carry the provider URL in payment_url.
+  return order.pay_token_hash ? null : order.payment_url;
+}
+
+/**
+ * Records an invoice on the order, only if the order still has none (never
+ * overwrites another invoice). `payment_url` stays the customer's link when
+ * the order already has its website pay page; otherwise the provider's URL
+ * fills it so the owner has something to share.
+ */
 async function linkInvoice(
   order: PhotoOrderRow,
   invoice: { invoiceId: string; paymentUrl: string | null; customerReference: string | null },
@@ -166,9 +195,9 @@ async function linkInvoice(
     .update({
       provider: MYFATOORAH_PROVIDER,
       provider_invoice_id: invoice.invoiceId,
-      payment_url: invoice.paymentUrl,
+      payment_url: order.pay_token_hash && order.payment_url ? order.payment_url : invoice.paymentUrl,
       invoice_claimed_at: null,
-      metadata: { ...rest, invoice: { provider: MYFATOORAH_PROVIDER, invoice_id: invoice.invoiceId, customer_reference: invoice.customerReference, created_at: deps.now().toISOString(), relinked } } as Json,
+      metadata: { ...rest, invoice: { provider: MYFATOORAH_PROVIDER, invoice_id: invoice.invoiceId, customer_reference: invoice.customerReference, provider_payment_url: invoice.paymentUrl, created_at: deps.now().toISOString(), relinked } } as Json,
     })
     .eq("id", order.id)
     .eq("owner_id", order.owner_id)
@@ -185,36 +214,29 @@ async function linkInvoice(
 }
 
 /**
- * Automatic path (cron): invoices eligible unpaid offline orders that have no
- * invoice yet. Bounded by `limit` and by a wall-clock `budgetMs` (each provider
- * call can take up to the client timeout, and the cron route shares its
- * maxDuration with reconcile), so a slow provider cannot run the function into
- * its hard limit mid-write. Never messages the customer.
+ * Moves the order's current provider invoice aside (it expired or was
+ * cancelled at the provider) so a fresh one can be created with the same
+ * claim protection. The old id is kept in metadata.superseded_invoices so a
+ * late payment of it is still matched to this order.
  */
-export async function autoInvoiceOrders(provider: PaymentProvider, deps: InvoiceDeps, opts: { limit?: number; budgetMs?: number } = {}): Promise<{ scanned: number; invoiced: number; failed: number }> {
-  const started = Date.now();
-  const budgetMs = opts.budgetMs ?? 25_000;
-  const { data: orders } = await deps.supabase
+export async function supersedeOrderInvoice(order: PhotoOrderRow, deps: InvoiceDeps, reason: string): Promise<boolean> {
+  if (!order.provider_invoice_id) return true;
+  const metadata = metadataOf(order);
+  const previous = Array.isArray(metadata.superseded_invoices) ? metadata.superseded_invoices.filter((v): v is string => typeof v === "string") : [];
+  const superseded = previous.includes(order.provider_invoice_id) ? previous : [...previous, order.provider_invoice_id].slice(-20);
+  const { data, error } = await deps.supabase
     .from("photo_orders")
-    .select("*")
-    .is("provider_invoice_id", null)
-    .in("payment_state", ["pending", "unknown"])
-    .neq("status", "cancelled")
-    .in("payment_method", OFFLINE_METHODS as unknown as string[])
-    .order("received_at", { ascending: true })
-    .limit(opts.limit ?? 10);
-  let invoiced = 0;
-  let failed = 0;
-  let scanned = 0;
-  for (const order of (orders ?? []) as PhotoOrderRow[]) {
-    if (Date.now() - started >= budgetMs) break;
-    scanned += 1;
-    if (!eligibleForAutoInvoice(order)) continue;
-    const result = await createInvoiceForOrder(order, provider, deps);
-    if (result.ok) invoiced += 1;
-    else if (result.reason !== "in_progress") failed += 1;
+    .update({ provider_invoice_id: null, invoice_claimed_at: null, metadata: { ...metadata, superseded_invoices: superseded, invoice_superseded: { invoice_id: order.provider_invoice_id, reason, at: deps.now().toISOString() } } as Json })
+    .eq("id", order.id)
+    .eq("owner_id", order.owner_id)
+    .eq("provider_invoice_id", order.provider_invoice_id)
+    .select("id");
+  if (error || !data?.length) {
+    deps.log.warn("payments.order_invoice_supersede_failed", { orderId: order.id, error: error?.message ?? "order changed" });
+    return false;
   }
-  return { scanned, invoiced, failed };
+  deps.log.info("payments.order_invoice_superseded", { orderId: order.id, invoiceId: order.provider_invoice_id, reason });
+  return true;
 }
 
 // ---------------------------------------------------------------------------

@@ -55,6 +55,27 @@ export function payPageUrl(siteUrl: string, token: string): string {
   return `${siteUrl.replace(/\/+$/, "")}/pay/${token}`;
 }
 
+// ---------------------------------------------------------------------------
+// Photo-order payment links: `/pay/order/<bbo_…>`. Same construction, its own
+// prefix so a booking token can never open an order page or vice versa.
+// ---------------------------------------------------------------------------
+
+export const ORDER_PAY_TOKEN_PREFIX = "bbo";
+const ORDER_TOKEN_RE = /^bbo_[A-Za-z0-9]{40}$/;
+
+export function createOrderPayToken(): { token: string; hash: string } {
+  const token = `${ORDER_PAY_TOKEN_PREFIX}_${randomBase62(40)}`;
+  return { token, hash: hashPayToken(token) };
+}
+
+export function isOrderPayTokenShape(value: unknown): value is string {
+  return typeof value === "string" && ORDER_TOKEN_RE.test(value);
+}
+
+export function orderPayPageUrl(siteUrl: string, token: string): string {
+  return `${siteUrl.replace(/\/+$/, "")}/pay/order/${token}`;
+}
+
 /**
  * True when `payment_url` points at OUR pay page (not the provider's hosted
  * invoice). The client portal only ever links to our page; a raw provider

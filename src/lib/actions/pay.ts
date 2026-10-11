@@ -5,7 +5,8 @@ import { createLogger } from "@/lib/log";
 import { cardViewScriptUrl, getPaymentsConfig, isPaymentsEnabled } from "@/lib/payments/config";
 import { createMyFatoorahClient } from "@/lib/payments/myfatoorah/client";
 import { executeCardPayment as executeCardPaymentService, startCardSession as startCardSessionService, startHostedPayment as startHostedPaymentService, type PayActionError, type PayPageDeps } from "@/lib/payments/pay-page";
-import { isPayTokenShape } from "@/lib/payments/pay-token";
+import { startOrderHostedPayment, type OrderPayActionError } from "@/lib/payments/order-pay";
+import { isOrderPayTokenShape, isPayTokenShape } from "@/lib/payments/pay-token";
 import { rateLimit, RULES } from "@/lib/rate-limit";
 import { siteUrl } from "@/lib/studio/queries";
 import { createServiceClient, isServiceClientConfigured } from "@/lib/supabase/service";
@@ -81,5 +82,35 @@ export async function startHostedPayment(token: string): Promise<PayRedirectStat
   if (!g.ok) return g;
   const res = await startHostedPaymentService(g.token, g.deps);
   if (!res.ok) return { ok: false, error: MESSAGES[res.error] };
+  return { ok: true, redirectUrl: res.redirectUrl };
+}
+
+const ORDER_MESSAGES: Record<OrderPayActionError, string> = {
+  not_found: "This payment link is not valid.",
+  expired: "This payment link has expired. Ask the studio for a new one.",
+  not_payable: "This order cannot be paid online right now. Reload the page to see its current state.",
+  payments_off: "Online payment is being set up. We will send you the link when it is ready.",
+  provider_error: "The payment service did not answer. Please try again in a moment.",
+  paid: "This order is already paid. Reload the page to see the confirmation.",
+};
+
+/** "Pay online" on the order payment page: the hosted page for the order's exact outstanding amount. */
+export async function startOrderPayment(token: string): Promise<PayRedirectState> {
+  if (!isOrderPayTokenShape(token)) return { ok: false, error: ORDER_MESSAGES.not_found };
+  const ip = await clientIp();
+  const limit = rateLimit(`pay:${ip}`, RULES.signPerIp);
+  if (!limit.ok) return { ok: false, error: `Too many attempts. Please wait ${Math.ceil(limit.retryAfterSeconds / 60)} minutes and try again.` };
+  if (!isServiceClientConfigured()) return { ok: false, error: ORDER_MESSAGES.provider_error };
+  const enabled = isPaymentsEnabled();
+  const config = getPaymentsConfig();
+  const res = await startOrderHostedPayment(token, {
+    supabase: createServiceClient(),
+    now: () => new Date(),
+    log: createLogger({ route: "actions/pay-order" }),
+    provider: enabled ? createMyFatoorahClient({ apiKey: config.apiKey, baseUrl: config.baseUrl }) : null,
+    enabled,
+    siteUrl: siteUrl(),
+  });
+  if (!res.ok) return { ok: false, error: ORDER_MESSAGES[res.error] };
   return { ok: true, redirectUrl: res.redirectUrl };
 }

@@ -443,10 +443,25 @@ and from the capture agent's credentials. It records the order atomically with
 its **[Orders]** Telegram outbox row (`photo_record_order`), dedupes Zap
 retries by `(owner, source, externalRef)`, never invents prices, and stores
 Fawran / bank-transfer / cash orders as **"Order placed — payment not yet
-confirmed"** until the owner confirms by hand. Owner-only `/orders` list and
-detail pages; buyers stay apart from tracked athletes; collaborators cannot
-read orders (RLS test). Proposed contract, Zapier field mapping and synthetic
-fixtures: [docs/orders-intake.md](docs/orders-intake.md).
+confirmed"** until the owner confirms by hand or the buyer pays online.
+Owner-only `/orders` list and detail pages; buyers stay apart from tracked
+athletes; collaborators cannot read orders (RLS test). Contract, Zapier field
+mapping and synthetic fixtures: [docs/orders-intake.md](docs/orders-intake.md).
+
+**Payment links (orders → invoice → e-mail → Telegram).** An order paid to
+the photographer directly can get a private payment page
+(`/pay/order/<token>`), a provider payment request for the exact outstanding
+total and **one** e-mail to the buyer, either after the owner presses **Send
+invoice** (Review mode, the default) or by itself for eligible new orders
+received after the activation time (Automatic mode, behind
+`PAYMENTS_AUTO_INVOICE_ENABLED=1`). Historical, paid, card, free and
+cancelled orders are never billed. Telegram is the control panel: [Orders]
+cards with signed inline buttons (Send invoice, Check payment, Retry e-mail,
+Done) that only the linked account may press, edited as the order moves and
+retired once it is paid. Payment is confirmed only by the signed webhook, a
+provider check or a verified return visit, with the amount and currency
+enforced. Photo release in the gallery stays manual (no API): **Done**
+records it. [docs/orders-invoicing.md](docs/orders-invoicing.md).
 
 ## Website photography and featured work
 
@@ -498,7 +513,8 @@ through `src/lib/services/pricing.ts`.
   grouped and each incident notifies once (`photo_incidents` +
   `src/lib/notifications/incidents.ts`). Set `NEXT_PUBLIC_SITE_URL` so the
   messages can link back to the app.
-- **MyFatoorah** is prepared behind `PAYMENTS_MYFATOORAH_ENABLED=1` (state machine, webhook signature verification, idempotent webhook deliveries, reconciliation); no checkout, invoices or Pic-Time integration exist, and paid bookings never create clients automatically. See [docs/payments.md](docs/payments.md).
+- **MyFatoorah** runs behind `PAYMENTS_MYFATOORAH_ENABLED=1` (state machine, webhook signature verification, idempotent webhook deliveries, reconciliation, booking deposit / balance requests, website checkout, photo-order payment links); paid bookings and orders never create clients automatically. See [docs/payments.md](docs/payments.md) and [docs/orders-invoicing.md](docs/orders-invoicing.md).
+- **Scheduler ticks.** The Railway worker calls `/api/cron/refresh`, `/api/cron/deliveries` and `/api/cron/payments` with `CRON_SECRET`; the jobs run in Vercel and write `photo_job_heartbeats`, shown in Settings and on the Orders page, so a stalled runner is visible without secrets.
 
 ## Testing and CI
 

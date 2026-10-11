@@ -4,6 +4,7 @@ import { processWebhook, replayUnmatchedEvents, type WebhookDeps } from "@/lib/p
 import type { PhotoOrderRow } from "@/lib/supabase/database.types";
 import { FakeSupabase } from "./fake-supabase";
 import { OWNER, paymentEvent, refundEvent } from "./fixtures";
+import { orderRow as baseOrderRow } from "../helpers/order-row";
 
 vi.mock("server-only", () => ({}));
 setLogSink(() => {});
@@ -11,16 +12,8 @@ setLogSink(() => {});
 const ORDER_ID = "44444444-4444-4444-8444-444444444444";
 const ORDER_INVOICE = "ORDER-INV-1";
 
-function order(overrides: Partial<PhotoOrderRow> = {}): PhotoOrderRow {
-  return {
-    id: ORDER_ID, owner_id: OWNER, pictime_order_id: "PT-7", customer_name: "Order Buyer", customer_email: "ob@example.com", customer_phone: null,
-    gallery_name: "Qatar Masters", amount_qr: 150, currency: "QAR", status: "placed", provider: "MYFATOORAH", provider_invoice_id: ORDER_INVOICE,
-    payment_url: "https://pay.test/ORDER-INV-1", paid_at: null, approved_in_pictime_at: null, metadata: {}, source: "pictime", external_ref: "PT-7",
-    payment_method: "fawran", payment_state: "pending", payment_reference: null, payment_reported_state: null, items: [], placed_at: null,
-    received_at: "2026-10-02T10:00:00.000Z", buyer_note: null, athlete_name_hint: null, raw: {}, payment_confirmed_at: null, payment_confirmed_by: null,
-    fulfilled_at: null, invoice_claimed_at: null, client_id: null, gallery_id: null, created_at: "2026-10-02T10:00:00.000Z", updated_at: "2026-10-02T10:00:00.000Z", ...overrides,
-  };
-}
+const BASE: Partial<PhotoOrderRow> = { pictime_order_id: "PT-7", customer_name: "Order Buyer", customer_email: "ob@example.com", gallery_name: "Qatar Masters", amount_qr: 350, provider: "MYFATOORAH", provider_invoice_id: ORDER_INVOICE, payment_url: "https://pay.test/ORDER-INV-1", external_ref: "PT-7", payment_method: "fawran", payment_reported_state: null };
+const order = (overrides: Partial<PhotoOrderRow> = {}) => baseOrderRow({ id: ORDER_ID, owner_id: OWNER, ...BASE, ...overrides });
 
 function setup(seedOrders: PhotoOrderRow[] = [order()]) {
   const db = new FakeSupabase();
@@ -145,5 +138,76 @@ describe("replayUnmatchedEvents — order path", () => {
     expect(orderRow(db).payment_state).toBe("paid");
     const ev = db.tables.photo_payment_events.find((e) => e.id === 900)!;
     expect(ev).toMatchObject({ order_id: ORDER_ID, processing_result: "processed" });
+  });
+});
+
+describe("processWebhook — exact amount, currency and invoice matching", () => {
+  it("a verified SUCCESS for the wrong amount is NOT a payment of this order: recorded, alerted, order stays unpaid", async () => {
+    const { db, deps } = setup([order({ amount_qr: 500 })]);
+    const out = await processWebhook({ body: paymentEvent({ invoiceId: ORDER_INVOICE, reference: "WH-ORD-AMT" }), signatureValid: true }, deps);
+    expect(out).toMatchObject({ result: "amount_mismatch" });
+    const o = orderRow(db);
+    expect(o.payment_state).toBe("pending");
+    expect(o.paid_at ?? null).toBeNull();
+    expect((o.metadata as Record<string, unknown>).payment_mismatch).toMatchObject({ amount: 350, expected: 500, invoice_id: ORDER_INVOICE });
+    expect(db.tables.photo_payment_records).toHaveLength(0);
+    expect(db.tables.photo_notification_deliveries.filter((d) => d.alert_key === `order-payment:${ORDER_ID}:paid`)).toHaveLength(0);
+    const alert = db.tables.photo_notification_deliveries.find((d) => String(d.alert_key).startsWith(`order-payment:${ORDER_ID}:mismatch:`))!;
+    expect(alert).toMatchObject({ kind: "INTEGRATION_FAILED" });
+    // The same event again is a duplicate; no second alert.
+    expect((await processWebhook({ body: paymentEvent({ invoiceId: ORDER_INVOICE, reference: "WH-ORD-AMT" }), signatureValid: true }, deps)).result).toBe("duplicate");
+    expect(db.tables.photo_notification_deliveries.filter((d) => String(d.alert_key).startsWith(`order-payment:${ORDER_ID}:mismatch:`))).toHaveLength(1);
+  });
+
+  it("a payment in another currency is refused too", async () => {
+    const { db, deps } = setup([order({ currency: "USD", amount_qr: 350 })]);
+    const out = await processWebhook({ body: paymentEvent({ invoiceId: ORDER_INVOICE, reference: "WH-ORD-CUR" }), signatureValid: true }, deps);
+    expect(out).toMatchObject({ result: "amount_mismatch", detail: expect.stringMatching(/currency QAR expected USD/) });
+    expect(orderRow(db).payment_state).toBe("pending");
+  });
+
+  it("an unverified event never touches an order", async () => {
+    const { db, deps } = setup();
+    const out = await processWebhook({ body: paymentEvent({ invoiceId: ORDER_INVOICE, reference: "WH-ORD-BADSIG" }), signatureValid: false }, deps);
+    expect(out.result).not.toBe("processed");
+    expect(orderRow(db).payment_state).toBe("pending");
+    expect(db.tables.photo_payment_records).toHaveLength(0);
+  });
+
+  it("a paid event for an invoice the order superseded is matched through the order id and the superseded list", async () => {
+    const { db, deps } = setup([order({ provider_invoice_id: "ORDER-INV-2", metadata: { superseded_invoices: [ORDER_INVOICE] } })]);
+    const body = paymentEvent({ invoiceId: ORDER_INVOICE, reference: "WH-ORD-OLD" });
+    body.Data.Invoice.ExternalIdentifier = ORDER_ID;
+    const out = await processWebhook({ body, signatureValid: true }, deps);
+    expect(out.result).toBe("processed");
+    const o = orderRow(db);
+    expect(o).toMatchObject({ payment_state: "paid", provider_invoice_id: ORDER_INVOICE });
+    // Without the order id as ExternalIdentifier, an unknown invoice is not guessed.
+    const { db: db2, deps: deps2 } = setup([order({ provider_invoice_id: "ORDER-INV-2", metadata: { superseded_invoices: [ORDER_INVOICE] } })]);
+    expect((await processWebhook({ body: paymentEvent({ invoiceId: ORDER_INVOICE, reference: "WH-ORD-OLD2" }), signatureValid: true }, deps2)).result).toBe("booking_not_found");
+    expect(orderRow(db2).payment_state).toBe("pending");
+  });
+
+  it("a confirmed payment writes the ledger record, the customer receipt e-mail and a paid card that retires the earlier cards' buttons, exactly once", async () => {
+    const { db, deps } = setup([order({ invoice_email_count: 1, invoice_email_state: "sent" })]);
+    const out = await processWebhook({ body: paymentEvent({ invoiceId: ORDER_INVOICE, reference: "WH-ORD-LEDGER" }), signatureValid: true }, deps);
+    expect(out.result).toBe("processed");
+    expect(db.tables.photo_payment_records).toHaveLength(1);
+    expect(db.tables.photo_payment_records[0]).toMatchObject({ order_id: ORDER_ID, kind: "provider", amount_qr: 350, currency: "QAR", provider_payment_id: "07076409988323998875" });
+    const receipt = db.tables.photo_notification_deliveries.filter((d) => d.kind === "ORDER_PAYMENT_RECEIVED");
+    expect(receipt).toHaveLength(1);
+    expect((receipt[0].payload as Record<string, unknown>).to).toBe("ob@example.com");
+    const paid = db.tables.photo_notification_deliveries.find((d) => d.alert_key === `order-payment:${ORDER_ID}:paid`)!;
+    const payload = paid.payload as Record<string, unknown>;
+    expect(payload.supersedes).toEqual([`order:pictime:PT-7`, `order:${ORDER_ID}:invoice:1`, `order:${ORDER_ID}:invoice-sent:1`]);
+    expect(JSON.stringify(payload.buttons)).toContain("Done");
+    expect(JSON.stringify(payload.buttons)).not.toMatch(/Send invoice|Check payment/);
+    expect((orderRow(db).metadata as Record<string, unknown>).payment_verified).toMatchObject({ invoice_id: ORDER_INVOICE, amount: 350, currency: "QAR" });
+    // A redelivery (same reference) and a different reference for the same payment both stay single.
+    await processWebhook({ body: paymentEvent({ invoiceId: ORDER_INVOICE, reference: "WH-ORD-LEDGER" }), signatureValid: true }, deps);
+    await processWebhook({ body: paymentEvent({ invoiceId: ORDER_INVOICE, reference: "WH-ORD-LEDGER-2" }), signatureValid: true }, deps);
+    expect(db.tables.photo_payment_records).toHaveLength(1);
+    expect(db.tables.photo_notification_deliveries.filter((d) => d.kind === "ORDER_PAYMENT_RECEIVED")).toHaveLength(1);
+    expect(db.tables.photo_notification_deliveries.filter((d) => d.alert_key === `order-payment:${ORDER_ID}:paid`)).toHaveLength(1);
   });
 });

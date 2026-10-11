@@ -276,13 +276,19 @@ existing flags (nothing runs until payments are activated):
   `src/lib/payments/invoicing.ts`) calls `SendPayment` with the **order id as the
   `customerReference`**, then writes `provider` / `provider_invoice_id` /
   `payment_url` back onto the `photo_orders` row. Two entry points:
-  - *Manual*: the owner action `requestOrderInvoice(orderId)` (Orders → an
-    order → "Create MyFatoorah payment invoice"). Gated by `isPaymentsEnabled()`.
-  - *Automatic*: the payments cron invoices every eligible order when
-    `PAYMENTS_AUTO_INVOICE_ENABLED=1`. Eligible = unpaid, not cancelled, has an
-    amount, no invoice yet, **and paid by an offline method** (Fawran / bank
-    transfer / cash). A card order is already settled in Pic-Time, so it is
-    never auto-invoiced (no double charge).
+  - *Owner-pressed*: **Send invoice** on the order page or under the Telegram
+    card (`sendOrderInvoiceNow`, gated by `isPaymentsEnabled()` and the
+    owner check).
+  - *Automatic*: the order's **invoice job** (`src/lib/orders/payment-link.ts`,
+    see [orders-invoicing.md](orders-invoicing.md)) when the owner's mode is
+    Automatic, `PAYMENTS_AUTO_INVOICE_ENABLED=1`, and the order was received
+    after the activation time. Eligible = unpaid, not cancelled or refunded,
+    has an amount, **paid by an offline method** (Fawran / bank transfer /
+    cash / "photographer"), with a usable buyer e-mail. A card order is
+    already settled in Pic-Time, so it is never invoiced (no double charge);
+    orders older than the activation time are never billed automatically.
+    Both paths pass `CallBackUrl` / `ErrorUrl` = the order's private page
+    (`/pay/order/<token>`) and a 30-day `ExpiryDate`.
 - **Direct / standalone invoice (option a).** `createStandaloneInvoice` inserts
   a `photo_bookings` row and invoices it with the booking id as the reference,
   so it flows through the existing webhook/reconcile path. (Library only for
@@ -293,26 +299,36 @@ existing flags (nothing runs until payments are activated):
   claim older than 10 minutes means an earlier attempt died mid-way: the
   invoice is looked up at MyFatoorah by CustomerReference (the order id) and
   re-linked, never created twice. The invoice-id index is unique. The
-  automatic path stops after 3 provider failures per order and works within a
-  time budget.
-- **The webhook/reconcile now resolve orders too.** When an invoice does not
-  match a standalone booking, `processWebhook` / `replayUnmatchedEvents` look it
-  up as an order (by `provider` + `provider_invoice_id`) and set the order's
-  `payment_state` (paid / failed / refunded), `paid_at`, and
-  `photo_payment_events.order_id`. Paid never regresses to failed (a late
-  FAILED attempt is ignored), the update is conditional on the state it was
-  read in, and the buyer-reported state is left as Pic-Time sent it. A failed
-  order update is retried by the replay job. On the first transition to
-  **paid** an owner `[Orders]` confirmation is enqueued.
+  invoice job leases the order (90 s), backs off provider failures (1 min,
+  5 min, 30 min, 2 h) and parks the order in the exception queue after four,
+  within a time budget per cron tick. An invoice the provider reports as
+  cancelled or expired when the buyer opens the pay page is **superseded**
+  (`metadata.superseded_invoices`) and replaced, never duplicated.
+- **The webhook/reconcile resolve orders too.** When an invoice does not match
+  a standalone booking, `processWebhook` / `replayUnmatchedEvents` look it up
+  as an order (by `provider` + `provider_invoice_id`, or for paid events by
+  `ExternalIdentifier` = order id plus the superseded list) and apply
+  `applyStatusToOrder`: the payment must be worth **exactly the order's
+  total** (± 0.01) **in the order's currency**, otherwise `amount_mismatch`
+  (recorded in `metadata.payment_mismatch`, owner alerted, order stays
+  unpaid). Paid never regresses to failed (a late FAILED attempt is ignored),
+  the update is conditional on the state it was read in, and the buyer-
+  reported state is left as Pic-Time sent it. A failed order update is
+  retried by the replay job. On the first transition to **paid**: a
+  `photo_payment_records` row, the customer's receipt e-mail
+  (`ORDER_PAYMENT_RECEIVED`), the owner's **Paid** card and an audit row, each
+  once. `reconcilePendingOrders` (behind `PAYMENTS_RECONCILE_ENABLED=1`)
+  re-checks unpaid invoiced orders at most every 30 minutes for 31 days;
+  **Check payment** does the same on demand.
 
-### What this does NOT do (owner's decision)
+### Sending the link to the buyer
 
-Creating an invoice **stores a payment URL on the order; it never sends that
-link to the customer.** Delivering the link to the buyer (and whether the
-automatic path should message them) is a deliberate, unbuilt step — it is an
-outward, customer-facing action that needs the owner's explicit sign-off on
-wording and channel. The owner sees the link on the order page and sends it
-themselves. A paid booking still never creates a tracked athlete.
+The payment-link e-mail (`ORDER_PAYMENT_LINK`, one per send count, through the
+Resend outbox) is part of the invoice job: queued in Review mode when the
+owner presses Send invoice, and by itself in Automatic mode for eligible new
+orders. The owner chooses the mode in Settings; the server switches
+(`PAYMENTS_AUTO_INVOICE_ENABLED`, `EMAIL_ENABLED`) still gate it. A paid
+order still never creates a tracked athlete.
 
 ## Deposit and balance (round 3): 50% before confirmation, 50% after delivery
 
