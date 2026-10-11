@@ -2,8 +2,16 @@
 
 import { randomInt } from "node:crypto";
 import { revalidatePath } from "next/cache";
+import { Api } from "grammy";
+import { writeAudit } from "@/lib/audit";
+import { createLogger } from "@/lib/log";
+import { isTelegramEnabled, telegramBotToken, telegramWebhookSecret } from "@/lib/notifications/telegram/config";
 import { TELEGRAM_CHANNEL } from "@/lib/notifications/telegram/core";
 import { normalizeKinds, TELEGRAM_ALERT_KINDS } from "@/lib/notifications/telegram/kinds";
+import { summarizeWebhookInfo, TELEGRAM_ALLOWED_UPDATES, telegramWebhookUrl, type WebhookSummary } from "@/lib/notifications/telegram/webhook-admin";
+import { rateLimit, RULES } from "@/lib/rate-limit";
+import { requireOwner } from "@/lib/roles";
+import { siteUrl } from "@/lib/studio/queries";
 import { createClient } from "@/lib/supabase/server";
 import { isUuid } from "@/lib/validation";
 
@@ -99,4 +107,66 @@ export async function saveTelegramSubscription(input: { eventId: string | null; 
 
   revalidatePath("/settings");
   return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Webhook registration (owner only; the token never leaves the server)
+// ---------------------------------------------------------------------------
+
+export type WebhookActionResult = { ok: true; summary: WebhookSummary; message?: string } | { ok: false; error: string };
+
+async function webhookGate(): Promise<{ ok: true; api: Api; userId: string; secret: string } | { ok: false; error: string }> {
+  const who = await requireOwner();
+  if (!who.ok) return { ok: false, error: "Only the studio owner can manage the Telegram webhook." };
+  if (!isTelegramEnabled()) return { ok: false, error: "Telegram is off on this server (TELEGRAM_ENABLED / TELEGRAM_BOT_TOKEN)." };
+  const secret = telegramWebhookSecret();
+  if (!secret) return { ok: false, error: "TELEGRAM_WEBHOOK_SECRET is missing or shorter than 8 characters on the server." };
+  const limit = rateLimit(`tg-webhook:${who.viewer.userId}`, RULES.providerActionPerUser);
+  if (!limit.ok) return { ok: false, error: `Too many webhook checks. Wait ${limit.retryAfterSeconds}s.` };
+  return { ok: true, api: new Api(telegramBotToken()), userId: who.viewer.userId, secret };
+}
+
+function describeApiError(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  // grammY error text is "Call to 'setWebhook' failed! (401: Unauthorized)"; keep it, strip anything token-like.
+  return msg.replace(/bot\d+:[A-Za-z0-9_-]+/g, "bot<token>").slice(0, 200);
+}
+
+/** Reads getWebhookInfo and reports it without secrets: URL match, allowed updates, pending count, last error. */
+export async function inspectTelegramWebhook(): Promise<WebhookActionResult> {
+  const gate = await webhookGate();
+  if (!gate.ok) return gate;
+  try {
+    const info = await gate.api.getWebhookInfo();
+    return { ok: true, summary: summarizeWebhookInfo(info, siteUrl()) };
+  } catch (err) {
+    return { ok: false, error: `Telegram did not answer: ${describeApiError(err)}` };
+  }
+}
+
+/**
+ * Registers (or re-registers) this deployment's webhook with the secret token
+ * and allowed_updates = ["message", "callback_query"]. Idempotent: Telegram
+ * replaces the previous registration. Audited; nothing about the secret is
+ * returned or logged.
+ */
+export async function registerTelegramWebhook(): Promise<WebhookActionResult> {
+  const gate = await webhookGate();
+  if (!gate.ok) return gate;
+  const url = telegramWebhookUrl(siteUrl());
+  if (!/^https:\/\//.test(url)) return { ok: false, error: `The site URL must be https for Telegram webhooks (got ${url}).` };
+  const log = createLogger({ scope: "telegram.webhook.register" });
+  try {
+    await gate.api.setWebhook(url, { secret_token: gate.secret, allowed_updates: [...TELEGRAM_ALLOWED_UPDATES], drop_pending_updates: false });
+    const info = await gate.api.getWebhookInfo();
+    const summary = summarizeWebhookInfo(info, siteUrl());
+    const supabase = await createClient();
+    await writeAudit(supabase, { ownerId: gate.userId, actorId: gate.userId, entity: "studio", entityId: gate.userId, action: "telegram.webhook_registered", data: { url, allowed_updates: [...TELEGRAM_ALLOWED_UPDATES], verdict: summary.verdict } });
+    log.info("telegram.webhook.registered", { verdict: summary.verdict });
+    revalidatePath("/settings");
+    return { ok: true, summary, message: summary.verdict === "ok" ? "Webhook registered. Messages and button clicks reach this app." : "Webhook call succeeded, but Telegram reports a problem; see below." };
+  } catch (err) {
+    log.warn("telegram.webhook.register_failed", { error: describeApiError(err) });
+    return { ok: false, error: `Telegram rejected the registration: ${describeApiError(err)}` };
+  }
 }

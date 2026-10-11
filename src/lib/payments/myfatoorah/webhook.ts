@@ -22,9 +22,10 @@ import { writeAudit } from "@/lib/audit";
 import { bookingEmailAlertKey, bookingEmailDraft, type BookingEmailKind } from "@/lib/bookings/emails";
 import { recomputeBookingGates } from "@/lib/bookings/gates";
 import { BOOKING_STATUS_LABEL, formatMoney, isCompletionReady, stageWords } from "@/lib/bookings/state";
-import { deliveryInsert } from "@/lib/notifications/delivery-runner";
 import { enqueueClientEmail } from "@/lib/notifications/email/outbox";
 import { enqueueOwnerTelegram } from "@/lib/notifications/owner";
+import { orderCardKeys, paidCard, supersededOrderKeys } from "@/lib/orders/cards";
+import { orderEmailAlertKey, orderPaymentReceivedEmail } from "@/lib/orders/emails";
 import { fulfillmentPlan } from "@/lib/payments/fulfillment";
 import { applyProviderResultToRequest, findRequestByInvoice, listStageRequests, requestSupersededInvoices } from "@/lib/payments/requests";
 import { applyTransition, isPaymentStatus, type PaymentStatus } from "@/lib/payments/types";
@@ -645,7 +646,34 @@ async function findOrderByInvoice(invoiceId: string, deps: WebhookDeps): Promise
   return data ?? null;
 }
 
-type OrderApplyOutcome = { result: Extract<ProcessingResult, "processed" | "unchanged" | "ignored_transition" | "error">; detail?: string };
+/**
+ * A paid order may be matched through an invoice it superseded (the pay page
+ * renewed an expired invoice and the buyer paid the old link): PAID events
+ * only, by CustomerReference (= the order id) plus the superseded list.
+ */
+async function findOrderForMapping(mapping: Extract<StatusMapping, { kind: "apply" }>, deps: WebhookDeps): Promise<PhotoOrderRow | null> {
+  const direct = await findOrderByInvoice(mapping.invoiceId, deps);
+  if (direct || mapping.status !== "paid" || !isUuid(mapping.externalIdentifier ?? "")) return direct;
+  const { data } = await deps.supabase.from("photo_orders").select("*").eq("id", mapping.externalIdentifier!).eq("provider", MYFATOORAH_PROVIDER).maybeSingle();
+  if (!data) return null;
+  const metadata = isRecord(data.metadata) ? data.metadata : {};
+  return supersededInvoices(metadata, null).includes(mapping.invoiceId) ? data : null;
+}
+
+export type OrderApplyOutcome = { result: Extract<ProcessingResult, "processed" | "unchanged" | "ignored_transition" | "amount_mismatch" | "error">; detail?: string; state?: string };
+
+/**
+ * A verified payment must be worth exactly the order's outstanding total (a
+ * photo purchase is collected in full; no deposit rules) in the order's
+ * currency. Null when it matches or the event carries no amount.
+ */
+export function orderAmountMismatch(order: Pick<PhotoOrderRow, "amount_qr" | "currency">, mapping: Pick<Extract<StatusMapping, { kind: "apply" }>, "amount" | "currency">): string | null {
+  if (mapping.amount === null) return null;
+  const expected = Math.round(Number(order.amount_qr) * 100) / 100;
+  if (Math.abs(mapping.amount - expected) > AMOUNT_TOLERANCE_QR) return `amount ${mapping.amount} expected ${expected}`;
+  if (mapping.currency && order.currency && mapping.currency.trim().toUpperCase() !== order.currency.trim().toUpperCase()) return `currency ${mapping.currency} expected ${order.currency}`;
+  return null;
+}
 
 /**
  * Order payment_state transitions a provider event may cause. Mirrors the
@@ -674,10 +702,10 @@ export const ORDER_RETRY_RESULT = "error:order_update_failed";
  * provider's verdict goes in metadata. On the first transition to paid the
  * owner's [Orders] confirmation is enqueued — an owner notice, never the buyer.
  */
-async function applyStatusToOrder(order: PhotoOrderRow, mapping: Extract<StatusMapping, { kind: "apply" }>, ctx: ApplyContext, deps: WebhookDeps): Promise<OrderApplyOutcome> {
+export async function applyStatusToOrder(order: PhotoOrderRow, mapping: Extract<StatusMapping, { kind: "apply" }>, ctx: ApplyContext, deps: WebhookDeps): Promise<OrderApplyOutcome> {
   const now = deps.now();
   const metadata = isRecord(order.metadata) ? order.metadata : {};
-  const lastEvent = { status: mapping.status, at: now.toISOString(), source: ctx.source, invoice_id: mapping.invoiceId };
+  const lastEvent = { status: mapping.status, at: now.toISOString(), source: ctx.source, invoice_id: mapping.invoiceId, payment_id: mapping.paymentId };
   const columns: Partial<PhotoOrderRow> = { metadata: { ...metadata, payment_last_event: lastEvent } as Json };
 
   const stateFor: Partial<Record<PaymentStatus, string>> = { paid: "paid", failed: "failed", refunded: "refunded" };
@@ -686,32 +714,32 @@ async function applyStatusToOrder(order: PhotoOrderRow, mapping: Extract<StatusM
     // disputed / cancelled: keep the record, do not invent an order state.
     const { error } = await deps.supabase.from("photo_orders").update(columns).eq("id", order.id).eq("owner_id", order.owner_id);
     if (error) deps.log.warn("payments.order_meta_update_failed", { orderId: order.id, error: error.message });
-    return { result: "unchanged", detail: `order_${mapping.status}` };
+    return { result: "unchanged", detail: `order_${mapping.status}`, state: order.payment_state };
   }
-  if (order.payment_state === nextState) return { result: "unchanged", detail: `already_${nextState}` };
+  if (order.payment_state === nextState) return { result: "unchanged", detail: `already_${nextState}`, state: order.payment_state };
   if (!(ORDER_TRANSITIONS[order.payment_state] ?? []).includes(nextState)) {
     deps.log.warn("payments.order_illegal_transition", { orderId: order.id, from: order.payment_state, to: nextState, source: ctx.source });
-    return { result: "ignored_transition", detail: `${order.payment_state}->${nextState}` };
+    return { result: "ignored_transition", detail: `${order.payment_state}->${nextState}`, state: order.payment_state };
+  }
+
+  // A verified SUCCESS for the wrong amount or currency is not a payment of THIS order.
+  if (mapping.status === "paid") {
+    const mismatch = orderAmountMismatch(order, mapping);
+    if (mismatch) {
+      await recordOrderMismatch(order, mapping, mismatch, ctx, deps);
+      return { result: "amount_mismatch", detail: mismatch, state: order.payment_state };
+    }
   }
 
   columns.payment_state = nextState;
-  let delivery: Database["public"]["Tables"]["photo_notification_deliveries"]["Insert"] | null = null;
   if (mapping.status === "paid") {
     // payment_confirmed_by is a user id (uuid) for owner confirmations; a
     // provider confirmation records its source in metadata instead.
     columns.paid_at = now.toISOString();
     columns.payment_confirmed_at = now.toISOString();
-    columns.metadata = { ...metadata, payment_last_event: lastEvent, payment_confirmed_source: MYFATOORAH_PROVIDER } as Json;
-    const amount = `${Number(mapping.amount ?? order.amount_qr).toFixed(2)} ${mapping.currency ?? order.currency}`;
-    const cancelledNote = order.status === "cancelled" ? "\n⚠ This order was marked cancelled — the buyer paid its invoice anyway." : "";
-    delivery = deliveryInsert({
-      ownerId: order.owner_id,
-      alertKey: `order-payment:${order.id}:paid`,
-      kind: "PAYMENT_CONFIRMED",
-      text: `<b>Payment confirmed — ${escapeHtml(order.customer_name)}</b>\n${escapeHtml(amount)}${order.gallery_name ? ` · ${escapeHtml(order.gallery_name)}` : ""}${cancelledNote}`,
-      category: "orders",
-      now,
-    });
+    columns.metadata = { ...metadata, payment_last_event: lastEvent, payment_confirmed_source: MYFATOORAH_PROVIDER, payment_verified: { invoice_id: mapping.invoiceId, payment_id: mapping.paymentId, amount: mapping.amount, currency: mapping.currency, at: now.toISOString(), source: ctx.source } } as Json;
+    // Paid through an invoice the order superseded: make that invoice the current one so later lookups match.
+    if (order.provider_invoice_id !== mapping.invoiceId) columns.provider_invoice_id = mapping.invoiceId;
   }
 
   const { data: updated, error } = await deps.supabase
@@ -720,17 +748,156 @@ async function applyStatusToOrder(order: PhotoOrderRow, mapping: Extract<StatusM
     .eq("id", order.id)
     .eq("owner_id", order.owner_id)
     .eq("payment_state", order.payment_state)
-    .select("id");
+    .select("*");
   if (error) {
     deps.log.error("payments.order_update_failed", { orderId: order.id, error: error.message });
-    return { result: "error", detail: "order_update_failed" };
+    return { result: "error", detail: "order_update_failed", state: order.payment_state };
   }
-  if (!updated?.length) return { result: "ignored_transition", detail: "concurrent_update" };
-  if (delivery) {
-    const { error: dErr } = await deps.supabase.from("photo_notification_deliveries").insert(delivery);
-    if (dErr) deps.log.warn("payments.order_confirm_enqueue_failed", { orderId: order.id, error: dErr.message });
+  if (!updated?.length) return { result: "ignored_transition", detail: "concurrent_update", state: order.payment_state };
+  const fresh = (updated[0] as PhotoOrderRow | undefined) ?? { ...order, ...columns, payment_state: nextState };
+  if (mapping.status === "paid") await afterOrderPaid(fresh, mapping, now, deps, ctx);
+  return { result: "processed", state: nextState };
+}
+
+/** Keeps the evidence of a mismatched order payment (metadata only) and alerts the owner once per event. Best effort. */
+async function recordOrderMismatch(order: PhotoOrderRow, mapping: Extract<StatusMapping, { kind: "apply" }>, reason: string, ctx: ApplyContext, deps: WebhookDeps): Promise<void> {
+  const now = deps.now();
+  const eventKey = ctx.eventId ?? mapping.paymentId ?? mapping.invoiceId;
+  deps.log.warn("payments.order_amount_mismatch", { orderId: order.id, invoiceId: mapping.invoiceId, reason, source: ctx.source });
+  try {
+    const metadata = isRecord(order.metadata) ? order.metadata : {};
+    const evidence = { invoice_id: mapping.invoiceId, payment_id: mapping.paymentId, amount: mapping.amount, currency: mapping.currency, expected: Number(order.amount_qr), expected_currency: order.currency, reason, source: ctx.source, at: now.toISOString() };
+    await deps.supabase.from("photo_orders").update({ metadata: { ...metadata, payment_mismatch: evidence } as Json }).eq("id", order.id).eq("owner_id", order.owner_id);
+  } catch (err) {
+    deps.log.warn("payments.order_mismatch_record_failed", { orderId: order.id, error: err instanceof Error ? err.message : "unknown" });
   }
-  return { result: "processed" };
+  try {
+    await enqueueOwnerTelegram(deps.supabase, {
+      ownerId: order.owner_id,
+      kind: "INTEGRATION_FAILED",
+      alertKey: `order-payment:${order.id}:mismatch:${eventKey}`,
+      title: `Payment amount mismatch: ${order.customer_name}`,
+      lines: [
+        `Order ${order.external_ref ?? order.pictime_order_id ?? order.id.slice(0, 8)}${order.gallery_name ? ` · ${order.gallery_name}` : ""}`,
+        `The payment service reports ${Number(mapping.amount).toFixed(2)} ${mapping.currency ?? ""}; the order expects ${Number(order.amount_qr).toFixed(2)} ${order.currency}.`,
+        "The order was NOT marked paid. Check the payment in your provider dashboard and confirm it by hand only if it is genuine.",
+      ],
+      url: `${portalBase()}/orders/${order.id}`,
+      now,
+    });
+  } catch (err) {
+    deps.log.warn("payments.order_mismatch_alert_failed", { orderId: order.id, error: err instanceof Error ? err.message : "unknown" });
+  }
+}
+
+/**
+ * Bookkeeping after a verified order payment, all best effort (the state
+ * itself was already committed): the ledger row, the owner's [Orders]
+ * "Payment confirmed" card with Done / View order (earlier cards lose their
+ * buttons), the buyer's receipt e-mail, and the audit row. Fulfilment
+ * (releasing the photos in the gallery) stays a manual step the owner
+ * records with Done; nothing here talks to the gallery.
+ */
+async function afterOrderPaid(order: PhotoOrderRow, mapping: Extract<StatusMapping, { kind: "apply" }>, now: Date, deps: WebhookDeps, ctx: ApplyContext): Promise<void> {
+  const nowIso = now.toISOString();
+  const amountQr = Number(mapping.amount ?? order.amount_qr);
+  const currency = mapping.currency ?? order.currency;
+  const amountText = `${amountQr.toFixed(2)} ${currency}`;
+  try {
+    const { error } = await deps.supabase.from("photo_payment_records").insert({
+      owner_id: order.owner_id,
+      order_id: order.id,
+      kind: "provider",
+      method: "myfatoorah",
+      amount_qr: amountQr,
+      currency,
+      paid_at: nowIso,
+      provider: MYFATOORAH_PROVIDER,
+      provider_payment_id: mapping.paymentId,
+      note: `Photo order ${order.external_ref ?? order.pictime_order_id ?? ""}`.trim(),
+    });
+    if (error && error.code !== PG_UNIQUE_VIOLATION) deps.log.warn("payments.order_record_insert_failed", { orderId: order.id, error: error.message });
+  } catch (err) {
+    deps.log.warn("payments.order_record_insert_failed", { orderId: order.id, error: err instanceof Error ? err.message : "unknown" });
+  }
+  try {
+    const card = paidCard(order, portalBase(), { amountText, source: "online" });
+    await enqueueOwnerTelegram(deps.supabase, { ownerId: order.owner_id, kind: "PAYMENT_CONFIRMED", alertKey: orderCardKeys.paid(order), html: card.text, buttons: card.buttons, orderId: order.id, supersedes: supersededOrderKeys(order), now });
+  } catch (err) {
+    deps.log.warn("payments.order_confirm_enqueue_failed", { orderId: order.id, error: err instanceof Error ? err.message : "unknown" });
+  }
+  try {
+    await writeAudit(deps.supabase, { ownerId: order.owner_id, actorKind: "system", entity: "order", entityId: order.id, action: "order.paid", data: { amount_qr: amountQr, currency, invoice_id: mapping.invoiceId, payment_id: mapping.paymentId, source: ctx.source } });
+  } catch {
+    /* audit is best effort */
+  }
+  if (!order.customer_email) return;
+  try {
+    const { data: studio } = await deps.supabase.from("photo_studio").select("business_name").eq("owner_id", order.owner_id).maybeSingle();
+    const draft = orderPaymentReceivedEmail(order, { businessName: studio?.business_name ?? "Blue Belt Media", amountText: `${amountQr.toLocaleString("en-QA", { minimumFractionDigits: 0, maximumFractionDigits: 2 })} ${currency}` });
+    if (draft) await enqueueClientEmail(deps.supabase, { ownerId: order.owner_id, kind: "ORDER_PAYMENT_RECEIVED", alertKey: orderEmailAlertKey("ORDER_PAYMENT_RECEIVED", order.id), draft, personId: order.client_id, now, extra: { orderId: order.id } });
+  } catch (err) {
+    deps.log.warn("payments.order_receipt_failed", { orderId: order.id, error: err instanceof Error ? err.message : "unknown" });
+  }
+}
+
+export type OrderReconcileResult = { result: ProcessingResult | "no_invoice" | "provider_error"; orderId: string; state?: string; detail?: string };
+
+/**
+ * Pulls the order's invoice from GetPaymentStatus and applies the same
+ * transition rules as the webhook (amount + currency enforced, paid never
+ * regresses). Safe to repeat; records the check time on the order.
+ */
+export async function reconcileOrder(order: PhotoOrderRow, provider: PaymentProvider, deps: WebhookDeps): Promise<OrderReconcileResult> {
+  if (!order.provider_invoice_id) return { result: "no_invoice", orderId: order.id, state: order.payment_state };
+  const inquiry = await provider.getPaymentStatus({ key: order.provider_invoice_id, keyType: "InvoiceId" });
+  const metadata = isRecord(order.metadata) ? order.metadata : {};
+  if (!inquiry.ok) {
+    deps.log.warn("payments.order_reconcile_provider_error", { orderId: order.id, code: inquiry.error.code, httpStatus: inquiry.error.httpStatus });
+    return { result: "provider_error", orderId: order.id, state: order.payment_state, detail: inquiry.error.code };
+  }
+  const checkedAt = deps.now().toISOString();
+  const mapping = mapInquiry(inquiry.data);
+  if (mapping.kind === "ignore") {
+    await deps.supabase.from("photo_orders").update({ metadata: { ...metadata, invoice_checked_at: checkedAt, invoice_status: inquiry.data.invoiceStatus } as Json }).eq("id", order.id).eq("owner_id", order.owner_id);
+    return { result: "unchanged", orderId: order.id, state: order.payment_state, detail: mapping.reason };
+  }
+  const applied = await applyStatusToOrder({ ...order, metadata: { ...metadata, invoice_checked_at: checkedAt, invoice_status: inquiry.data.invoiceStatus } as Json }, mapping, { source: "reconcile", eventId: mapping.paymentId ? `reconcile:${mapping.paymentId}` : null }, deps);
+  deps.log.info("payments.order_reconcile", { orderId: order.id, result: applied.result, from: order.payment_state, to: applied.state });
+  return { result: applied.result, orderId: order.id, state: applied.state, detail: applied.detail };
+}
+
+/** How often an unpaid order's invoice is polled while its link is live. */
+const ORDER_RECONCILE_SPACING_MS = 30 * 60_000;
+
+/**
+ * Safety net for missed webhooks on order invoices: orders with an invoice
+ * that are still unpaid, polled at most every 30 minutes each while the link
+ * is within its 30-day life. Bounded by `limit`.
+ */
+export async function reconcilePendingOrders(provider: PaymentProvider, deps: WebhookDeps, opts: { olderThanMinutes?: number; maxAgeDays?: number; limit?: number } = {}): Promise<{ scanned: number; changed: number; results: OrderReconcileResult[] }> {
+  const now = deps.now().getTime();
+  const cutoff = new Date(now - (opts.olderThanMinutes ?? 10) * 60_000).toISOString();
+  const floor = new Date(now - (opts.maxAgeDays ?? 31) * 86_400_000).toISOString();
+  const { data: orders } = await deps.supabase
+    .from("photo_orders")
+    .select("*")
+    .eq("provider", MYFATOORAH_PROVIDER)
+    .not("provider_invoice_id", "is", null)
+    .in("payment_state", ["pending", "unknown", "failed"])
+    .neq("status", "cancelled")
+    .lt("updated_at", cutoff)
+    .gt("created_at", floor)
+    .order("created_at", { ascending: true })
+    .limit(Math.max(1, Math.min(opts.limit ?? 25, 100)));
+  const results: OrderReconcileResult[] = [];
+  for (const order of (orders ?? []) as PhotoOrderRow[]) {
+    const meta = isRecord(order.metadata) ? order.metadata : {};
+    const last = typeof meta.invoice_checked_at === "string" ? Date.parse(meta.invoice_checked_at) : 0;
+    if (last && now - last < ORDER_RECONCILE_SPACING_MS) continue;
+    results.push(await reconcileOrder(order, provider, deps));
+  }
+  return { scanned: results.length, changed: results.filter((r) => r.result === "processed").length, results };
 }
 
 // ---------------------------------------------------------------------------
@@ -812,9 +979,9 @@ export async function processWebhook(event: WebhookEvent, deps: WebhookDeps): Pr
   const target = await resolveMapping(mapping, deps);
   if (!target) {
     // Not a standalone booking — the invoice may belong to a Pic-Time order.
-    const order = await findOrderByInvoice(mapping.invoiceId, deps);
+    const order = await findOrderForMapping(mapping, deps);
     if (order) {
-      const appliedOrder = await applyStatusToOrder(order, mapping, { source: `webhook:${eventId}`, eventRowId: rowId }, deps);
+      const appliedOrder = await applyStatusToOrder(order, mapping, { source: `webhook:${eventId}`, eventRowId: rowId, eventId }, deps);
       return finish(appliedOrder.result, null, appliedOrder.result === "processed" ? mapping.status : undefined, appliedOrder.detail, order);
     }
     deps.log.warn("payments.booking_not_found", { eventId, eventType });
@@ -882,9 +1049,9 @@ export async function replayUnmatchedEvents(deps: WebhookDeps, limit = 50): Prom
     }
     // No booking — try the Pic-Time order side (the order may have been
     // invoiced after this event first arrived).
-    const order = await findOrderByInvoice(mapping.invoiceId, deps);
+    const order = await findOrderForMapping(mapping, deps);
     if (!order) continue;
-    const out = await applyStatusToOrder(order, mapping, { source, eventRowId: ev.id }, deps);
+    const out = await applyStatusToOrder(order, mapping, { source, eventRowId: ev.id, eventId: String(ev.provider_event_id ?? ev.id) }, deps);
     await deps.supabase.from("photo_payment_events").update({ processing_result: out.detail ? `${out.result}:${out.detail}` : out.result, processed_at: deps.now().toISOString(), order_id: order.id, owner_id: order.owner_id }).eq("id", ev.id);
     if (out.result === "processed") applied += 1;
   }

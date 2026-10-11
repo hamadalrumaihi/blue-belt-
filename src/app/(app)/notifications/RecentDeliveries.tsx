@@ -14,7 +14,7 @@ const STATUS: Record<DeliveryView["status"], { label: string; tone: string }> = 
   sending: { label: "Sending", tone: "bg-lightblue text-primary border border-primary/20" },
   sent: { label: "Sent", tone: "bg-success-soft text-success border border-success/30" },
   failed: { label: "Failed", tone: "bg-danger-soft text-danger border border-danger/30" },
-  skipped: { label: "Skipped", tone: "bg-warning-soft text-warning border border-warning/30" },
+  skipped: { label: "No linked chat", tone: "bg-warning-soft text-warning border border-warning/30" },
 };
 
 function kindLabel(kind: string): string {

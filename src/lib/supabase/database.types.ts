@@ -289,6 +289,9 @@ export type PhotoTelegramLinkRow = {
   link_code_expires_at: string | null;
   linked_at: string | null;
   enabled: boolean;
+  /** Telegram user who linked the chat; the only one allowed to press financial buttons in a group. */
+  user_id: number | null;
+  chat_type: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -325,6 +328,8 @@ export type PhotoNotificationDeliveryRow = {
   lease_owner: string | null;
   /** match | orders | system — the message prefix. */
   category: string | null;
+  /** Telegram message id once sent, so a later card can edit it or clear its buttons. */
+  provider_message_id: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -531,9 +536,28 @@ export type PhotoOrderRow = {
   /** Studio links (optional): the CRM person and the gallery this order belongs to. */
   client_id: string | null;
   gallery_id: string | null;
+  /** Private payment link (/pay/order/<token>): sha256 of the token and when it was minted. */
+  pay_token_hash: string | null;
+  pay_token_created_at: string | null;
+  /** Durable invoice job (see src/lib/orders/payment-link.ts). */
+  invoice_requested_at: string | null;
+  invoice_requested_by: string | null;
+  invoice_job_leased_until: string | null;
+  invoice_job_attempts: number;
+  invoice_next_attempt_at: string | null;
+  invoice_job_error: string | null;
+  invoice_completed_at: string | null;
+  invoice_email_state: InvoiceEmailState;
+  invoice_email_updated_at: string | null;
+  invoice_email_count: number;
+  invoice_exception: string | null;
   created_at: string;
   updated_at: string;
 };
+
+export type InvoiceEmailState = "none" | "queued" | "sent" | "failed" | "exception";
+
+export type PhotoJobHeartbeatRow = { name: string; ran_at: string; ok: boolean; summary: Json };
 
 // ---------------------------------------------------------------------------
 // Studio platform (roles, CRM, documents, galleries, payment records)
@@ -1043,7 +1067,7 @@ export type Database = {
       };
       photo_telegram_links: {
         Row: PhotoTelegramLinkRow;
-        Insert: Optional<PhotoTelegramLinkRow, GeneratedCols | "chat_id" | "chat_title" | "link_code" | "link_code_expires_at" | "linked_at" | "enabled">;
+        Insert: Optional<PhotoTelegramLinkRow, GeneratedCols | "chat_id" | "chat_title" | "link_code" | "link_code_expires_at" | "linked_at" | "enabled" | "user_id" | "chat_type">;
         Update: Partial<PhotoTelegramLinkRow>;
         Relationships: [];
       };
@@ -1057,7 +1081,7 @@ export type Database = {
         Row: PhotoNotificationDeliveryRow;
         Insert: Optional<
           PhotoNotificationDeliveryRow,
-          GeneratedCols | "athlete_id" | "match_id" | "payload" | "status" | "attempts" | "last_error" | "next_attempt_at" | "sent_at" | "leased_until" | "lease_owner" | "category"
+          GeneratedCols | "athlete_id" | "match_id" | "payload" | "status" | "attempts" | "last_error" | "next_attempt_at" | "sent_at" | "leased_until" | "lease_owner" | "category" | "provider_message_id"
         >;
         Update: Partial<PhotoNotificationDeliveryRow>;
         Relationships: [];
@@ -1183,8 +1207,27 @@ export type Database = {
           | "invoice_claimed_at"
           | "client_id"
           | "gallery_id"
+          | "pay_token_hash"
+          | "pay_token_created_at"
+          | "invoice_requested_at"
+          | "invoice_requested_by"
+          | "invoice_job_leased_until"
+          | "invoice_job_attempts"
+          | "invoice_next_attempt_at"
+          | "invoice_job_error"
+          | "invoice_completed_at"
+          | "invoice_email_state"
+          | "invoice_email_updated_at"
+          | "invoice_email_count"
+          | "invoice_exception"
         >;
         Update: Partial<PhotoOrderRow>;
+        Relationships: [];
+      };
+      photo_job_heartbeats: {
+        Row: PhotoJobHeartbeatRow;
+        Insert: Optional<PhotoJobHeartbeatRow, "ran_at" | "ok" | "summary">;
+        Update: Partial<PhotoJobHeartbeatRow>;
         Relationships: [];
       };
       photo_profiles: {

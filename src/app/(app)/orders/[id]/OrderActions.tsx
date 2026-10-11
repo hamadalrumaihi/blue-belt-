@@ -2,12 +2,12 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { cancelOrder, confirmOrderPayment, markOrderFulfilled, requestOrderInvoice } from "@/lib/actions/orders";
+import { cancelOrder, confirmOrderPayment, markOrderFulfilled } from "@/lib/actions/orders";
 
-type Props = { orderId: string; paymentState: string; status: string; offline: boolean; paymentsEnabled?: boolean; hasInvoice?: boolean };
+type Props = { orderId: string; paymentState: string; status: string; offline: boolean };
 
-/** Owner bookkeeping for one order: create a payment invoice, confirm an offline payment, mark fulfilled, cancel. */
-export function OrderActions({ orderId, paymentState, status, offline, paymentsEnabled = false, hasInvoice = false }: Props) {
+/** Owner bookkeeping for one order: confirm an offline payment by hand, mark fulfilled / undo, cancel. The payment link lives in its own card. */
+export function OrderActions({ orderId, paymentState, status, offline }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -25,13 +25,8 @@ export function OrderActions({ orderId, paymentState, status, offline, paymentsE
 
   if (status === "cancelled") return <p className="mt-3 text-xs font-semibold text-muted">Cancelled.</p>;
 
-  const canInvoice = paymentsEnabled && !hasInvoice && paymentState !== "paid" && paymentState !== "refunded";
-
   return (
     <div className="mt-3 space-y-2">
-      {canInvoice && (
-        <button type="button" className="btn-secondary min-h-11" disabled={pending} onClick={() => run(() => requestOrderInvoice(orderId))}>Create MyFatoorah payment invoice</button>
-      )}
       {paymentState !== "paid" && paymentState !== "refunded" && (
         confirming ? (
           <div className="grid gap-2 sm:grid-cols-[1fr_auto_auto] sm:items-end">
@@ -43,16 +38,16 @@ export function OrderActions({ orderId, paymentState, status, offline, paymentsE
             <button type="button" className="btn-ghost min-h-11" disabled={pending} onClick={() => setConfirming(false)}>Cancel</button>
           </div>
         ) : (
-          <button type="button" className="btn-primary min-h-11" disabled={pending} onClick={() => setConfirming(true)}>{offline ? "Payment received, confirm" : "Mark as paid"}</button>
+          <button type="button" className="btn-secondary min-h-11" disabled={pending} onClick={() => setConfirming(true)}>{offline ? "Paid by hand (cash / transfer received)" : "Mark as paid"}</button>
         )
       )}
       <div className="flex flex-wrap gap-2">
         {status === "fulfilled" ? (
           <button type="button" className="btn-secondary min-h-11" disabled={pending} onClick={() => run(() => markOrderFulfilled(orderId, false))}>Undo fulfilled</button>
-        ) : (
-          <button type="button" className="btn-secondary min-h-11" disabled={pending} onClick={() => run(() => markOrderFulfilled(orderId, true))}>Mark fulfilled</button>
+        ) : paymentState === "paid" ? null : (
+          <button type="button" className="btn-ghost min-h-11" disabled={pending} onClick={() => run(() => markOrderFulfilled(orderId, true))}>Mark fulfilled</button>
         )}
-        <button type="button" className="btn-ghost min-h-11 text-danger" disabled={pending} onClick={() => { if (confirm("Cancel this order record? Prices and the Pic-Time order itself are not changed.")) run(() => cancelOrder(orderId)); }}>Cancel order</button>
+        <button type="button" className="btn-ghost min-h-11 text-danger" disabled={pending} onClick={() => { if (confirm("Cancel this order record? Prices and the gallery order itself are not changed; the payment link stops working.")) run(() => cancelOrder(orderId)); }}>Cancel order</button>
       </div>
       {error && <p className="text-xs font-semibold text-danger" role="alert">{error}</p>}
     </div>

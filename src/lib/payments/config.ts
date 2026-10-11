@@ -50,6 +50,11 @@ export function isAutoInvoiceEnabled(): boolean {
   return isPaymentsEnabled() && env("PAYMENTS_AUTO_INVOICE_ENABLED") === "1";
 }
 
+/** True while the configured base URL is the provider's test environment (no real money can move). */
+export function isSandboxPayments(): boolean {
+  return getPaymentsConfig().baseUrl.toLowerCase() === MYFATOORAH_TEST_BASE_URL;
+}
+
 export function getPaymentsConfig(): PaymentsConfig {
   const baseUrl = (env("MYFATOORAH_BASE_URL") || MYFATOORAH_TEST_BASE_URL).replace(/\/+$/, "");
   return { enabled: isPaymentsEnabled(), apiKey: env("MYFATOORAH_API_KEY"), webhookSecret: env("MYFATOORAH_WEBHOOK_SECRET"), baseUrl };

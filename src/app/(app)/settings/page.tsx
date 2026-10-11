@@ -3,6 +3,7 @@ import { BrandHeader } from "@/components/BrandHeader";
 import { PageBody } from "@/components/AppShell";
 import { CaptureAgentSection } from "./CaptureAgentSection";
 import { OrdersIntakeSection } from "./OrdersIntakeSection";
+import { OrdersInvoicingSection } from "./OrdersInvoicingSection";
 import { SettingsForm } from "./SettingsForm";
 import { StudioSection } from "./StudioSection";
 import { TelegramSection } from "./TelegramSection";
@@ -26,6 +27,9 @@ export default function SettingsPage() {
         </div>
         <div className="mt-4">
           <OrdersIntakeSection />
+        </div>
+        <div className="mt-4">
+          <OrdersInvoicingSection />
         </div>
       </PageBody>
     </>

@@ -2,10 +2,11 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { createLinkCode, disableTelegram, enableTelegram, saveTelegramSubscription } from "@/lib/actions/telegram";
+import { createLinkCode, disableTelegram, enableTelegram, inspectTelegramWebhook, registerTelegramWebhook, saveTelegramSubscription } from "@/lib/actions/telegram";
 import { TELEGRAM_ALERT_KINDS, TELEGRAM_KIND_LABELS, type TelegramAlertKind } from "@/lib/notifications/telegram/kinds";
 import type { DeliveryHealth } from "@/lib/notifications/telegram/health";
 import type { TelegramSettingsState } from "@/lib/notifications/telegram/settings";
+import { WEBHOOK_VERDICT_LABEL, type WebhookSummary } from "@/lib/notifications/telegram/webhook-admin";
 import { formatStamp } from "@/lib/time";
 import { cn } from "@/lib/utils";
 
@@ -33,6 +34,19 @@ export function TelegramSettings({ configured, botUsername, state, health = null
   const [code, setCode] = useState<{ code: string; expiresAt: string } | null>(state.code && state.codeExpiresAt ? { code: state.code, expiresAt: state.codeExpiresAt } : null);
   const [kinds, setKinds] = useState<TelegramAlertKind[]>(state.kinds);
   const [subscribed, setSubscribed] = useState(state.subscriptionEnabled);
+  const [webhook, setWebhook] = useState<{ summary: WebhookSummary; message?: string } | null>(null);
+  const [webhookBusy, setWebhookBusy] = useState<"check" | "register" | null>(null);
+
+  function runWebhook(kind: "check" | "register") {
+    setError(null);
+    setWebhookBusy(kind);
+    startTransition(async () => {
+      const res = kind === "check" ? await inspectTelegramWebhook() : await registerTelegramWebhook();
+      setWebhookBusy(null);
+      if (!res.ok) setError(res.error);
+      else setWebhook({ summary: res.summary, message: res.message });
+    });
+  }
 
   // Server re-renders (after an action or a manual refresh) supply fresh props.
   const [seen, setSeen] = useState(state);
@@ -129,6 +143,36 @@ export function TelegramSettings({ configured, botUsername, state, health = null
             ))}
             <Toggle label="Telegram alerts on" checked={subscribed} disabled={pending} onChange={(v) => saveKinds(kinds, v)} />
             <p className="hint">Alerts fire when a refresh runs (the app open on any device, or the scheduled refresh). Each alert is sent once.</p>
+          </div>
+
+          <div className="space-y-2 rounded-xl border border-line p-3">
+            <p className="label">Order buttons</p>
+            {state.linked ? (
+              state.userLinked ? (
+                <p className="text-sm text-ink">Enabled for the Telegram account that linked this {state.chatType === "private" || !state.chatType ? "chat" : state.chatType}. Only that account can press Send invoice, Check payment, Retry e-mail and Done on [Orders] cards; anyone else sees “not allowed”.</p>
+              ) : (
+                <p className="text-sm text-amber-800">This chat was linked before the order buttons existed, so the bot does not know which Telegram account is you. Generate a new link code and send <code className="font-semibold">/start CODE</code> again from your own account; the chat stays the same.</p>
+              )
+            ) : (
+              <p className="text-sm text-muted">Link a chat first. [Orders] cards then carry buttons (Send invoice, Check payment, Retry e-mail, Done) that only your Telegram account can use.</p>
+            )}
+            <p className="text-xs text-muted">Button clicks arrive only if the webhook is registered for <code>callback_query</code> updates. Check it here after every change to the bot or the site address.</p>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <button type="button" className="btn-secondary" disabled={pending} aria-busy={webhookBusy === "check"} onClick={() => runWebhook("check")}>{webhookBusy === "check" ? "Checking…" : "Check webhook"}</button>
+              <button type="button" className="btn-secondary" disabled={pending} aria-busy={webhookBusy === "register"} onClick={() => runWebhook("register")}>{webhookBusy === "register" ? "Registering…" : "Register webhook (messages + buttons)"}</button>
+            </div>
+            {webhook && (
+              <div className={cn("rounded-lg px-3 py-2 text-xs", webhook.summary.verdict === "ok" ? "bg-success-soft text-success" : "bg-amber-50 text-amber-800")} role="status">
+                <p className="font-bold">{WEBHOOK_VERDICT_LABEL[webhook.summary.verdict]}</p>
+                {webhook.message && <p className="mt-0.5 text-ink">{webhook.message}</p>}
+                <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-ink">
+                  {webhook.summary.registered && !webhook.summary.urlMatches && <><dt>Points at</dt><dd>{webhook.summary.registeredHost} (expected this site)</dd></>}
+                  {webhook.summary.missingUpdates.length > 0 && <><dt>Missing updates</dt><dd>{webhook.summary.missingUpdates.join(", ")}</dd></>}
+                  <dt>Waiting at Telegram</dt><dd>{webhook.summary.pendingUpdates}</dd>
+                  {webhook.summary.lastError && <><dt>Last error</dt><dd className="break-words">{webhook.summary.lastError}{webhook.summary.lastErrorAt ? ` (${formatStamp(webhook.summary.lastErrorAt)})` : ""}</dd></>}
+                </dl>
+              </div>
+            )}
           </div>
 
           {state.linked ? (

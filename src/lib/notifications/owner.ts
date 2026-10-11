@@ -2,6 +2,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "@/lib/supabase/database.types";
 import { deliveryInsert } from "./delivery-runner";
+import type { CardButton } from "./telegram/callbacks";
 import { escapeHtml } from "./telegram/core";
 import { categoryForKind, type OwnerKind } from "./telegram/kinds";
 
@@ -12,17 +13,27 @@ export type OwnerMessage = {
   kind: OwnerKind;
   /** Dedupe key: the same key is never sent twice (e.g. `booking:<id>:new`). */
   alertKey: string;
-  title: string;
+  /** Bold first line; optional when `html` carries the whole message. */
+  title?: string;
   lines?: Array<string | null | undefined>;
   /** Absolute link appended as "Open: <url>". */
   url?: string | null;
+  /** Ready-made HTML (an [Orders] card); when set, title/lines/url are ignored for the text. */
+  html?: string | null;
+  /** Inline buttons under the message; actions are signed for `orderId` when the message is sent. */
+  buttons?: CardButton[][];
+  orderId?: string | null;
+  /** Edit the message of this earlier alert key in place instead of sending a new one. */
+  editOf?: string | null;
+  /** Clear the buttons under these earlier messages once this one is out. */
+  supersedes?: string[];
   now?: Date;
   extra?: Record<string, Json>;
 };
 
 /** HTML for a studio message: bold title, plain lines, optional link. All text is escaped. */
 export function ownerMessageHtml(m: Pick<OwnerMessage, "title" | "lines" | "url">): string {
-  const parts = [`<b>${escapeHtml(m.title)}</b>`];
+  const parts = [`<b>${escapeHtml(m.title ?? "")}</b>`];
   for (const line of m.lines ?? []) if (line) parts.push(escapeHtml(line));
   if (m.url) parts.push(`Open: ${escapeHtml(m.url)}`);
   return parts.join("\n");
@@ -34,9 +45,10 @@ export function ownerMessageHtml(m: Pick<OwnerMessage, "title" | "lines" | "url"
  * Rows are drained by the delivery runner; while Telegram is off they wait.
  * Never throws: the caller's action must not fail because a notice did.
  */
-export async function enqueueOwnerTelegram(supabase: Client, m: OwnerMessage): Promise<{ ok: boolean; error?: string }> {
+export async function enqueueOwnerTelegram(supabase: Client, m: OwnerMessage): Promise<{ ok: boolean; queued?: boolean; error?: string }> {
   const now = m.now ?? new Date();
-  const row = deliveryInsert({ ownerId: m.ownerId, alertKey: m.alertKey, kind: m.kind, text: ownerMessageHtml(m), category: categoryForKind(m.kind), extra: m.extra, now });
-  const { error } = await supabase.from("photo_notification_deliveries").upsert(row, { onConflict: "owner_id,channel,alert_key", ignoreDuplicates: true });
-  return error ? { ok: false, error: error.message } : { ok: true };
+  const row = deliveryInsert({ ownerId: m.ownerId, alertKey: m.alertKey, kind: m.kind, text: m.html ?? ownerMessageHtml(m), category: categoryForKind(m.kind), extra: m.extra, buttons: m.buttons, orderId: m.orderId, editOf: m.editOf, supersedes: m.supersedes, now });
+  const { data, error } = await supabase.from("photo_notification_deliveries").upsert(row, { onConflict: "owner_id,channel,alert_key", ignoreDuplicates: true }).select("id");
+  if (error) return { ok: false, error: error.message };
+  return { ok: true, queued: (data ?? []).length > 0 };
 }

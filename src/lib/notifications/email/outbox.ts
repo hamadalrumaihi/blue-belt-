@@ -21,6 +21,8 @@ export type EnqueueEmailInput = {
   /** Links the row to a client record for the Notifications page. */
   personId?: string | null;
   bookingId?: string | null;
+  /** Extra payload keys for the runner's outcome hooks (e.g. orderId). Never rendered. */
+  extra?: Record<string, Json>;
   now?: Date;
 };
 
@@ -51,7 +53,7 @@ export async function enqueueClientEmail(supabase: Client, input: EnqueueEmailIn
         alert_key: input.alertKey,
         kind: input.kind,
         category: "delivery",
-        payload: { to: input.draft.to, subject: input.draft.subject, html: input.draft.html, text: input.draft.text, personId: input.personId ?? null, bookingId: input.bookingId ?? null } as Json,
+        payload: { ...(input.extra ?? {}), to: input.draft.to, subject: input.draft.subject, html: input.draft.html, text: input.draft.text, personId: input.personId ?? null, bookingId: input.bookingId ?? null } as Json,
         status: "pending",
         attempts: 0,
         next_attempt_at: now.toISOString(),
@@ -67,7 +69,10 @@ export type SendEmail = (draft: EmailDraft) => Promise<{ id: string | null }>;
 
 export type EmailBatchSummary = { claimed: number; sent: number; retried: number; failed: number };
 
-export type EmailBatchOptions = { supabase: Client; now?: Date; log?: Logger; send?: SendEmail; limit?: number; worker?: string; leaseSeconds?: number };
+/** Outcome hooks, called after the row's status is written; errors are logged, never rethrown. */
+export type EmailHooks = { onSent?: (row: PhotoNotificationDeliveryRow, now: Date) => Promise<void>; onFailed?: (row: PhotoNotificationDeliveryRow, now: Date) => Promise<void> };
+
+export type EmailBatchOptions = { supabase: Client; now?: Date; log?: Logger; send?: SendEmail; limit?: number; worker?: string; leaseSeconds?: number; hooks?: EmailHooks };
 
 /**
  * One bounded pass of the e-mail runner over channel 'email'. Same claim RPC
@@ -97,10 +102,10 @@ export async function runEmailBatch(opts: EmailBatchOptions): Promise<EmailBatch
       summary.failed += 1;
       continue;
     }
+    let sentOk = false;
     try {
       await send(draft);
-      await patch(supabase, row, { status: "sent", sent_at: now.toISOString(), last_error: null, next_attempt_at: null, leased_until: null, updated_at: now.toISOString() });
-      summary.sent += 1;
+      sentOk = true;
     } catch (err) {
       const reason = err instanceof Error ? err.message.slice(0, 200) : "send failed";
       const delay = backoffDelayMs(row.attempts);
@@ -111,13 +116,38 @@ export async function runEmailBatch(opts: EmailBatchOptions): Promise<EmailBatch
         leased_until: null,
         updated_at: now.toISOString(),
       });
-      if (delay === null) summary.failed += 1;
-      else summary.retried += 1;
+      if (delay === null) {
+        summary.failed += 1;
+        await runHook(opts.hooks?.onFailed, { ...row, status: "failed", last_error: reason }, now, log, "onFailed");
+      } else summary.retried += 1;
       log.warn("email.retry", { deliveryId: row.id, attempts: row.attempts, reason });
+    }
+    if (sentOk) {
+      // Like the Telegram runner: a failed status write is not a send failure. Retry it briefly; the lease covers the rest.
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        try {
+          await patch(supabase, row, { status: "sent", sent_at: now.toISOString(), last_error: null, next_attempt_at: null, leased_until: null, updated_at: now.toISOString() });
+          break;
+        } catch (perr) {
+          if (attempt === 3) log.warn("email.mark_sent_failed", { deliveryId: row.id, error: perr instanceof Error ? perr.message : String(perr) });
+          else await new Promise((r) => setTimeout(r, 250 * attempt));
+        }
+      }
+      summary.sent += 1;
+      await runHook(opts.hooks?.onSent, { ...row, status: "sent", sent_at: now.toISOString() }, now, log, "onSent");
     }
   }
   if (summary.claimed) log.info("email.batch", summary);
   return summary;
+}
+
+async function runHook(hook: ((row: PhotoNotificationDeliveryRow, now: Date) => Promise<void>) | undefined, row: PhotoNotificationDeliveryRow, now: Date, log: Logger, name: string): Promise<void> {
+  if (!hook) return;
+  try {
+    await hook(row, now);
+  } catch (err) {
+    log.warn("email.hook_failed", { deliveryId: row.id, hook: name, error: err instanceof Error ? err.message : String(err) });
+  }
 }
 
 export function draftOf(row: Pick<PhotoNotificationDeliveryRow, "payload">): EmailDraft | null {
