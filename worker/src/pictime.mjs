@@ -25,7 +25,7 @@ export function approvalDecision(input, snapshot) {
 }
 
 // Selectors observed in the account on 2026-10-12. Unknown layouts fail closed.
-async function snapshot(page) {
+export async function snapshot(page) {
   return page.evaluate(() => {
     const visible = (el) => Boolean(el && el.getClientRects().length);
     const leaves = [...document.querySelectorAll("div")].filter(el => visible(el) && !el.children.length);
@@ -48,7 +48,18 @@ async function snapshot(page) {
   }).then(value => ({ ...value, amountMinor: parseSale(value.amount) }));
 }
 
+// One Pic-Time browser session at a time, shared by approval and the dashboard
+// intake (pictime-intake.mjs): two contexts on one login would race each other.
 let busy = false;
+export function acquirePictimeSession() {
+  if (busy) return false;
+  busy = true;
+  return true;
+}
+export function releasePictimeSession() {
+  busy = false;
+}
+
 export async function approvePictimeOrder(input) {
   const valid = validateApprovalInput(input);
   if (!valid.ok) return valid;
@@ -59,8 +70,7 @@ export async function approvePictimeOrder(input) {
   const live = process.env.PICTIME_APPROVAL_DRY_RUN === "0";
   const allowlist = (process.env.PICTIME_APPROVAL_ORDER_ALLOWLIST ?? "").split(",").map(v => v.trim());
   if (live && !allowlist.includes(input.orderRef) && !allowlist.includes("*")) return fail("ORDER_NOT_ENABLED");
-  if (busy) return fail("BUSY");
-  busy = true;
+  if (!acquirePictimeSession()) return fail("BUSY");
   let browser;
   let clicked = false;
   try {
@@ -90,6 +100,6 @@ export async function approvePictimeOrder(input) {
     // Do not return browser errors: they may contain authenticated URLs or secrets.
     return fail(clicked ? "APPROVAL_UNCONFIRMED" : "PAGE_OR_SESSION_UNAVAILABLE");
   } finally {
-    try { await browser?.close(); } finally { busy = false; }
+    try { await browser?.close(); } finally { releasePictimeSession(); }
   }
 }

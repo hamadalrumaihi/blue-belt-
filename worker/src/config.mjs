@@ -55,6 +55,8 @@ export const config = {
     deliverySeconds: process.env.DELIVERY_SECONDS === undefined ? (int("SCHEDULE_SECONDS", 0) ? 30 : 0) : int("DELIVERY_SECONDS", 0),
     /** Payment confirmation job tick (/api/cron/payments). 0 (default) disables; see docs/payments.md. */
     paymentsSeconds: int("PAYMENTS_SECONDS", 0),
+    /** Pic-Time dashboard intake pass (in-process, docs/pictime-intake.md). 0 (default) disables; also needs PICTIME_INTAKE_ENABLED=1. */
+    pictimeIntakeSeconds: int("PICTIME_INTAKE_SECONDS", 0),
     /** Ops self-checks tick (/api/cron/ops-health: silent order intake). 0 disables; defaults to 900 s when the refresh loop is on. */
     opsSeconds: process.env.OPS_HEALTH_SECONDS === undefined ? (int("SCHEDULE_SECONDS", 0) ? 900 : 0) : int("OPS_HEALTH_SECONDS", 0),
     appUrl: (process.env.APP_URL ?? "").replace(/\/$/, ""),

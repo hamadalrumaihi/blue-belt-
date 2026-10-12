@@ -1,5 +1,6 @@
 import { config } from "./config.mjs";
 import { log } from "./log.mjs";
+import { runPictimeIntake } from "./pictime-intake.mjs";
 
 /**
  * Optional loops. The worker is an always-on process, so it is the natural
@@ -28,7 +29,7 @@ const MAX_PAGES_PER_TICK = 10;
 const REFRESH_REQUEST_TIMEOUT_MS = 310_000;
 
 export function startScheduler(deps = {}) {
-  const { seconds, appUrl, cronSecret, deliverySeconds, paymentsSeconds, opsSeconds } = config.schedule;
+  const { seconds, appUrl, cronSecret, deliverySeconds, paymentsSeconds, opsSeconds, pictimeIntakeSeconds } = config.schedule;
   const fetchImpl = deps.fetch ?? fetch;
   const handles = [];
 
@@ -143,12 +144,36 @@ export function startScheduler(deps = {}) {
     handles.push({ name: "ops", tick, first: setTimeout(tick, 20_000), timer: setInterval(tick, interval) });
   }
 
+  // Pic-Time dashboard intake runs in this process (it needs the worker's own
+  // Pic-Time session), off unless both PICTIME_INTAKE_SECONDS and
+  // PICTIME_INTAKE_ENABLED=1 are set. Never overlaps itself; the run shares the
+  // approval job's session lock.
+  if (pictimeIntakeSeconds && process.env.PICTIME_INTAKE_ENABLED === "1") {
+    const intakeImpl = deps.runPictimeIntake ?? runPictimeIntake;
+    const interval = Math.max(300, pictimeIntakeSeconds) * 1000;
+    let running = false;
+    async function tick() {
+      if (running) return;
+      running = true;
+      try {
+        await intakeImpl();
+      } catch (err) {
+        log.error("pictime_intake.error", { error: err instanceof Error ? err.name : "error" });
+      } finally {
+        running = false;
+      }
+    }
+    log.info("pictime_intake.enabled", { everySeconds: interval / 1000, post: process.env.PICTIME_INTAKE_POST === "1" });
+    handles.push({ name: "pictime-intake", tick, first: setTimeout(tick, 60_000), timer: setInterval(tick, interval) });
+  }
+
   if (!handles.length) return null;
   return {
     tick: () => handles.find((h) => h.name === "refresh")?.tick(),
     tickDeliveries: () => handles.find((h) => h.name === "deliveries")?.tick(),
     tickPayments: () => handles.find((h) => h.name === "payments")?.tick(),
     tickOps: () => handles.find((h) => h.name === "ops")?.tick(),
+    tickPictimeIntake: () => handles.find((h) => h.name === "pictime-intake")?.tick(),
     stop: () => {
       for (const h of handles) {
         clearTimeout(h.first);

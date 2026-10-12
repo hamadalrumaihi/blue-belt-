@@ -105,6 +105,8 @@ generic OK/Confirm controls or replay undocumented payment endpoints.
   show pending orders, but automatic dashboard intake has not been built.
   A live Zap that never emits pending orders still needs repair or a separate
   intake adapter. Approval automation cannot approve an order the app lacks.
+  The adapter is designed in [pictime-intake.md](pictime-intake.md) (off by
+  default, read-only).
 
   Evidence that this is the blocker today (Zap 382341383 history export,
   12 October 2026): every trigger payload of Pic-Time's "New Order Placed" is
