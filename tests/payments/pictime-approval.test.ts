@@ -24,6 +24,42 @@ it("dry run leaves fulfillment pending; only confirmed delivery persists it", as
   expect(db.tables.photo_orders[0].approved_in_pictime_at).toBe("2026-10-12T10:05:00.000Z");
   expect(db.tables.photo_notification_deliveries.length).toBe(2);
 });
+it("a confirmed shipment marks the order fulfilled everywhere the owner looks, and Done afterwards changes nothing", async () => {
+  const { fulfillOrder } = await import("@/lib/orders/payment-link");
+  const { createLogger, setLogSink } = await import("@/lib/log");
+  setLogSink(() => {});
+  const db = new FakeSupabase(); db.seed("photo_orders", [paid()] as unknown as Record<string,unknown>[]);
+  const config = {enabled:true,url:"https://worker.example",token:"worker-token",orderRefs:["1484532733"]};
+  const now = () => new Date("2026-10-12T10:00:00Z");
+  const out = await runPictimeApprovals({supabase:db.asClient(),provider,now,config,siteUrl:"https://site.test",fetcher:async()=>new Response(JSON.stringify({ok:true,state:"shipped",orderRef:"1484532733"}))});
+  expect(out).toMatchObject({shipped:1,failed:0});
+  const row = db.tables.photo_orders[0];
+  // The Orders pages, the cards and the Done button all read status, not fulfilled_at.
+  expect(row).toMatchObject({status:"fulfilled",fulfilled_at:"2026-10-12T10:00:00.000Z",approved_in_pictime_at:"2026-10-12T10:00:00.000Z",approval_leased_until:null,approval_last_error:null});
+  const card = db.tables.photo_notification_deliveries.find((d) => d.alert_key === `order:${row.id}:fulfilled`)!;
+  expect(card).toMatchObject({kind:"ORDER_FULFILLED"});
+  const payload = card.payload as Record<string, unknown>;
+  expect(payload.edit_of).toBe(`order-payment:${row.id}:paid`);
+  expect(payload.supersedes).toEqual([`order-payment:${row.id}:paid`]);
+  expect(String(payload.text)).toContain("Shipped to client");
+  expect(JSON.stringify(payload.buttons)).not.toContain("Done");
+  expect(db.tables.photo_notification_deliveries).toHaveLength(1);
+  expect(db.tables.photo_audit_log.find((a) => a.action === "order.fulfilled")).toMatchObject({actor_kind:"system",entity_id:row.id});
+  // A stale Done press on the old Paid card is now an honest no-op, not a fabricated second fulfilment.
+  const done = await fulfillOrder({supabase:db.asClient(),provider:null,now,log:createLogger(),siteUrl:"https://site.test"}, String(row.id), {kind:"telegram",userId:String(row.owner_id),telegramUserId:1});
+  expect(done).toMatchObject({ok:true,message:"Already marked done."});
+  expect(db.tables.photo_notification_deliveries).toHaveLength(1);
+});
+it("an order cancelled in the app never reaches the browser, so its photos are never released", async () => {
+  expect(approvalCommand({...paid(),status:"cancelled"})).toBeNull();
+  const db = new FakeSupabase(); db.seed("photo_orders", [{...paid(),status:"cancelled"}] as unknown as Record<string,unknown>[]);
+  let dispatched = false;
+  const out = await runPictimeApprovals({supabase:db.asClient(),provider,config:{enabled:true,url:"https://worker.example",token:"worker-token",orderRefs:["*"]},fetcher:async()=>{dispatched=true;return new Response(JSON.stringify({ok:true,state:"shipped",orderRef:"1484532733"}));}});
+  expect(dispatched).toBe(false);
+  expect(out).toMatchObject({scanned:1,shipped:0,failed:0});
+  expect(db.tables.photo_orders[0]).toMatchObject({status:"cancelled",fulfilled_at:null,approval_leased_until:null});
+  expect(db.tables.photo_notification_deliveries).toHaveLength(0);
+});
 it("failed or mismatched worker responses never mark delivery complete", async () => {
   for (const body of [{ok:false,code:"SESSION_REQUIRED"}, {ok:true,state:"shipped",orderRef:"wrong"}]) {
     const db = new FakeSupabase(); db.seed("photo_orders", [paid()] as unknown as Record<string,unknown>[]);

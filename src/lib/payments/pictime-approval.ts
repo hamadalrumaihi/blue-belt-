@@ -1,9 +1,14 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, PhotoOrderRow } from "@/lib/supabase/database.types";
+import { writeAudit } from "@/lib/audit";
+import type { Logger } from "@/lib/log";
 import { enqueueOwnerTelegram } from "@/lib/notifications/owner";
+import { invoiceCard, orderCardKeys } from "@/lib/orders/cards";
 import { getPaymentsConfig, isSandboxPayments } from "@/lib/payments/config";
 import { createMyFatoorahClient, type PaymentProvider } from "@/lib/payments/myfatoorah/client";
+
+const DEFAULT_SITE_URL = "https://www.bluebeltmedia.com";
 
 type Command = { orderRef: string; amountMinor: number; currency: "QAR" };
 type Config = { enabled: boolean; url: string; token: string; orderRefs: string[] };
@@ -21,7 +26,8 @@ export function approvalCommand(order: PhotoOrderRow): Command | null {
   const verified = record(metadata.payment_verified);
   const ref = order.pictime_order_id ?? order.external_ref;
   const amountMinor = minor(order.amount_qr);
-  if (order.payment_state !== "paid" || order.fulfilled_at || order.approved_in_pictime_at || order.provider !== "MYFATOORAH" || metadata.payment_confirmed_source !== "MYFATOORAH") return null;
+  // A cancelled order must never reach the browser: an approval click there releases the photos.
+  if (order.status === "cancelled" || order.payment_state !== "paid" || order.fulfilled_at || order.approved_in_pictime_at || order.provider !== "MYFATOORAH" || metadata.payment_confirmed_source !== "MYFATOORAH") return null;
   if (!ref || !/^\d{1,20}$/.test(ref) || (order.external_ref && order.external_ref !== ref)) return null;
   if (!order.provider_invoice_id || verified.invoice_id !== order.provider_invoice_id || typeof verified.payment_id !== "string" || !verified.payment_id) return null;
   if (amountMinor === null || minor(verified.amount) !== amountMinor || order.currency !== "QAR" || verified.currency !== "QAR") return null;
@@ -44,7 +50,11 @@ export async function runPictimeApprovals(deps: {
   now?: () => Date;
   fetcher?: typeof fetch;
   provider?: Pick<PaymentProvider, "getPaymentStatus">;
+  /** Base URL for the order card's "View order" link. */
+  siteUrl?: string;
+  log?: Logger;
 }) {
+  const site = (deps.siteUrl ?? process.env.NEXT_PUBLIC_SITE_URL ?? DEFAULT_SITE_URL).replace(/\/$/, "");
   const config = deps.config ?? configuration();
   const result = { enabled: config.enabled, scanned: 0, shipped: 0, dryRun: 0, failed: 0 };
   if (!config.enabled) return result;
@@ -72,7 +82,7 @@ export async function runPictimeApprovals(deps: {
     if (!fresh || JSON.stringify(approvalCommand(fresh)) !== JSON.stringify(command)) continue;
     if (fresh.approval_leased_until && Date.parse(fresh.approval_leased_until) > nowBefore.getTime()) continue;
     const leaseUntil = new Date(nowBefore.getTime() + 120_000).toISOString();
-    let claim = deps.supabase.from("photo_orders").update({approval_leased_until:leaseUntil}).eq("id",fresh.id).eq("owner_id",fresh.owner_id).eq("payment_state","paid").eq("provider_invoice_id",fresh.provider_invoice_id!).is("fulfilled_at",null);
+    let claim = deps.supabase.from("photo_orders").update({approval_leased_until:leaseUntil}).eq("id",fresh.id).eq("owner_id",fresh.owner_id).eq("payment_state","paid").neq("status","cancelled").eq("provider_invoice_id",fresh.provider_invoice_id!).is("fulfilled_at",null);
     claim = fresh.approval_leased_until ? claim.eq("approval_leased_until",fresh.approval_leased_until) : claim.is("approval_leased_until",null);
     const {data:claimed,error:claimError} = await claim.select("id");
     if (claimError) throw new Error("Cannot claim Pic-Time approval job.");
@@ -90,11 +100,13 @@ export async function runPictimeApprovals(deps: {
       if (!response.ok) body.ok = false;
     } catch (error) { body = {ok:false,code:error instanceof Error && error.message === "PAYMENT_NOT_CURRENT" ? "PAYMENT_NOT_CURRENT" : "WORKER_UNAVAILABLE"}; }
     const now = (deps.now ?? (() => new Date()))();
+    let delivered: PhotoOrderRow | null = null;
     if (body.ok === true && body.orderRef === command.orderRef && body.state === "shipped") {
       const stamp = now.toISOString();
-      const { data: saved, error: saveError } = await deps.supabase.from("photo_orders").update({ approved_in_pictime_at: stamp, fulfilled_at: stamp }).eq("id", fresh.id).eq("owner_id", fresh.owner_id).eq("payment_state", "paid").eq("provider_invoice_id", fresh.provider_invoice_id!).is("fulfilled_at", null).select("id");
+      // status is what the Orders pages, the cards and the Done button read; fulfilled_at alone leaves them "pending".
+      const { data: saved, error: saveError } = await deps.supabase.from("photo_orders").update({ approved_in_pictime_at: stamp, fulfilled_at: stamp, status: "fulfilled" }).eq("id", fresh.id).eq("owner_id", fresh.owner_id).eq("payment_state", "paid").eq("provider_invoice_id", fresh.provider_invoice_id!).neq("status", "cancelled").is("fulfilled_at", null).select("*");
       if (saveError || !saved?.length) body = {ok:false,code:"DELIVERY_RECORD_NOT_SAVED"};
-      else result.shipped++;
+      else { result.shipped++; delivered = saved[0] as PhotoOrderRow; }
     } else if (body.ok === true && body.orderRef === command.orderRef && body.state === "dry_run") result.dryRun++;
     else body.ok = false;
     const failed = body.ok !== true;
@@ -102,6 +114,14 @@ export async function runPictimeApprovals(deps: {
     const code = typeof body.code === "string" && /^[A-Z_]{1,64}$/.test(body.code) ? body.code : "APPROVAL_UNCONFIRMED";
     const {error:releaseError} = await deps.supabase.from("photo_orders").update({approval_leased_until:null,approval_next_attempt_at:failed || body.state === "dry_run" ? new Date(now.getTime()+300_000).toISOString() : null,approval_last_error:failed ? code : null}).eq("id",fresh.id).eq("owner_id",fresh.owner_id).eq("approval_leased_until",leaseUntil);
     if (releaseError) throw new Error("Cannot save Pic-Time approval job outcome.");
+    if (delivered) {
+      // Same card and keys as the owner's Done button: the Paid card is edited in place and its buttons retired.
+      const card = invoiceCard(delivered, site, `Fulfilment: done. Pic-Time reports Shipped to client for order #${command.orderRef}.`);
+      await enqueueOwnerTelegram(deps.supabase, { ownerId: delivered.owner_id, kind: "ORDER_FULFILLED", alertKey: orderCardKeys.fulfilled(delivered), html: card.text, buttons: card.buttons, orderId: delivered.id, editOf: orderCardKeys.paid(delivered), supersedes: [orderCardKeys.paid(delivered)], now });
+      const audited = await writeAudit(deps.supabase, { ownerId: delivered.owner_id, actorKind: "system", entity: "order", entityId: delivered.id, action: "order.fulfilled", data: { via: "pictime_approval", pictime_order: command.orderRef, already_shipped: body.alreadyShipped === true } }).catch(() => ({ ok: false }));
+      if (!audited.ok) deps.log?.warn("pictime.approval_audit_failed", { orderId: delivered.id });
+      break;
+    }
     await enqueueOwnerTelegram(deps.supabase, {
       ownerId: fresh.owner_id,
       kind: failed ? "INTEGRATION_FAILED" : "PAYMENT_CONFIRMED",

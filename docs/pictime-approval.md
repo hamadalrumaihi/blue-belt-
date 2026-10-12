@@ -35,8 +35,11 @@ clicks only the observed approval control and requires a positive shipped
 status afterward. A timeout is uncertain, never a delivery success. A later
 attempt can recognize an already shipped order without clicking again.
 
-Only a confirmed shipped result updates `approved_in_pictime_at` and
-`fulfilled_at` in the app. The app's receipt is not proof of photo delivery.
+Only a confirmed shipped result updates `approved_in_pictime_at`,
+`fulfilled_at` and `status = fulfilled` in the app, writes an
+`order.fulfilled` audit row, and edits the order's Paid card in Telegram into
+a Fulfilled card (its Done button is retired). An order cancelled in the app
+is never sent to the worker. The app's receipt is not proof of photo delivery.
 
 ## Configure for a single-order dry run
 
@@ -53,7 +56,7 @@ Only a confirmed shipped result updates `approved_in_pictime_at` and
    Close it after the dashboard appears. The state file contains session
    credentials. Keep it out of git and logs; transfer it securely to the
    worker's private persistent volume, for example `/data/pictime/state.json`.
-   The ChatGPT browser session is not automatically a Railway session.
+   A browser session on another computer or tool is not a Railway session.
 
 4. Set server-only Vercel variables:
 
@@ -102,6 +105,22 @@ generic OK/Confirm controls or replay undocumented payment endpoints.
   show pending orders, but automatic dashboard intake has not been built.
   A live Zap that never emits pending orders still needs repair or a separate
   intake adapter. Approval automation cannot approve an order the app lacks.
+
+  Evidence that this is the blocker today (Zap 382341383 history export,
+  12 October 2026): every trigger payload of Pic-Time's "New Order Placed" is
+  an `orderApproved` event (type 210) whose `createDate` is the approval
+  time, not the placement time. Order 1475080675 was placed on 28 September
+  and its event was created on 4 October; the two zero-amount test orders
+  produced events only after they were approved. For a store with
+  photographer-collected payment, orders are held until approved, so the
+  Zap delivers an order only after its approval. With this job enabled the
+  order would reach the app only after the job had approved it, which it
+  cannot do for an order the app lacks. The Zap's later post-approval
+  delivery is harmless (the intake dedupes on the Pic-Time reference).
+
+- **Never approve an unpaid offline order in Pic-Time to make the Zap fire.**
+  Approving a digital order ships it ("Shipped to client"), which releases
+  the purchased downloads before any payment.
 - A worker session must be provisioned and refreshed; login expiry alerts
   require intervention. The worker does not automate Google authentication.
 - A refund racing an external approval cannot be made atomic across two
