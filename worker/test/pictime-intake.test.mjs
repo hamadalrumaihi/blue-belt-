@@ -25,7 +25,7 @@ function fakeDashboard({ refs = [pendingOrder.orderRef], orders = { [pendingOrde
     url: () => landOn ?? `${ORIGIN}/professional`,
     goto: async (url) => { visits.push(url); current = url.match(/order_(\d+)$/)?.[1] ?? ""; },
     waitForTimeout: async () => {},
-    evaluate: async (_fn, arg) => (arg !== undefined ? refs : orders[current]),
+    evaluate: async (_fn, arg) => (arg !== undefined ? refs : current ? orders[current] : { orderTextLeaves: 0, orderAttrLinks: 0, orderClassTokens: ["orderRow:3"] }),
     getByText: (text) => ({ waitFor: async () => { if (!orders[current] || text !== `Order #${current}`) throw new Error("not visible"); } }),
     locator: () => ({ allTextContents: async () => buyers[current] ?? [] }),
   };
@@ -150,6 +150,27 @@ describe("runPictimeIntake", () => {
     assert.ok(lines.length > 0);
     assert.doesNotMatch(JSON.stringify(lines), /Buyer Name|bbmo_/);
   });
+});
+
+test("an empty listing logs its result code and markup facts (counts and class tokens only)", async () => {
+  const lines = [];
+  const log = { info: (msg, f) => lines.push([msg, f]), warn: () => {}, error() {} };
+  const out = await runPictimeIntake({ env: baseEnv, open: fakeDashboard({ refs: [] }).open, log });
+  assert.equal(out.ok, true);
+  const [, fields] = lines.find(([m]) => m === "pictime_intake.run");
+  assert.equal(fields.listed, 0);
+  assert.equal(fields.code, null);
+  assert.deepEqual(fields.facts, { landedPath: "/professional", landedHash: "", orderTextLeaves: 0, orderAttrLinks: 0, orderClassTokens: ["orderRow:3"] });
+});
+
+test("a refused session logs the code and where it landed, without query or digits", async () => {
+  const lines = [];
+  const log = { info: (msg, f) => lines.push([msg, f]), warn: () => {}, error() {} };
+  await runPictimeIntake({ env: baseEnv, open: fakeDashboard({ landOn: "https://bluebeltmedia.pic-time.com/login/123?token=secret" }).open, log });
+  const [, fields] = lines.find(([m]) => m === "pictime_intake.run");
+  assert.equal(fields.code, "SESSION_REQUIRED");
+  assert.deepEqual(fields.facts, { landedHost: "bluebeltmedia.pic-time.com", landedPath: "/login/N" });
+  assert.doesNotMatch(JSON.stringify(fields), /secret|123/);
 });
 
 test("read-only by construction: the adapter never clicks, types, fills or submits", async () => {
