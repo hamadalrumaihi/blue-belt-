@@ -48,6 +48,15 @@ describe("worker HTTP server", () => {
     assert.deepEqual(await res.json(), { ok: true, browserReady: true, mode: "new" });
   });
 
+  test("approval commands require authentication and reject arbitrary URLs", async () => {
+    const command = {orderRef:"1484532733",amountMinor:6000,currency:"QAR"};
+    const unauth = await fetch(`${h.base}/pictime/approve`, {method:"POST",body:JSON.stringify(command)});
+    assert.equal(unauth.status,401);
+    const invalid = await fetch(`${h.base}/pictime/approve`, {method:"POST",headers:AUTH,body:JSON.stringify({...command,orderRef:"https://evil.example"})});
+    assert.equal(invalid.status,400);
+    assert.equal((await invalid.json()).code,"INVALID_APPROVAL");
+  });
+
   test("GET /health with the token adds config problems, stats and uptime", async () => {
     const res = await fetch(`${h.base}/health`, { headers: AUTH });
     const body = await res.json();

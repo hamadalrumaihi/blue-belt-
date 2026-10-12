@@ -4,6 +4,7 @@ import { JOB_NAMES, recordJobHeartbeat } from "@/lib/jobs/heartbeat";
 import { requestLogger } from "@/lib/log";
 import { orderInvoiceQueueStats, runOrderInvoiceJobs, type InvoiceJobsSummary, type QueueStats } from "@/lib/orders/payment-link";
 import { getPaymentsConfig, isPaymentsEnabled } from "@/lib/payments/config";
+import { runPictimeApprovals } from "@/lib/payments/pictime-approval";
 import { createMyFatoorahClient } from "@/lib/payments/myfatoorah/client";
 import { reconcilePendingBookings, reconcilePendingOrders, replayUnmatchedEvents } from "@/lib/payments/myfatoorah/webhook";
 import { rateLimit, rateLimitHeaders, RULES } from "@/lib/rate-limit";
@@ -27,7 +28,9 @@ export const maxDuration = 60;
  *   2. replay verified webhook events that arrived before their booking or
  *      order existed (no provider call);
  *   3. only with PAYMENTS_RECONCILE_ENABLED=1: ask the provider about
- *      bookings and orders still unpaid after 10+ minutes (missed webhooks).
+ *      bookings and orders still unpaid after 10+ minutes (missed webhooks);
+ *   4. only with PICTIME_APPROVAL_ENABLED=1: approve at most one verified,
+ *      paid Pic-Time order through the worker (docs/pictime-approval.md).
  * Provider credentials live here (Vercel), never on the Railway ticker.
  */
 export async function POST(request: Request) {
@@ -64,6 +67,19 @@ export async function POST(request: Request) {
     ordersReconcile = { enabled: true, scanned: o.scanned, changed: o.changed };
   }
 
+  // One approval per tick at most: a production payment check (5 s) plus the worker's browser (32 s)
+  // must still fit in maxDuration, so the step only starts in the first 15 s.
+  let approval: Awaited<ReturnType<typeof runPictimeApprovals>> | null = null;
+  if (Date.now() - started < 15_000) {
+    try {
+      approval = await runPictimeApprovals({ supabase, siteUrl: siteUrl(), log });
+    } catch (err) {
+      // The job's own messages are fixed strings (no order data, no secrets).
+      log.warn("pictime.approval_failed", { error: err instanceof Error ? err.message : String(err) });
+      jobsError ??= "Pic-Time approval job failed; check its configuration and database access.";
+    }
+  }
+
   let queue: QueueStats | null = null;
   try {
     queue = await orderInvoiceQueueStats(supabase);
@@ -71,10 +87,10 @@ export async function POST(request: Request) {
     log.warn("orders.queue_stats_failed", { error: err instanceof Error ? err.message : String(err) });
   }
   const durationMs = Date.now() - started;
-  const body = { ok: !jobsError, invoiceJobs, jobsError, replay, reconcile, ordersReconcile, queue, durationMs, checkedAt: new Date().toISOString() };
+  const body = { ok: !jobsError && !approval?.failed, invoiceJobs, jobsError, replay, reconcile, ordersReconcile, approval, queue, durationMs, checkedAt: new Date().toISOString() };
   log.info("payments.confirmation_job", { ...body, queue: queue ?? undefined });
   try {
-    await recordJobHeartbeat(supabase, JOB_NAMES.payments, !jobsError, { invoiceJobs: invoiceJobs as unknown as Record<string, number | boolean>, replay, reconcile, ordersReconcile, queue: queue as unknown as Record<string, number | string | null>, durationMs });
+    await recordJobHeartbeat(supabase, JOB_NAMES.payments, body.ok, { invoiceJobs: invoiceJobs as unknown as Record<string, number | boolean>, replay, reconcile, ordersReconcile, approval: approval ?? undefined, queue: queue as unknown as Record<string, number | string | null>, durationMs });
   } catch (err) {
     log.warn("payments.heartbeat_failed", { error: err instanceof Error ? err.message : String(err) });
   }
