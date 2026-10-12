@@ -100,16 +100,24 @@ const onDashboard = (page) => {
   return u.origin === ORIGIN && u.pathname.startsWith("/professional");
 };
 
-// The orders list route and its markup are inferred from the observed order
-// URL (#dash|store|orders|order_<ref>), not yet observed themselves: refs are
-// collected from links / attributes naming order_<digits> and from visible
-// "Order #<digits>" leaves. Finding none is reported, never guessed around.
+// The orders list route (#dash|store|orders) was confirmed on 12 Oct 2026; its
+// rows carry an OrderLink_<digits> class token. Refs are also collected from
+// links / attributes naming order_<digits> and from visible "Order #<digits>"
+// leaves. Every ref is only a candidate: the order page must then show the
+// same "Order #<ref>" heading, or it is skipped. Finding none is reported.
 async function discoverOrderRefs(page) {
   return page.evaluate((max) => {
     const refs = new Set();
     for (const el of document.querySelectorAll("[href*='order_'], [data-hash*='order_'], [onclick*='order_']")) {
       for (const attr of ["href", "data-hash", "onclick"]) {
         const m = (el.getAttribute(attr) ?? "").match(/order_(\d{1,20})/);
+        if (m) refs.add(m[1]);
+      }
+    }
+    // Observed 12 Oct 2026: list rows carry a class token OrderLink_<order number>.
+    for (const el of document.querySelectorAll("[class*='OrderLink_']")) {
+      for (const t of String(el.className).split(/\s+/)) {
+        const m = t.match(/^OrderLink_(\d{1,20})$/);
         if (m) refs.add(m[1]);
       }
     }
