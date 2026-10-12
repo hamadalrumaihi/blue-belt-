@@ -10,7 +10,7 @@ type Client = SupabaseClient<Database>;
  * customer data. Writes come from the service role (cron routes); the studio
  * team can read them (RLS).
  */
-export const JOB_NAMES = { deliveries: "deliveries", payments: "payments", refresh: "refresh" } as const;
+export const JOB_NAMES = { deliveries: "deliveries", payments: "payments", refresh: "refresh", ops: "ops" } as const;
 export type JobName = (typeof JOB_NAMES)[keyof typeof JOB_NAMES];
 
 export async function recordJobHeartbeat(supabase: Client, name: JobName, ok: boolean, summary: Record<string, Json | undefined>, now = new Date()): Promise<void> {

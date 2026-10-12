@@ -53,4 +53,19 @@ describe("scheduler", () => {
     }
     assert.equal(max, 1);
   });
+
+  test("ticks the ops self-check by default once the refresh loop is on (OPS_HEALTH_SECONDS unset)", async () => {
+    const calls = [];
+    const fetchImpl = async (url, init) => {
+      calls.push({ url, auth: init.headers.authorization, method: init.method });
+      return new Response(JSON.stringify({ ok: true, intake: { enabled: true, alerts: 1, queued: 1 } }), { status: 200 });
+    };
+    const s = startScheduler({ fetch: fetchImpl });
+    try {
+      await s.tickOps();
+    } finally {
+      s.stop();
+    }
+    assert.deepEqual(calls, [{ url: "https://app.test/api/cron/ops-health", auth: "Bearer cron-secret-0123456789", method: "POST" }]);
+  });
 });
