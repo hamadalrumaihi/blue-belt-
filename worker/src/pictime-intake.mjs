@@ -122,6 +122,29 @@ async function discoverOrderRefs(page) {
   }, MAX_ORDERS_PER_RUN);
 }
 
+// Markup facts for an empty listing, so observe mode shows why nothing was
+// found without leaking anything: paths with digits masked, counts, and
+// class-name tokens mentioning "order" (markup, never text or values).
+async function pageFacts(page) {
+  const u = new URL(page.url());
+  const facts = await page.evaluate(() => {
+    const visible = (el) => el.getClientRects().length > 0;
+    const leaves = [...document.querySelectorAll("div, span, a")].filter((el) => !el.children.length && visible(el));
+    const tokens = new Map();
+    for (const el of document.querySelectorAll("[class]")) {
+      for (const t of String(el.className).split(/\s+/)) {
+        if (/order/i.test(t) && t.length <= 40) tokens.set(t, (tokens.get(t) ?? 0) + 1);
+      }
+    }
+    return {
+      orderTextLeaves: leaves.filter((el) => /^Order #\d{1,20}$/.test(el.textContent.trim())).length,
+      orderAttrLinks: document.querySelectorAll("[href*='order_'], [data-hash*='order_'], [onclick*='order_']").length,
+      orderClassTokens: [...tokens.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([t, n]) => `${t.replace(/\d+/g, "N")}:${n}`),
+    };
+  });
+  return { landedPath: u.pathname.replace(/\d+/g, "N"), landedHash: u.hash.slice(0, 60).replace(/\d+/g, "N"), ...facts };
+}
+
 async function readBuyerName(page, selector) {
   if (!selector) return null;
   const names = await page.locator(selector).allTextContents().catch(() => []);
@@ -151,28 +174,34 @@ export async function runPictimeIntake(deps = {}) {
   const s = intakeSettings(env);
   const summary = { ok: false, mode: s.post ? "post" : "observe", listed: 0, opened: 0, pending: 0, recordable: 0, buyerReadable: 0, recorded: 0, replayed: 0, skipped: {} };
   const skip = (code) => { summary.skipped[code] = (summary.skipped[code] ?? 0) + 1; };
+  const fail = (code) => { summary.code = code; return { ...summary }; };
 
-  if (!s.enabled) return { ...summary, code: "DISABLED" };
+  if (!s.enabled) return fail("DISABLED");
   const problems = settingsProblems(s);
   if (problems.length) {
     log.warn("pictime_intake.not_configured", { missing: problems });
-    return { ...summary, code: "NOT_CONFIGURED" };
+    return fail("NOT_CONFIGURED");
   }
-  if (!acquirePictimeSession()) return { ...summary, code: "BUSY" };
+  if (!acquirePictimeSession()) return fail("BUSY");
 
   let session;
   try {
     session = await open(s.statePath);
     const { page } = session;
     await page.goto(`${ORIGIN}/professional#dash|store|orders`, { waitUntil: "domcontentloaded", timeout: 15_000 });
-    if (!onDashboard(page)) return { ...summary, code: "SESSION_REQUIRED" };
+    if (!onDashboard(page)) {
+      const u = new URL(page.url());
+      summary.facts = { landedHost: u.host, landedPath: u.pathname.replace(/\d+/g, "N") };
+      return fail("SESSION_REQUIRED");
+    }
     await page.waitForTimeout(3_000);
     const refs = (await discoverOrderRefs(page)).filter((r) => !acknowledged.has(r));
     summary.listed = refs.length;
+    if (!refs.length) summary.facts = await pageFacts(page).catch(() => ({ unreadable: true }));
 
     for (const ref of refs.slice(0, MAX_ORDERS_PER_RUN)) {
       await page.goto(`${ORIGIN}/professional#dash|store|orders|order_${ref}`, { waitUntil: "domcontentloaded", timeout: 10_000 });
-      if (!onDashboard(page)) return { ...summary, code: "SESSION_REQUIRED" };
+      if (!onDashboard(page)) return fail("SESSION_REQUIRED");
       const visible = await page.getByText(`Order #${ref}`, { exact: true }).waitFor({ state: "visible" }).then(() => true, () => false);
       if (!visible) { skip("ORDER_NOT_SHOWN"); continue; }
       summary.opened += 1;
@@ -201,17 +230,17 @@ export async function runPictimeIntake(deps = {}) {
       } else {
         // 401/403 credential, 404 intake off, 429, 5xx, network: stop; the next tick retries.
         log.warn("pictime_intake.app_refused", { status });
-        return { ...summary, code: status ? `INTAKE_HTTP_${status}` : "INTAKE_UNREACHABLE" };
+        return fail(status ? `INTAKE_HTTP_${status}` : "INTAKE_UNREACHABLE");
       }
     }
     summary.ok = true;
     return summary;
   } catch {
     // Browser errors can carry authenticated URLs: report a code only.
-    return { ...summary, code: "PAGE_OR_SESSION_UNAVAILABLE" };
+    return fail("PAGE_OR_SESSION_UNAVAILABLE");
   } finally {
     try { await session?.close(); } catch { /* already gone */ }
     releasePictimeSession();
-    log.info("pictime_intake.run", { mode: summary.mode, listed: summary.listed, opened: summary.opened, pending: summary.pending, recordable: summary.recordable, buyerReadable: summary.buyerReadable, recorded: summary.recorded, replayed: summary.replayed, skipped: summary.skipped });
+    log.info("pictime_intake.run", { ok: summary.ok, code: summary.code ?? null, facts: summary.facts ?? null, mode: summary.mode, listed: summary.listed, opened: summary.opened, pending: summary.pending, recordable: summary.recordable, buyerReadable: summary.buyerReadable, recorded: summary.recorded, replayed: summary.replayed, skipped: summary.skipped });
   }
 }
