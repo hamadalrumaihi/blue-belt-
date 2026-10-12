@@ -7,7 +7,10 @@ import { log } from "./log.mjs";
  *   - /api/cron/refresh every SCHEDULE_SECONDS: refreshes every active athlete
  *     of today's events (through this worker) while phones are locked;
  *   - /api/cron/deliveries every DELIVERY_SECONDS: the independent notification
- *     runner (pre-match reminders + lease-claimed Telegram sends with backoff).
+ *     runner (pre-match reminders + lease-claimed Telegram sends with backoff);
+ *   - /api/cron/payments every PAYMENTS_SECONDS: photo-order payment jobs;
+ *   - /api/cron/ops-health every OPS_HEALTH_SECONDS: ops self-checks that
+ *     queue [System] alerts (silent order intake).
  * Both are disabled unless APP_URL and CRON_SECRET are set; each tick never
  * overlaps itself (a slow tick is skipped, not queued).
  *
@@ -25,7 +28,7 @@ const MAX_PAGES_PER_TICK = 10;
 const REFRESH_REQUEST_TIMEOUT_MS = 310_000;
 
 export function startScheduler(deps = {}) {
-  const { seconds, appUrl, cronSecret, deliverySeconds, paymentsSeconds } = config.schedule;
+  const { seconds, appUrl, cronSecret, deliverySeconds, paymentsSeconds, opsSeconds } = config.schedule;
   const fetchImpl = deps.fetch ?? fetch;
   const handles = [];
 
@@ -118,11 +121,34 @@ export function startScheduler(deps = {}) {
     handles.push({ name: "payments", tick, first: setTimeout(tick, 15_000), timer: setInterval(tick, interval) });
   }
 
+  if (opsSeconds && appUrl && cronSecret) {
+    const interval = Math.max(300, opsSeconds) * 1000;
+    let running = false;
+    async function tick() {
+      if (running) return;
+      running = true;
+      const started = Date.now();
+      try {
+        const res = await fetchImpl(`${appUrl}/api/cron/ops-health`, { method: "POST", headers: { authorization: `Bearer ${cronSecret}`, "content-type": "application/json" }, body: "{}", signal: AbortSignal.timeout(30_000) });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) log.warn("ops.tick_failed", { status: res.status, code: body.code, elapsedMs: Date.now() - started });
+        else if (body.intake?.queued) log.info("ops.tick", { alerts: body.intake.alerts, queued: body.intake.queued, elapsedMs: Date.now() - started });
+      } catch (err) {
+        log.error("ops.error", { error: err instanceof Error ? err.message : String(err), elapsedMs: Date.now() - started });
+      } finally {
+        running = false;
+      }
+    }
+    log.info("ops.enabled", { everySeconds: interval / 1000, target: `${appUrl}/api/cron/ops-health` });
+    handles.push({ name: "ops", tick, first: setTimeout(tick, 20_000), timer: setInterval(tick, interval) });
+  }
+
   if (!handles.length) return null;
   return {
     tick: () => handles.find((h) => h.name === "refresh")?.tick(),
     tickDeliveries: () => handles.find((h) => h.name === "deliveries")?.tick(),
     tickPayments: () => handles.find((h) => h.name === "payments")?.tick(),
+    tickOps: () => handles.find((h) => h.name === "ops")?.tick(),
     stop: () => {
       for (const h of handles) {
         clearTimeout(h.first);
