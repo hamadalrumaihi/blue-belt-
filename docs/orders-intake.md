@@ -142,7 +142,8 @@ needs.
   Existing `status` is the lifecycle: `placed` → `fulfilled` | `cancelled`.
 - Owner-only everywhere: `photo_orders` has owner RLS only; collaborators
   (event members) have no policy and the Orders pages are not linked from
-  `/coverage`. Pinned by `supabase/tests/orders_rls.test.sql`.
+  `/coverage`. Pinned by `supabase/tests/orders_rls.test.sql`, `tests/ops-intake-silence.test.ts`
+(conditions, dedupe keys, threshold, route).
 - Telegram: one `ORDER_PLACED` row per order, category `orders`, delivered by
   the independent runner (`docs/telegram.md`).
 
@@ -192,7 +193,33 @@ the intake itself does with it:
   replay that neither re-queues nor re-runs anything.
 - Nothing in the intake can repair or verify Zapier's trigger subscription: a
   manual POST and a Zap POST are indistinguishable here. The Settings card
-  shows the credential's last use so a silent Zap is visible.
+  shows the credential's last use so a silent Zap is visible. The silent-intake check
+  below turns that last use into a Telegram alert.
+
+## Silent-intake alert
+
+Zapier's SDK (`@zapier/zapier-sdk` 0.115.1, checked 12 October 2026) exposes
+app actions, connections, code workflows and trigger inboxes, but not a
+classic Zap's on/off state or its run history. The app therefore watches
+the one signal it owns: the orders credentials' `last_used_at`.
+
+`POST /api/cron/ops-health` (cron secret; ticked by the Railway worker every
+`OPS_HEALTH_SECONDS`, default 900 when its scheduler is on) runs
+`src/lib/ops/intake-silence.ts` while `ORDERS_INTAKE_ENABLED=1` and queues a
+**[System]** Telegram alert (kind `INTEGRATION_FAILED`) through the outbox:
+
+| Condition | When | Alert key (one alert per key) |
+| --- | --- | --- |
+| silent | newest use of any orders credential is older than `ORDERS_INTAKE_SILENCE_HOURS` (default 168; 0 = off) | `ops:orders-intake:silent:<last use>` |
+| never used | an active credential older than the threshold has never been used | `ops:orders-intake:silent:never:<credential id>` |
+| no credential | every orders credential is revoked or expired (the Zap gets 401) | `ops:orders-intake:no-credential:<newest id>` |
+| expiring | the longest-lived active credential expires within 7 days | `ops:orders-intake:expiring:<credential id>` |
+
+The key carries the state it was raised for, so repeated ticks never repeat
+an alert, and a new silence after a later order raises a new one. Because the
+current Zap fires only on approval (see `docs/pictime-approval.md`), a quiet
+week can also mean no order was approved; the alert says so. The response
+and heartbeat (`photo_job_heartbeats.name = 'ops'`) carry counts only.
 
 ## Tests
 
@@ -202,4 +229,5 @@ state words, Fawran rule, refusals, redaction), `tests/invoice-draft.test.ts`
 (flag, credential kind, owner from credential, atomic RPC call, replay 200,
 plans: card skip, review, exception, auto queued + kicked once, historical
 cutoff, spoofed owner), `tests/orders-eligibility.test.ts`,
-`supabase/tests/orders_rls.test.sql`.
+`supabase/tests/orders_rls.test.sql`, `tests/ops-intake-silence.test.ts`
+(conditions, dedupe keys, threshold, route).
