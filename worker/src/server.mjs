@@ -5,6 +5,7 @@ import { getContext, render, shutdown, stats } from "./browser.mjs";
 import { log } from "./log.mjs";
 import { startScheduler } from "./scheduler.mjs";
 import { validateTargetUrl } from "./url-policy.mjs";
+import { approvePictimeOrder, validateApprovalInput } from "./pictime.mjs";
 
 /**
  * Blue Belt Media — Tournament Watcher render worker.
@@ -32,6 +33,7 @@ export function createServer(deps = {}) {
   const errors = deps.configErrors ?? configErrors;
   const token = deps.token ?? config.token;
   const allowedHosts = deps.allowedHosts ?? config.allowedHosts;
+  const approveImpl = deps.approvePictimeOrder ?? approvePictimeOrder;
 
   function authorized(req) {
     const header = req.headers.authorization ?? "";
@@ -58,6 +60,19 @@ export function createServer(deps = {}) {
     if (!authorized(req)) {
       reqLog.warn("auth.rejected");
       return json(res, 401, { ok: false, code: "UNAUTHORIZED", message: "Missing or invalid worker token." });
+    }
+
+    if (req.method === "POST" && url.pathname === "/pictime/approve") {
+      let body;
+      try { body = JSON.parse(await readBody(req)); }
+      catch (err) { return json(res, err?.message === "Body too large" ? 413 : 400, { ok: false, code: "BAD_REQUEST" }); }
+      if (!validateApprovalInput(body).ok) return json(res, 400, { ok: false, code: "INVALID_APPROVAL" });
+      try {
+        const result = await approveImpl(body);
+        return json(res, result.ok ? 200 : 503, result);
+      } catch {
+        return json(res, 503, { ok: false, code: "APPROVAL_UNCONFIRMED" });
+      }
     }
 
     if (req.method === "POST" && url.pathname === "/render") {

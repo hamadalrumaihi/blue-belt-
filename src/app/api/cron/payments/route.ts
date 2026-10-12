@@ -4,6 +4,7 @@ import { JOB_NAMES, recordJobHeartbeat } from "@/lib/jobs/heartbeat";
 import { requestLogger } from "@/lib/log";
 import { orderInvoiceQueueStats, runOrderInvoiceJobs, type InvoiceJobsSummary, type QueueStats } from "@/lib/orders/payment-link";
 import { getPaymentsConfig, isPaymentsEnabled } from "@/lib/payments/config";
+import { runPictimeApprovals } from "@/lib/payments/pictime-approval";
 import { createMyFatoorahClient } from "@/lib/payments/myfatoorah/client";
 import { reconcilePendingBookings, reconcilePendingOrders, replayUnmatchedEvents } from "@/lib/payments/myfatoorah/webhook";
 import { rateLimit, rateLimitHeaders, RULES } from "@/lib/rate-limit";
@@ -64,6 +65,12 @@ export async function POST(request: Request) {
     ordersReconcile = { enabled: true, scanned: o.scanned, changed: o.changed };
   }
 
+  let approval: Awaited<ReturnType<typeof runPictimeApprovals>> | null = null;
+  if (Date.now() - started < 20_000) {
+    try { approval = await runPictimeApprovals({ supabase }); }
+    catch { jobsError ??= "Pic-Time approval job failed; check its configuration and database access."; }
+  }
+
   let queue: QueueStats | null = null;
   try {
     queue = await orderInvoiceQueueStats(supabase);
@@ -71,7 +78,7 @@ export async function POST(request: Request) {
     log.warn("orders.queue_stats_failed", { error: err instanceof Error ? err.message : String(err) });
   }
   const durationMs = Date.now() - started;
-  const body = { ok: !jobsError, invoiceJobs, jobsError, replay, reconcile, ordersReconcile, queue, durationMs, checkedAt: new Date().toISOString() };
+  const body = { ok: !jobsError && !approval?.failed, invoiceJobs, jobsError, replay, reconcile, ordersReconcile, approval, queue, durationMs, checkedAt: new Date().toISOString() };
   log.info("payments.confirmation_job", { ...body, queue: queue ?? undefined });
   try {
     await recordJobHeartbeat(supabase, JOB_NAMES.payments, !jobsError, { invoiceJobs: invoiceJobs as unknown as Record<string, number | boolean>, replay, reconcile, ordersReconcile, queue: queue as unknown as Record<string, number | string | null>, durationMs });
