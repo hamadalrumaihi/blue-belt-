@@ -20,10 +20,12 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 const writeAudit = vi.fn(async () => ({ ok: true }));
 vi.mock("@/lib/audit", () => ({ writeAudit: (...args: unknown[]) => writeAudit(...(args as [])) }));
 const processAsset = vi.fn();
-const removeDerivatives = vi.fn(async () => undefined);
+const publishDerivatives = vi.fn(async () => undefined);
+const removePublicDerivatives = vi.fn(async () => undefined);
 vi.mock("@/lib/media/process", () => ({
   processAsset: (...a: unknown[]) => processAsset(...(a as [])),
-  removeDerivatives: (...a: unknown[]) => removeDerivatives(...(a as [])),
+  publishDerivatives: (...a: unknown[]) => publishDerivatives(...(a as [])),
+  removePublicDerivatives: (...a: unknown[]) => removePublicDerivatives(...(a as [])),
   derivativesJson: (list: unknown) => list,
 }));
 const serviceConfigured = { value: true };
@@ -34,7 +36,9 @@ type Result = { data: unknown; error: { message: string } | null; count?: number
 const results: Record<string, Result | Result[]> = {};
 const writes: Array<{ table: string; op: string; payload?: unknown; filters: Array<[string, unknown]> }> = [];
 const reads: Array<{ table: string; filters: Array<[string, unknown]> }> = [];
-const signed = vi.fn(async (path: string) => ({ data: { signedUrl: `https://storage.example/${path}?token=t`, token: "tok", path }, error: null }));
+/** Records "<bucket>:<path>:<opts>" for assertions, returns the real path like storage-js does. */
+const signed = vi.fn(async (bucket: string, path: string, opts: unknown) => ({ data: { signedUrl: `https://storage.example/${bucket}/${path}?token=t&upsert=${JSON.stringify(opts)}`, token: "tok", path }, error: null }));
+const signedUrls = vi.fn(async (bucket: string, paths: string[]) => ({ data: paths.map((p) => ({ path: p, signedUrl: `https://storage.example/sign/${bucket}/${p}?token=s`, signedURL: `/sign/${p}`, error: null })), error: null }));
 
 function chain(table: string) {
   const self: Record<string, unknown> = {};
@@ -71,11 +75,11 @@ function chain(table: string) {
 const createClient = vi.fn(async () => ({
   auth: { getUser: async () => ({ data: { user: session.user } }) },
   from: (table: string) => chain(table),
-  storage: { from: (bucket: string) => ({ createSignedUploadUrl: (path: string, opts: unknown) => signed(`${bucket}:${path}:${JSON.stringify(opts)}`) }) },
+  storage: { from: (bucket: string) => ({ createSignedUploadUrl: (path: string, opts: unknown) => signed(bucket, path, opts), createSignedUrls: (paths: string[]) => signedUrls(bucket, paths) }) },
 }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: (...a: unknown[]) => createClient(...(a as [])) }));
 
-import { archiveMedia, createMediaUpload, finalizeMediaUpload, publishMedia, setPlacement, unpublishMedia, updateMediaMeta } from "@/lib/actions/media";
+import { archiveMedia, createMediaUpload, finalizeMediaUpload, publishMedia, restoreMedia, setPlacement, unpublishMedia, updateMediaMeta } from "@/lib/actions/media";
 import { parseMetaPatch, publishBlocker } from "@/lib/media/rules";
 import type { PhotoMediaAssetRow } from "@/lib/supabase/database.types";
 
@@ -130,7 +134,9 @@ beforeEach(() => {
   writeAudit.mockClear();
   createClient.mockClear();
   processAsset.mockReset();
-  removeDerivatives.mockClear();
+  publishDerivatives.mockClear();
+  removePublicDerivatives.mockClear();
+  signedUrls.mockClear();
   signed.mockClear();
   serviceConfigured.value = true;
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
@@ -170,7 +176,7 @@ describe("createMediaUpload", () => {
     const insert = writes.find((w) => w.op === "insert" && w.table === "photo_media_assets");
     expect(insert?.payload).toMatchObject({ owner_id: OWNER, status: "draft", content_sha256: SHA, original_key: `${OWNER}/${SHA}.jpg`, original_bytes: 5_000_000, mime: "image/jpeg", source: "web_upload" });
     expect(insert?.payload).not.toHaveProperty("rights_confirmed");
-    expect(signed).toHaveBeenCalledWith(`bbm-media-private:${OWNER}/${SHA}.jpg:{"upsert":true}`);
+    expect(signed).toHaveBeenCalledWith("bbm-media-private", `${OWNER}/${SHA}.jpg`, { upsert: true });
     expect(writeAudit).toHaveBeenCalledTimes(1);
   });
 
@@ -188,9 +194,20 @@ describe("createMediaUpload", () => {
     expect(signed).not.toHaveBeenCalled();
     results.photo_media_assets = { data: row({ status: "draft" }), error: null };
     const again = await createMediaUpload(goodUpload);
-    expect(again).toMatchObject({ ok: true, kind: "upload", assetId: ASSET });
+    expect(again).toMatchObject({ ok: true, kind: "upload", assetId: ASSET, path: `${OWNER}/${SHA}.jpg` });
     expect(writes.filter((w) => w.op === "insert")).toHaveLength(0);
+    expect(writes.filter((w) => w.op === "update")).toHaveLength(0);
     expect(signed).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-describes an abandoned draft when the same bytes are re-claimed with another type, so row and key agree", async () => {
+    results.photo_media_assets = [{ data: row({ status: "draft", mime: "image/jpeg", original_key: `${OWNER}/${SHA}.jpg` }), error: null }, { data: null, error: null }];
+    const r = await createMediaUpload({ ...goodUpload, mime: "image/png", filename: "a.png", bytes: 777 });
+    expect(r).toMatchObject({ ok: true, kind: "upload", path: `${OWNER}/${SHA}.png` });
+    const upd = writes.find((w) => w.op === "update");
+    expect(upd?.payload).toMatchObject({ original_key: `${OWNER}/${SHA}.png`, mime: "image/png", original_bytes: 777 });
+    expect(upd?.filters).toContainEqual(["eq:status", "draft"]);
+    expect(signed).toHaveBeenCalledWith("bbm-media-private", `${OWNER}/${SHA}.png`, { upsert: true });
   });
 
   it("rejects bad claims without a database round-trip", async () => {
@@ -207,7 +224,9 @@ describe("finalizeMediaUpload", () => {
     processAsset.mockResolvedValue({ width: 4000, height: 2667, derivatives: DERIVS, blurDataURL: "data:image/jpeg;base64,AA", format: "jpeg" });
     results.photo_media_assets = [{ data: row({ status: "draft", derivatives: [] }), error: null }, { data: null, error: null }, { data: row({ status: "ready" }), error: null }];
     const r = await finalizeMediaUpload(ASSET);
-    expect(r).toMatchObject({ ok: true, asset: { status: "ready", previewUrl: `https://example.supabase.co/storage/v1/object/public/bbm-media-public/${OWNER}/${SHA}/1280.jpg` } });
+    expect(r).toMatchObject({ ok: true, asset: { status: "ready", previewUrl: `https://storage.example/sign/bbm-media-private/${OWNER}/${SHA}/1280.jpg?token=s` } });
+    expect(signedUrls).toHaveBeenCalledWith("bbm-media-private", [`${OWNER}/${SHA}/1280.jpg`]);
+    expect(JSON.stringify(r)).not.toContain("bbm-media-public");
     expect(processAsset).toHaveBeenCalledWith(serviceClient, expect.objectContaining({ id: ASSET, original_key: `${OWNER}/${SHA}.jpg` }));
     const updates = writes.filter((w) => w.op === "update").map((w) => w.payload as Record<string, unknown>);
     expect(updates[0]).toMatchObject({ status: "processing" });
@@ -258,7 +277,22 @@ describe("publish guard", () => {
     const update = writes.find((w) => w.op === "update");
     expect(update?.payload).toMatchObject({ status: "published", published_at: expect.any(String), archived_at: null });
     expect(update?.filters).toContainEqual(["eq:status", "ready"]);
+    expect(publishDerivatives).toHaveBeenCalledTimes(1);
+    expect(publishDerivatives).toHaveBeenCalledWith(serviceClient, DERIVS);
     expect(writeAudit).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ action: "media.published" }));
+  });
+
+  it("publishMedia keeps the row unpublished when the copy to the public bucket fails", async () => {
+    publishDerivatives.mockRejectedValueOnce(new Error("A web copy could not be published (boom)."));
+    results.photo_media_assets = { data: [row()], error: null };
+    const r = await publishMedia([ASSET]);
+    expect(r).toEqual({ ok: true, done: [], skipped: [{ id: ASSET, reason: expect.stringContaining("boom") }] });
+    expect(writes.filter((w) => w.op === "update")).toEqual([]);
+  });
+
+  it("publishMedia refuses outright without the service role (nothing can reach the public bucket)", async () => {
+    serviceConfigured.value = false;
+    expect(await publishMedia([ASSET])).toEqual({ ok: false, error: expect.stringContaining("SUPABASE_SERVICE_ROLE_KEY") });
   });
 
   it("publishMedia refuses an asset needing review without guardian permission, whatever the pipeline wrote", async () => {
@@ -266,18 +300,35 @@ describe("publish guard", () => {
     const r = await publishMedia([ASSET]);
     expect(r).toEqual({ ok: true, done: [], skipped: [{ id: ASSET, reason: expect.stringContaining("flagged for review") }] });
     expect(writes.filter((w) => w.op === "update")).toEqual([]);
+    expect(publishDerivatives).not.toHaveBeenCalled();
     expect(writeAudit).not.toHaveBeenCalled();
   });
 
-  it("unpublish and archive move the status and archive removes the public copies", async () => {
+  it("unpublish and archive move the status and remove the public copies; archive keeps the private ones", async () => {
     results.photo_media_assets = [{ data: [row({ status: "published" })], error: null }, { data: null, error: null }];
     expect(await unpublishMedia([ASSET])).toEqual({ ok: true, done: [ASSET], skipped: [] });
     expect(writes.find((w) => w.op === "update")?.payload).toEqual({ status: "ready" });
+    expect(removePublicDerivatives).toHaveBeenCalledWith(serviceClient, DERIVS);
     writes.length = 0;
+    removePublicDerivatives.mockClear();
     results.photo_media_assets = [{ data: [row({ status: "published" })], error: null }, { data: null, error: null }];
     expect(await archiveMedia([ASSET])).toEqual({ ok: true, done: [ASSET], skipped: [] });
-    expect(writes.find((w) => w.op === "update")?.payload).toMatchObject({ status: "archived", derivatives: [] });
-    expect(removeDerivatives).toHaveBeenCalledWith(serviceClient, DERIVS);
+    const payload = writes.find((w) => w.op === "update")?.payload as Record<string, unknown>;
+    expect(payload).toMatchObject({ status: "archived" });
+    expect(payload).not.toHaveProperty("derivatives");
+    expect(removePublicDerivatives).toHaveBeenCalledWith(serviceClient, DERIVS);
+    removePublicDerivatives.mockClear();
+    writes.length = 0;
+    results.photo_media_assets = [{ data: [row({ status: "ready" })], error: null }, { data: null, error: null }];
+    expect(await archiveMedia([ASSET])).toEqual({ ok: true, done: [ASSET], skipped: [] });
+    expect(removePublicDerivatives).not.toHaveBeenCalled();
+  });
+
+  it("restore returns an archived asset to ready without re-rendering", async () => {
+    results.photo_media_assets = [{ data: [row({ status: "archived" })], error: null }, { data: null, error: null }];
+    expect(await restoreMedia([ASSET])).toEqual({ ok: true, done: [ASSET], skipped: [] });
+    expect(writes.find((w) => w.op === "update")?.payload).toMatchObject({ status: "ready", archived_at: null });
+    expect(processAsset).not.toHaveBeenCalled();
   });
 });
 
@@ -292,11 +343,12 @@ describe("metadata", () => {
     expect(parseMetaPatch({ taken_on: "14/03/2026" })).toMatchObject({ ok: false });
   });
 
-  it("withdrawing the rights confirmation on a published asset unpublishes it", async () => {
+  it("withdrawing the rights confirmation on a published asset unpublishes it and removes the public copies", async () => {
     results.photo_media_assets = [{ data: row({ status: "published", rights_confirmed: false }), error: null }, { data: null, error: null }];
     const r = await updateMediaMeta(ASSET, { rights_confirmed: false });
     expect(r).toMatchObject({ ok: true, asset: { status: "ready" } });
     expect(writes.map((w) => w.payload)).toEqual([{ rights_confirmed: false }, { status: "ready" }]);
+    expect(removePublicDerivatives).toHaveBeenCalledWith(serviceClient, DERIVS);
   });
 });
 

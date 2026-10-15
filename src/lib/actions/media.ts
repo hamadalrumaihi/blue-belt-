@@ -2,11 +2,11 @@
 
 import { revalidatePath } from "next/cache";
 import { writeAudit } from "@/lib/audit";
-import { removeDerivatives, derivativesJson, processAsset } from "@/lib/media/process";
+import { derivativesJson, processAsset, publishDerivatives, removePublicDerivatives } from "@/lib/media/process";
 import { parsePlacement, placementRows } from "@/lib/media/placements";
-import { supabasePublicBase } from "@/lib/media/queries";
+import { toMediaAssetsWithPreview } from "@/lib/media/queries";
 import { parseMetaPatch, publishBlocker } from "@/lib/media/rules";
-import { PRIVATE_BUCKET, readDerivatives, toMediaAsset, type MediaAsset, type MediaPlacement } from "@/lib/media/types";
+import { PRIVATE_BUCKET, readDerivatives, type MediaAsset, type MediaPlacement } from "@/lib/media/types";
 import { originalKey, validateUploadRequest } from "@/lib/media/validate";
 import { requireOwner } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
@@ -39,6 +39,12 @@ async function owner(): Promise<Owner> {
 function revalidateMedia() {
   for (const p of PUBLIC_PATHS) revalidatePath(p);
   revalidatePath("/services", "layout");
+}
+
+/** Owner model with preview URLs (signed from the private bucket unless published). */
+async function asset(supabase: Client, row: PhotoMediaAssetRow): Promise<MediaAsset> {
+  const [a] = await toMediaAssetsWithPreview(supabase, [row]);
+  return a;
 }
 
 async function audit(supabase: Client, userId: string, action: string, entityId: string | null, data: Record<string, Json | undefined> = {}) {
@@ -76,12 +82,11 @@ export async function createMediaUpload(input: unknown): Promise<CreateUploadRes
   if (!parsed.ok) return { ok: false, error: parsed.error };
   const { sha256, bytes, mime, ext } = parsed.value;
   const { supabase, userId } = o;
-  const base = supabasePublicBase();
 
   const { data: existing } = await supabase.from("photo_media_assets").select("*").eq("owner_id", userId).eq("content_sha256", sha256).maybeSingle();
   if (existing && existing.status !== "draft") {
-    if (existing.status === "failed") return { ok: true, kind: "retry", asset: toMediaAsset(existing, base) };
-    return { ok: true, kind: "duplicate", asset: toMediaAsset(existing, base) };
+    if (existing.status === "failed") return { ok: true, kind: "retry", asset: await asset(supabase, existing) };
+    return { ok: true, kind: "duplicate", asset: await asset(supabase, existing) };
   }
 
   const key = originalKey(userId, sha256, ext);
@@ -94,6 +99,10 @@ export async function createMediaUpload(input: unknown): Promise<CreateUploadRes
       .single();
     if (error || !inserted) return { ok: false, error: error?.message ?? "The upload could not be registered." };
     assetId = inserted.id;
+  } else if (existing && (existing.original_key !== key || existing.mime !== mime || Number(existing.original_bytes) !== bytes)) {
+    // An abandoned draft re-claimed with a different type/size: the row must describe the bytes that will land at `key`.
+    const { error } = await supabase.from("photo_media_assets").update({ original_key: key, mime, original_bytes: bytes, error: null }).eq("id", assetId).eq("owner_id", userId).eq("status", "draft");
+    if (error) return { ok: false, error: error.message };
   }
   const { data: signed, error: signError } = await supabase.storage.from(PRIVATE_BUCKET).createSignedUploadUrl(key, { upsert: true });
   if (signError || !signed) return { ok: false, error: `The upload could not be authorised (${signError?.message ?? "no URL"}). Check that the storage buckets exist (docs/media-library.md).` };
@@ -114,11 +123,10 @@ export async function finalizeMediaUpload(assetId: unknown): Promise<FinalizeRes
   const o = await owner();
   if (!o.ok) return { ok: false, error: o.error };
   const { supabase, userId } = o;
-  const base = supabasePublicBase();
   const { data: row } = await supabase.from("photo_media_assets").select("*").eq("id", assetId).eq("owner_id", userId).maybeSingle();
   if (!row) return { ok: false, error: "Asset not found." };
-  if (row.status !== "draft" && row.status !== "failed" && row.status !== "processing") return { ok: true, asset: toMediaAsset(row, base) };
-  if (!isServiceClientConfigured()) return { ok: false, error: "SUPABASE_SERVICE_ROLE_KEY is not set on the server, so web copies cannot be made. The original is stored; retry once it is configured.", asset: toMediaAsset(row, base) };
+  if (row.status !== "draft" && row.status !== "failed" && row.status !== "processing") return { ok: true, asset: await asset(supabase, row) };
+  if (!isServiceClientConfigured()) return { ok: false, error: "SUPABASE_SERVICE_ROLE_KEY is not set on the server, so web copies cannot be made. The original is stored; retry once it is configured.", asset: await asset(supabase, row) };
 
   await supabase.from("photo_media_assets").update({ status: "processing", error: null }).eq("id", assetId).eq("owner_id", userId);
   const service = createServiceClient();
@@ -134,12 +142,12 @@ export async function finalizeMediaUpload(assetId: unknown): Promise<FinalizeRes
     if (error || !updated) throw new Error(error?.message ?? "The asset could not be updated.");
     await audit(supabase, userId, "processed", assetId, { width: result.width, height: result.height, derivatives: result.derivatives.length });
     revalidatePath("/media");
-    return { ok: true, asset: toMediaAsset(updated, base) };
+    return { ok: true, asset: await asset(supabase, updated) };
   } catch (err) {
     const message = (err instanceof Error ? err.message : String(err)).slice(0, 500);
     const { data: failed } = await supabase.from("photo_media_assets").update({ status: "failed", error: message }).eq("id", assetId).eq("owner_id", userId).select("*").single();
     await audit(supabase, userId, "failed", assetId, { error: message });
-    return { ok: false, error: message, asset: failed ? toMediaAsset(failed, base) : undefined };
+    return { ok: false, error: message, asset: failed ? await asset(supabase, failed) : undefined };
   }
 }
 
@@ -147,7 +155,14 @@ export async function finalizeMediaUpload(assetId: unknown): Promise<FinalizeRes
 // Lifecycle
 // ---------------------------------------------------------------------------
 
-async function transition(ids: unknown, action: string, allowed: (row: PhotoMediaAssetRow) => string | null, patch: (row: PhotoMediaAssetRow) => Partial<PhotoMediaAssetRow>, after?: (rows: PhotoMediaAssetRow[]) => Promise<void>): Promise<MediaBatchResult> {
+type Hooks = {
+  /** Runs before the row changes; a throw skips the row with the message (used to copy to the public bucket on publish). */
+  before?: (row: PhotoMediaAssetRow) => Promise<void>;
+  /** Runs after the rows changed; best effort (used to remove public copies on unpublish/archive). */
+  after?: (rows: PhotoMediaAssetRow[]) => Promise<void>;
+};
+
+async function transition(ids: unknown, action: string, allowed: (row: PhotoMediaAssetRow) => string | null, patch: (row: PhotoMediaAssetRow) => Partial<PhotoMediaAssetRow>, hooks: Hooks = {}): Promise<MediaBatchResult> {
   const list = uuidList(ids);
   if (!list) return { ok: false, error: "Choose at least one asset." };
   const o = await owner();
@@ -169,6 +184,14 @@ async function transition(ids: unknown, action: string, allowed: (row: PhotoMedi
       skipped.push({ id, reason });
       continue;
     }
+    if (hooks.before) {
+      try {
+        await hooks.before(row);
+      } catch (err) {
+        skipped.push({ id, reason: (err instanceof Error ? err.message : String(err)).slice(0, 300) });
+        continue;
+      }
+    }
     const { error } = await supabase.from("photo_media_assets").update(patch(row)).eq("id", id).eq("owner_id", userId).eq("status", row.status);
     if (error) {
       skipped.push({ id, reason: error.message });
@@ -177,7 +200,7 @@ async function transition(ids: unknown, action: string, allowed: (row: PhotoMedi
     done.push(id);
     changed.push(row);
   }
-  if (after && changed.length) await after(changed);
+  if (hooks.after && changed.length) await hooks.after(changed);
   if (done.length) {
     await audit(supabase, userId, action, done.length === 1 ? done[0] : null, { ids: done, skipped: skipped.length });
     revalidateMedia();
@@ -185,42 +208,52 @@ async function transition(ids: unknown, action: string, allowed: (row: PhotoMedi
   return { ok: true, done, skipped };
 }
 
-/** ready → published. Requires rights_confirmed, and guardian_ok when the asset needs review. Classification never sets those. */
+/**
+ * ready → published. Requires rights_confirmed, and guardian_ok when the
+ * asset needs review; classification never sets those. The web copies are
+ * copied from the private bucket to the public one here and nowhere else,
+ * so nothing unpublished is ever fetchable by URL.
+ */
 export async function publishMedia(ids: unknown): Promise<MediaBatchResult> {
   const now = new Date().toISOString();
-  return transition(ids, "published", (row) => (row.status === "published" ? "Already published." : publishBlocker(row)), () => ({ status: "published", published_at: now, archived_at: null }));
+  if (!isServiceClientConfigured()) return { ok: false, error: "SUPABASE_SERVICE_ROLE_KEY is not set on the server, so web copies cannot be published." };
+  const service = createServiceClient();
+  return transition(
+    ids,
+    "published",
+    (row) => (row.status === "published" ? "Already published." : publishBlocker(row)),
+    () => ({ status: "published", published_at: now, archived_at: null }),
+    { before: (row) => publishDerivatives(service, readDerivatives(row.derivatives)) },
+  );
 }
 
-/** published → ready. The derivatives stay in the public bucket until archived; see docs/media-library.md on what unpublish can and cannot retract. */
+/** Removes the public copies of the given rows; best effort, the private copies and the original stay. */
+async function withdrawPublicCopies(rows: PhotoMediaAssetRow[]): Promise<void> {
+  if (!isServiceClientConfigured()) return;
+  const service = createServiceClient();
+  for (const row of rows) await removePublicDerivatives(service, readDerivatives(row.derivatives)).catch(() => undefined);
+}
+
+/** published → ready. The public copies are removed; see docs/media-library.md on what unpublish can and cannot retract. */
 export async function unpublishMedia(ids: unknown): Promise<MediaBatchResult> {
-  return transition(ids, "unpublished", (row) => (row.status === "published" ? null : "Not published."), () => ({ status: "ready" }));
+  return transition(ids, "unpublished", (row) => (row.status === "published" ? null : "Not published."), () => ({ status: "ready" }), { after: withdrawPublicCopies });
 }
 
-/** ready | published | failed → archived. Web copies are removed from the public bucket; the original stays in the private bucket so restore can rebuild them. */
+/** ready | published | failed → archived. Public copies are removed; the private copies and the original stay so restore is instant. */
 export async function archiveMedia(ids: unknown): Promise<MediaBatchResult> {
   const now = new Date().toISOString();
   return transition(
     ids,
     "archived",
     (row) => (row.status === "ready" || row.status === "published" || row.status === "failed" ? null : `Cannot archive a ${row.status} asset.`),
-    () => ({ status: "archived", archived_at: now, derivatives: [] as Json }),
-    async (rows) => {
-      if (!isServiceClientConfigured()) return;
-      const service = createServiceClient();
-      for (const row of rows) await removeDerivatives(service, readDerivatives(row.derivatives)).catch(() => undefined);
-    },
+    () => ({ status: "archived", archived_at: now }),
+    { after: (rows) => withdrawPublicCopies(rows.filter((r) => r.status === "published")) },
   );
 }
 
-/** archived → ready, re-rendering the web copies from the kept original. */
+/** archived → ready (the private web copies were kept). Publishing again copies them to the public bucket. */
 export async function restoreMedia(ids: unknown): Promise<MediaBatchResult> {
-  const result = await transition(ids, "restored", (row) => (row.status === "archived" ? null : "Not archived."), () => ({ status: "failed", archived_at: null, error: null }));
-  if (!result.ok) return result;
-  for (const id of result.done) {
-    const fin = await finalizeMediaUpload(id);
-    if (!fin.ok) result.skipped.push({ id, reason: fin.error });
-  }
-  return result;
+  return transition(ids, "restored", (row) => (row.status === "archived" ? null : "Not archived."), (row) => ({ status: readDerivatives(row.derivatives).length ? "ready" : "failed", archived_at: null, error: readDerivatives(row.derivatives).length ? null : "No web copies; retry processing." }));
 }
 
 // ---------------------------------------------------------------------------
@@ -239,11 +272,12 @@ export async function updateMediaMeta(id: unknown, input: unknown): Promise<{ ok
   // A published asset whose confirmations were withdrawn goes back to ready immediately.
   if (data.status === "published" && publishBlocker({ ...data, status: "ready" })) {
     await supabase.from("photo_media_assets").update({ status: "ready" }).eq("id", id).eq("owner_id", userId);
+    await withdrawPublicCopies([data]);
     data.status = "ready";
   }
   await audit(supabase, userId, "meta.updated", data.id, { fields: Object.keys(parsed.patch) });
   revalidateMedia();
-  return { ok: true, asset: toMediaAsset(data, supabasePublicBase()) };
+  return { ok: true, asset: await asset(supabase, data) };
 }
 
 // ---------------------------------------------------------------------------

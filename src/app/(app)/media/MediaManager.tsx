@@ -77,25 +77,10 @@ export function MediaManager({ initialAssets, initialPlacements, counts, usage }
       const res = await fn(ids);
       applyBatch(res, action === "publish" ? "published" : action === "unpublish" ? "unpublished" : action === "archive" ? "archived" : "restored");
       if (res.ok && res.done.length) {
-        const now = new Date().toISOString();
-        setAssets((m) => {
-          const next = new Map(m);
-          for (const id of res.done) {
-            const a = next.get(id);
-            if (!a) continue;
-            if (action === "publish") next.set(id, { ...a, status: "published", publishedAt: now, archivedAt: null });
-            if (action === "unpublish") next.set(id, { ...a, status: "ready" });
-            if (action === "archive") next.set(id, { ...a, status: "archived", archivedAt: now, derivatives: [], thumbUrl: null, previewUrl: null });
-            if (action === "restore") next.set(id, { ...a, status: "processing", archivedAt: null });
-          }
-          return next;
-        });
-        if (action === "restore") {
-          // The server already rebuilt the web copies; finalize on a ready row just returns it.
-          for (const id of res.done) {
-            const fin = await finalizeMediaUpload(id);
-            if (fin.asset) upsert(fin.asset);
-          }
+        // Re-read each changed row: URLs differ by status (public when published, signed otherwise).
+        for (const id of res.done) {
+          const fin = await finalizeMediaUpload(id);
+          if (fin.asset) upsert(fin.asset);
         }
         setSelected(new Set());
       }

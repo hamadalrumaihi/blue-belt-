@@ -7,7 +7,7 @@ import type { PhotoMediaPlacementRow } from "@/lib/supabase/database.types";
 import { ALL_PLACEMENTS, orderedIds, parsePlacement } from "./placements";
 import { toPublicMediaItem, type PublicProjectionInput } from "./projection";
 import { supabasePublicBase } from "./queries";
-import type { MediaPlacement } from "./types";
+import { PRIVATE_BUCKET, readDerivatives, type MediaPlacement } from "./types";
 
 /**
  * CONTRACT between the media library (workstream C) and the public pages
@@ -16,10 +16,12 @@ import type { MediaPlacement } from "./types";
  *
  * Implementation: rows are read with the service role (the public site has
  * no session) for the single public owner (loadPublicStudio), then pushed
- * through the explicit projection in projection.ts. Only `published` assets
- * are returned to visitors. A studio user (owner/staff) who asks with
- * `preview: true` (the Work page's `?preview=1`) also sees `ready` assets,
- * so a selection can be checked before it goes live. Cached per request.
+ * through the explicit projection in projection.ts. Visitors get `published`
+ * assets only, as public-bucket URLs. A studio user (owner/staff) who asks
+ * with `preview: true` (the Work page's `?preview=1`) also sees `ready`
+ * assets, served as short-lived signed URLs from the PRIVATE bucket: nothing
+ * unpublished is ever copied to, or listable in, the public bucket.
+ * Cached per request.
  */
 export type { MediaPlacement } from "./types";
 
@@ -47,6 +49,9 @@ export type PublicMediaQuery = {
   /** Studio users only: include `ready` (unpublished) assets. Ignored for visitors. */
   preview?: boolean;
 };
+
+/** How long a studio preview URL for an unpublished copy stays valid. */
+export const PREVIEW_URL_SECONDS = 60 * 30;
 
 type Loaded = { rows: PublicProjectionInput[]; placements: Array<Pick<PhotoMediaPlacementRow, "asset_id" | "placement" | "position">>; base: string } | null;
 
@@ -76,15 +81,37 @@ const canPreview = cache(async (): Promise<boolean> => {
   return Boolean(viewer && isStudioRole(viewer.role));
 });
 
-export async function loadPublicMedia(query: PublicMediaQuery = {}): Promise<PublicMediaItem[]> {
+/** Signed private-bucket URLs for every derivative of the `ready` rows (studio preview only). One batch per request. */
+const previewUrls = cache(async (): Promise<Map<string, string>> => {
   const loaded = await loadRows();
-  if (!loaded) return [];
-  const includeReady = query.preview === true && (await canPreview());
+  const map = new Map<string, string>();
+  if (!loaded) return map;
+  const keys = loaded.rows.filter((r) => r.status === "ready").flatMap((r) => readDerivatives(r.derivatives).map((d) => d.key));
+  if (!keys.length) return map;
+  const { data } = await createServiceClient().storage.from(PRIVATE_BUCKET).createSignedUrls(keys, PREVIEW_URL_SECONDS);
+  for (const d of data ?? []) if (d.path && d.signedUrl && !d.error) map.set(d.path, d.signedUrl);
+  return map;
+});
+
+async function projectAll(includeReady: boolean): Promise<{ loaded: NonNullable<Loaded>; byId: Map<string, PublicMediaItem>; readyIds: Set<string> } | null> {
+  const loaded = await loadRows();
+  if (!loaded) return null;
+  const signed = includeReady ? await previewUrls() : null;
   const byId = new Map<string, PublicMediaItem>();
+  const readyIds = new Set<string>();
   for (const row of loaded.rows) {
-    const item = toPublicMediaItem(row, loaded.base, { includeReady });
+    if (row.status === "ready") readyIds.add(row.id);
+    const item = toPublicMediaItem(row, loaded.base, { includeReady, signedUrlFor: signed ? (key) => signed.get(key) : undefined });
     if (item) byId.set(item.id, item);
   }
+  return { loaded, byId, readyIds };
+}
+
+export async function loadPublicMedia(query: PublicMediaQuery = {}): Promise<PublicMediaItem[]> {
+  const includeReady = query.preview === true && (await canPreview());
+  const projected = await projectAll(includeReady);
+  if (!projected) return [];
+  const { loaded, byId } = projected;
   let items: PublicMediaItem[];
   if (query.placement !== undefined) {
     const placement = parsePlacement(query.placement);
@@ -100,31 +127,32 @@ export async function loadPublicMedia(query: PublicMediaQuery = {}): Promise<Pub
   return items;
 }
 
-export type PlacedMedia = { byPlacement: Record<string, PublicMediaItem[]>; /** True when a placed asset is ready but not yet published (and preview is off). */ pending: boolean; /** True when the library holds at least one published asset with a placement. */ published: boolean };
+export type PlacedMedia = {
+  byPlacement: Record<string, PublicMediaItem[]>;
+  /** Studio preview only: a placed asset is ready but not yet published. Always false for visitors. */
+  pending: boolean;
+  /** True when at least one published asset has a placement. */
+  published: boolean;
+};
 
 /** Every placement at once, for the home/services gallery. Same visibility rules as loadPublicMedia. */
 export async function loadPlacedMedia({ preview = false }: { preview?: boolean } = {}): Promise<PlacedMedia | null> {
-  const loaded = await loadRows();
-  if (!loaded) return null;
   const includeReady = preview && (await canPreview());
-  const visible = new Map<string, PublicMediaItem>();
-  const readyIds = new Set<string>();
-  for (const row of loaded.rows) {
-    if (row.status === "ready") readyIds.add(row.id);
-    const item = toPublicMediaItem(row, loaded.base, { includeReady });
-    if (item) visible.set(item.id, item);
-  }
+  const projected = await projectAll(includeReady);
+  if (!projected) return null;
+  const { loaded, byId, readyIds } = projected;
   const byPlacement: Record<string, PublicMediaItem[]> = {};
   let pending = false;
   let published = false;
   for (const p of ALL_PLACEMENTS) {
     const ids = orderedIds(loaded.placements, p);
-    byPlacement[p] = ids.map((id) => visible.get(id)).filter((i): i is PublicMediaItem => Boolean(i));
+    byPlacement[p] = ids.map((id) => byId.get(id)).filter((i): i is PublicMediaItem => Boolean(i));
     for (const id of ids) {
-      if (readyIds.has(id)) pending = true;
-      else if (visible.has(id)) published = true;
+      if (readyIds.has(id)) pending = includeReady || pending;
+      else if (byId.has(id)) published = true;
     }
   }
-  if (includeReady) pending = false;
+  // Visitors are never told about unpublished work; the preview notice is for studio users only.
+  if (!includeReady) pending = false;
   return { byPlacement, pending, published };
 }

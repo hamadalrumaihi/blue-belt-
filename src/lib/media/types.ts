@@ -45,7 +45,7 @@ export const DERIVATIVE_WIDTHS = [640, 1280, 1920, 2560] as const;
 /** Limits enforced before an upload is signed and again when the bytes are inspected. */
 export const MEDIA_MAX_BYTES = 40 * 1024 * 1024;
 export const MEDIA_MIN_LONG_EDGE = 1200;
-export const MEDIA_MAX_EDGE = 12000;
+export const MEDIA_MAX_EDGE = 8000;
 export const MEDIA_ALT_MAX = 300;
 export const MEDIA_CAPTION_MAX = 500;
 export const MEDIA_TAG_MAX = 40;
@@ -62,9 +62,9 @@ export type MediaAsset = {
   width: number | null;
   height: number | null;
   derivatives: Derivative[];
-  /** Public URL of the smallest derivative, for thumbnails; null until processed. */
+  /** Smallest derivative for thumbnails: a public URL when published, else a short-lived signed URL from the private bucket; null until processed or when no signed URL was resolved. */
   thumbUrl: string | null;
-  /** Public URL of the largest derivative; null until processed. */
+  /** Largest derivative; same rules as thumbUrl. */
   previewUrl: string | null;
   blurDataURL: string | null;
   alt: string;
@@ -107,12 +107,22 @@ export function publicObjectUrl(base: string, key: string): string {
   return `${base.replace(/\/$/, "")}/storage/v1/object/public/${PUBLIC_BUCKET}/${key}`;
 }
 
-/** Owner-side model from a row. Private-bucket paths are kept (the owner may see them); the public projection lives in projection.ts. */
-export function toMediaAsset(row: PhotoMediaAssetRow, publicBase: string): MediaAsset {
+/**
+ * Owner-side model from a row. Derivatives live in the private bucket until
+ * published; `signed` maps a derivative key to a short-lived signed URL for
+ * the owner's own preview (queries.ts resolves them). The public projection
+ * lives in projection.ts and never uses this.
+ */
+export function toMediaAsset(row: PhotoMediaAssetRow, publicBase: string, signed: Record<string, string> = {}): MediaAsset {
   const derivatives = readDerivatives(row.derivatives);
   const smallest = derivatives[0];
   const largest = derivatives[derivatives.length - 1];
   const processed = row.status === "ready" || row.status === "published" || row.status === "archived";
+  const urlFor = (d: Derivative | undefined): string | null => {
+    if (!processed || !d) return null;
+    if (row.status === "published") return publicObjectUrl(publicBase, d.key);
+    return signed[d.key] ?? null;
+  };
   return {
     id: row.id,
     status: row.status,
@@ -122,8 +132,8 @@ export function toMediaAsset(row: PhotoMediaAssetRow, publicBase: string): Media
     width: row.original_width,
     height: row.original_height,
     derivatives,
-    thumbUrl: processed && smallest ? publicObjectUrl(publicBase, smallest.key) : null,
-    previewUrl: processed && largest ? publicObjectUrl(publicBase, largest.key) : null,
+    thumbUrl: urlFor(smallest),
+    previewUrl: urlFor(largest),
     blurDataURL: row.blur_data_url,
     alt: row.alt,
     caption: row.caption,

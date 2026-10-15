@@ -10,8 +10,8 @@ under **Studio → Media library** (`/media`). This replaces the committed
 
 | Store | What | Who can read | Who can write |
 | --- | --- | --- | --- |
-| `bbm-media-private` (bucket, not public) | originals as uploaded (`<owner>/<sha256>.<ext>`) | the owner (own folder, via RLS), the service role | the owner (own folder only, through a signed upload URL), the service role (CLI import) |
-| `bbm-media-public` (bucket, public) | web copies `<owner>/<sha256>/<width>.jpg` of **published or ready** assets, sRGB JPEG, all metadata removed | anyone with the URL | the service role only; there is no authenticated write policy |
+| `bbm-media-private` (bucket, not public) | originals (`<owner>/<sha256>.<ext>`) **and every rendered web copy** (`<owner>/<sha256>/<width>.jpg`) of ready, unpublished, flagged and archived assets | the owner (own folder, via RLS: select/insert/update/delete), the service role | the owner (own folder only, through a signed upload URL), the service role (processing, CLI import) |
+| `bbm-media-public` (bucket, public) | copies of the web copies of **published** assets only, put there by `publishMedia` and removed by unpublish/archive | anyone with the URL (`/object/public/...`); **nobody can list it** (no select policy) | the service role only; there is no anon/authenticated policy of any kind |
 | `photo_media_assets`, `photo_media_placements` (tables) | one row per photograph, placements | owner-role profile only (`photo_is_owner_user()`); public pages read through the service role with an explicit projection | owner only; staff and clients get zero rows |
 
 Facts to keep in mind:
@@ -21,12 +21,18 @@ Facts to keep in mind:
   linking it; archiving also deletes the files from the bucket; neither can
   recall a copy someone already downloaded or that a CDN cached in the meantime.
   Do not publish anything you would need to retract.
-- **Drafts never touch the public bucket.** Derivatives are only written after
-  the original has been validated server-side, and the public projection
-  (`src/lib/media/projection.ts`) only ever emits public-bucket URLs for
-  `published` rows (or `ready` rows for a signed-in studio user who asked for a
-  preview). A test asserts no private path, owner id, source label or review
-  note can appear in the public output.
+- **Nothing unpublished ever touches the public bucket.** Processing renders the
+  web copies into the *private* bucket. Only `publishMedia`, after the rights /
+  guardian guard passed, copies them to the public bucket (`copy` with
+  `destinationBucket`); unpublish, archive and withdrawing a confirmation remove
+  them again. The public bucket has no select policy, so its keys cannot be
+  enumerated, and the public projection (`src/lib/media/projection.ts`) emits
+  public-bucket URLs for `published` rows only. A signed-in studio user who asks
+  for a preview sees `ready` rows through 30-minute signed URLs from the private
+  bucket, never through the public one. Tests assert no private path, owner id,
+  source label or review note can appear in the public output, that an
+  anonymous visitor never gets the preview notice, and that a copy failure keeps
+  the row unpublished.
 - **Originals never reach deployed assets.** They stay in the private bucket;
   nothing copies them into `public/` or the Next.js build.
 - **Metadata is stripped.** Every derivative is rendered with sharp without
@@ -83,10 +89,10 @@ session** (so the private bucket's own-folder policy is what authorises it).
 The browser uploads straight to Storage with `uploadToSignedUrl` (no Next.js
 body limit), then calls `finalizeMediaUpload(assetId)`: the server downloads the
 original with the service client, re-validates the real bytes (format vs claimed
-mime, ≤ 40 MB, long edge 1200–12000 px, no SVG/GIF/animation), renders
-640/1280/1920/2560 px JPEGs (never upscaled) plus the blur, uploads them to the
-public bucket and marks the row `ready`. Failures mark it `failed` with the
-reason; **Retry** runs finalize again without re-uploading.
+mime, ≤ 40 MB, long edge 1200–8000 px, no SVG/GIF/animation), decodes it once,
+renders 640/1280/1920/2560 px JPEGs (never upscaled) plus the blur, stores them
+in the **private** bucket and marks the row `ready`. Failures mark it `failed`
+with the reason; **Retry** runs finalize again without re-uploading.
 
 Accepted: JPEG (preferred), PNG, WebP, TIFF, HEIC/HEIF when the server's sharp
 build can decode it (the prebuilt binaries usually cannot decode HEIC; export
@@ -95,9 +101,11 @@ JPEG instead). Rejected with a message: GIF, SVG, video, anything else.
 Then per photograph: alt text, caption, category, tags, focal point (click the
 picture in edit mode), sort order, date, **I hold the rights**, and
 **Permission confirmed** when flagged. Place it (hero / featured / work /
-service) and **Publish**. Studio users see unpublished placed photographs on
-the public pages as a preview; `/work?preview=1` is served with `ready` assets
-to studio users only (`loadPublicMedia({ preview: true })` checks the viewer).
+service) and **Publish**: that is the moment the web copies are copied to the
+public bucket. Studio users see unpublished placed photographs on the public
+pages as a preview through signed private URLs; `/work?preview=1` is served
+with `ready` assets to studio users only (`loadPublicMedia({ preview: true })`
+checks the viewer; visitors get published assets and no preview notice).
 
 ## Path B: import from the archive (CLI, owner's PC)
 
@@ -126,8 +134,8 @@ failures (too small, blown out, unsupported), collapses bursts and re-exports,
 ranks the rest, optionally asks Claude about the top candidates (category, alt
 text, focal point, review flags), uploads each chosen original to the private
 bucket, inserts a `draft` row (`source = 'cli_import'`, `source_label` = 12 hex
-characters of the basename's hash, never a path), renders and uploads the web
-copies, and marks the row `ready`. It **never publishes**, never sets
+characters of the basename's hash, never a path), renders the web copies into
+the private bucket, and marks the row `ready`. It **never publishes**, never sets
 `rights_confirmed`/`guardian_ok`, never modifies, renames, moves or deletes an
 original, never scans outside `--source`, and skips bytes already in the
 library. The report lists what happened and, with `--suggest-placements`, which
@@ -153,8 +161,10 @@ confirm rights and review flags, place and publish.
 
 - **Storage usage** is estimated from the rows (originals + web copies) on
   `/media`; it does not list the buckets.
-- **Archive** removes the public web copies and keeps the original; **Restore**
-  re-renders them. Deleting originals is deliberately not offered in the UI.
+- **Archive** removes the public copies and keeps the original and the private
+  web copies; **Restore** returns the asset to `ready` instantly (publishing
+  again is a copy, not a render). Deleting originals is deliberately not
+  offered in the UI.
 - **Cleanup** of abandoned uploads: `POST /api/media/cleanup?hours=24`.
 - **Audit**: every action writes `media.*` rows to `photo_audit_log`
   (entity `studio`, entity_id = asset id).
@@ -167,7 +177,7 @@ confirm rights and review flags, place and publish.
 
 - `src/lib/media/types.ts` vocabulary, limits, row → owner model
 - `src/lib/media/mime.ts`, `validate.ts` claim/bytes/key validation
-- `src/lib/media/process.ts` derivative rendering + public-bucket upload (service role)
+- `src/lib/media/process.ts` derivative rendering into the private bucket, publish-time copy to / removal from the public bucket (service role)
 - `src/lib/media/queries.ts` owner reads (RLS), counts, usage, placements
 - `src/lib/media/public.ts` the public contract (`loadPublicMedia`, `loadPlacedMedia`)
 - `src/lib/media/projection.ts` the only row → public item path

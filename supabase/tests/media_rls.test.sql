@@ -76,6 +76,9 @@ begin
   insert into storage.objects (bucket_id, name, owner, owner_id) values ('bbm-media-private', v_owner::text || '/' || v_sha || '.jpg', v_owner, v_owner::text);
   select count(*) into v_count from storage.objects where bucket_id = 'bbm-media-private' and name like v_owner::text || '/%';
   if v_count <> 1 then raise exception 'FAIL owner cannot read own private object'; end if;
+  update storage.objects set metadata = '{"mimetype":"image/jpeg"}'::jsonb where bucket_id = 'bbm-media-private' and name = v_owner::text || '/' || v_sha || '.jpg';
+  get diagnostics v_count = row_count;
+  if v_count <> 1 then raise exception 'FAIL owner cannot update (upsert) own private object'; end if;
   begin
     insert into storage.objects (bucket_id, name, owner, owner_id) values ('bbm-media-private', v_other::text || '/' || v_sha || '.jpg', v_owner, v_owner::text);
     raise exception 'FAIL owner inserted into another owner''s private folder';
@@ -157,6 +160,18 @@ begin
   end;
   select count(*) into v_count from storage.objects where bucket_id = 'bbm-media-private';
   if v_count <> 0 then raise exception 'FAIL anon can list private objects'; end if;
+  -- Seed a published copy as the service role, then check that anon cannot enumerate it.
+  perform set_config('role', 'service_role', true);
+  insert into storage.objects (bucket_id, name) values ('bbm-media-public', v_owner::text || '/' || v_sha || '/1280.jpg');
+  perform set_config('role', 'anon', true);
+  select count(*) into v_count from storage.objects where bucket_id = 'bbm-media-public';
+  if v_count <> 0 then raise exception 'FAIL anon can list the public bucket (unpublished keys would be enumerable)'; end if;
+  perform set_config('request.jwt.claims', json_build_object('sub', v_staff, 'role', 'authenticated')::text, true);
+  perform set_config('role', 'authenticated', true);
+  select count(*) into v_count from storage.objects where bucket_id = 'bbm-media-public';
+  if v_count <> 0 then raise exception 'FAIL an authenticated user can list the public bucket'; end if;
+  perform set_config('request.jwt.claims', '{"role":"anon"}', true);
+  perform set_config('role', 'anon', true);
   begin
     insert into storage.objects (bucket_id, name) values ('bbm-media-public', 'anon/x.jpg');
     raise exception 'FAIL anon wrote to the public bucket';

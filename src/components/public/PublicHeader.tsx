@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useState, useSyncExternalStore } from "react";
 import type { Locale } from "@/lib/i18n/locale";
 import { langSwitchHref, LOCALE_LABEL, otherLocale } from "@/lib/i18n/locale";
 import { tr, UI } from "@/lib/i18n/ui";
@@ -17,16 +17,19 @@ import { LanguageSwitch } from "./LanguageSwitch";
  * read the query on the server, so it starts from the path alone and picks
  * up the current query after mount, keeping every parameter.
  */
+const noSubscribe = () => () => {};
+const readSearch = () => {
+  try {
+    return window.location.search;
+  } catch {
+    return "";
+  }
+};
 function SwitchFallback({ locale, pathname }: { locale: Locale; pathname: string }) {
   const next = otherLocale(locale);
-  const [href, setHref] = useState(() => langSwitchHref(pathname, "", next));
-  useEffect(() => {
-    try {
-      setHref(langSwitchHref(window.location.pathname, window.location.search, next));
-    } catch {
-      // Keep the path-only link.
-    }
-  }, [next, pathname]);
+  // Server snapshot is empty (the query is unknown there); the browser's current query takes over after hydration.
+  const search = useSyncExternalStore(noSubscribe, readSearch, () => "");
+  const href = langSwitchHref(pathname, search, next);
   return (
     <a href={href} hrefLang={next} lang={next} rel="nofollow" className="inline-flex min-h-10 items-center rounded-xl px-3 text-sm font-semibold text-ink hover:bg-page">
       {LOCALE_LABEL[next]}

@@ -75,12 +75,21 @@ describe("public projection", () => {
     expect(json).not.toContain(OWNER + '"'); // the owner id only ever appears inside a public URL path
   });
 
-  it("hides anything not published; ready only with the explicit preview flag", () => {
+  it("hides anything not published; ready only for a preview with signed private URLs for every copy", () => {
+    const signedUrlFor = (key: string) => `https://example.supabase.co/storage/v1/object/sign/bbm-media-private/${key}?token=abc`;
     expect(toPublicMediaItem(row({ status: "ready" }), BASE)).toBeNull();
-    expect(toPublicMediaItem(row({ status: "ready" }), BASE, { includeReady: true })).not.toBeNull();
+    expect(toPublicMediaItem(row({ status: "ready" }), BASE, { includeReady: true })).toBeNull(); // no resolver, no item
+    const preview = toPublicMediaItem(row({ status: "ready" }), BASE, { includeReady: true, signedUrlFor });
+    expect(preview).not.toBeNull();
+    expect(preview!.src).toContain("/object/sign/bbm-media-private/");
+    expect(JSON.stringify(preview)).not.toContain("bbm-media-public");
+    // A missing signed URL for one copy drops the whole item rather than falling back to a public URL.
+    expect(toPublicMediaItem(row({ status: "ready" }), BASE, { includeReady: true, signedUrlFor: (k) => (k.endsWith("/640.jpg") ? null : signedUrlFor(k)) })).toBeNull();
+    // A published row never uses the resolver.
+    expect(toPublicMediaItem(row(), BASE, { includeReady: true, signedUrlFor })!.src).toContain("/object/public/bbm-media-public/");
     for (const status of ["draft", "processing", "archived", "failed"] as const) {
       expect(toPublicMediaItem(row({ status }), BASE)).toBeNull();
-      expect(toPublicMediaItem(row({ status }), BASE, { includeReady: true })).toBeNull();
+      expect(toPublicMediaItem(row({ status }), BASE, { includeReady: true, signedUrlFor })).toBeNull();
     }
   });
 

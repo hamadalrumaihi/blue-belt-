@@ -7,14 +7,18 @@
 -- zero rows and cannot insert, and anon has no grant at all.
 --
 -- Trust boundaries:
---   * bbm-media-private  originals and drafts. Never public. An owner-role user may
---     insert / read / delete objects under "<their uid>/..." only; that is what the
---     signed upload URL path relies on. Nothing else reads it except the service role.
---   * bbm-media-public   published web derivatives only (JPEG, stripped of EXIF).
---     Anyone may read; NO authenticated write policy exists, so only the service
---     role (server-side processing) ever writes or deletes there. A derivative is
---     public by design once it is uploaded: unpublishing removes the object and
---     stops the site linking it, but copies already downloaded cannot be recalled.
+--   * bbm-media-private  originals AND every rendered web copy (ready, unpublished,
+--     flagged, archived). Never public. An owner-role user may insert / read /
+--     update / delete objects under "<their uid>/..." only; that is what the signed
+--     upload URL path relies on. Nothing else reads it except the service role.
+--   * bbm-media-public   copies of the web derivatives of PUBLISHED assets only, put
+--     there by publishMedia (service role) and removed again by unpublish/archive.
+--     Objects are fetched by URL (/object/public/...), which needs no policy; there
+--     is deliberately NO select policy, so nobody can list the bucket, and NO
+--     authenticated write policy, so only the service role writes or deletes there.
+--     A derivative is public by design once it is copied: unpublishing removes the
+--     object and stops the site linking it, but copies already downloaded cannot
+--     be recalled.
 
 -- Buckets ----------------------------------------------------------------------------
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
@@ -168,6 +172,20 @@ create policy bbm_media_private_owner_select on storage.objects
     and (storage.foldername(name))[1] = (select auth.uid())::text
   );
 
+drop policy if exists bbm_media_private_owner_update on storage.objects;
+create policy bbm_media_private_owner_update on storage.objects
+  for update to authenticated
+  using (
+    bucket_id = 'bbm-media-private'
+    and public.photo_is_owner_user()
+    and (storage.foldername(name))[1] = (select auth.uid())::text
+  )
+  with check (
+    bucket_id = 'bbm-media-private'
+    and public.photo_is_owner_user()
+    and (storage.foldername(name))[1] = (select auth.uid())::text
+  );
+
 drop policy if exists bbm_media_private_owner_delete on storage.objects;
 create policy bbm_media_private_owner_delete on storage.objects
   for delete to authenticated
@@ -177,9 +195,10 @@ create policy bbm_media_private_owner_delete on storage.objects
     and (storage.foldername(name))[1] = (select auth.uid())::text
   );
 
--- Public bucket: read for everyone; deliberately NO insert/update/delete policy for anon or
--- authenticated. Only the service role (bypasses RLS) writes published derivatives.
+-- Public bucket: NO policy at all. Downloads of a public bucket's objects by URL
+-- (/storage/v1/object/public/bbm-media-public/<key>) do not consult storage.objects
+-- policies, so visitors fetch published copies without one; without a select policy
+-- nobody can LIST the bucket (unpublished keys are not enumerable), and without a
+-- write policy only the service role (bypasses RLS) copies or removes derivatives.
+-- An earlier draft of this migration created a read policy; drop it if present.
 drop policy if exists bbm_media_public_read on storage.objects;
-create policy bbm_media_public_read on storage.objects
-  for select to anon, authenticated
-  using (bucket_id = 'bbm-media-public');

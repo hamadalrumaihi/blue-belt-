@@ -247,9 +247,6 @@ describe("submitPublicBooking", () => {
     expect(args.p_owner_id).toBe(OWNER);
     expect(args.p_idempotency_key).toBe(KEY);
     expect(args.p_person).toEqual({ full_name: "Hamad", email: "hamad@example.com", phone: "+974 5555 1234", instagram: null, kind: "person", source: "website" });
-    service = new FakeService();
-    await expectRedirect(submitPublicBooking(null, fd({ ...ATHLETE, instagram: "https://instagram.com/Hamad.BJJ/", idempotency_key: "55555555-5555-4555-8555-555555555557" })));
-    expect((service.rpcCalls[0].args.p_person as Row).instagram).toBe("hamad.bjj");
     expect(args.p_organization).toBeNull();
     expect(args.p_lead).toMatchObject({ event_id: EVENT_ID, booking_type: "tournament_athlete", status: "new", source: "website", details: { service_id: SERVICE_ID, service_name: "Tournament photo", service_key: "tournament_athlete", media_scope: "photo" } });
     const booking = rpcBooking();
@@ -312,6 +309,12 @@ describe("submitPublicBooking", () => {
     expect(enqueuePricingAssessment.mock.calls[0][1]).toEqual({ ownerId: OWNER, bookingId: BOOKING_ID, leadId: LEAD_ID, reason: "public_submission" });
     const assessment = await enqueuePricingAssessment.mock.results[0].value;
     expect(assessment.seq).toBeGreaterThan(service.rpcCalls[0].seq);
+  });
+
+  it("normalises the Instagram handle before it reaches the transaction", async () => {
+    await expectRedirect(submitPublicBooking(null, fd({ ...ATHLETE, instagram: "https://instagram.com/Hamad.BJJ/" })));
+    expect((service.rpcCalls[0].args.p_person as Row).instagram).toBe("hamad.bjj");
+    expect((service.rpcCalls[0].args.p_booking as Row).details).toMatchObject({ instagram: "hamad.bjj" });
   });
 
   it("issue #10 regression: a quote-mode package with a price on the row books as a quote (amount 0, inquiry, no deposit)", async () => {

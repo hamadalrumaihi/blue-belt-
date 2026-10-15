@@ -1,10 +1,41 @@
 import "server-only";
 import { cache } from "react";
 import type { PhotoCategory } from "@/lib/photos/manifest";
+import { normalizeSearchTerm } from "@/lib/studio/search";
 import { createClient } from "@/lib/supabase/server";
 import type { PhotoMediaAssetRow } from "@/lib/supabase/database.types";
 import { groupPlacements } from "./placements";
-import { isMediaCategory, isMediaStatus, readDerivatives, toMediaAsset, type MediaAsset, type MediaStatus } from "./types";
+import { isMediaCategory, isMediaStatus, PRIVATE_BUCKET, readDerivatives, toMediaAsset, type MediaAsset, type MediaStatus } from "./types";
+
+type Client = Awaited<ReturnType<typeof createClient>>;
+
+/** How long the owner's own preview links for unpublished copies stay valid. */
+export const OWNER_PREVIEW_URL_SECONDS = 60 * 60;
+
+/**
+ * Owner models with preview URLs. Published assets use public URLs; every
+ * other processed asset's smallest and largest copies are signed from the
+ * private bucket with the owner's own session (the storage select policy
+ * limits that to the owner's folder). Signing failures leave the URL null.
+ */
+export async function toMediaAssetsWithPreview(supabase: Client, rows: PhotoMediaAssetRow[]): Promise<MediaAsset[]> {
+  const base = supabasePublicBase();
+  const keys = new Set<string>();
+  for (const row of rows) {
+    if (row.status === "published" || row.status === "draft" || row.status === "failed" || row.status === "processing") continue;
+    const list = readDerivatives(row.derivatives);
+    if (list.length) {
+      keys.add(list[0].key);
+      keys.add(list[list.length - 1].key);
+    }
+  }
+  const signed: Record<string, string> = {};
+  if (keys.size) {
+    const { data } = await supabase.storage.from(PRIVATE_BUCKET).createSignedUrls([...keys], OWNER_PREVIEW_URL_SECONDS);
+    for (const d of data ?? []) if (d.path && d.signedUrl && !d.error) signed[d.path] = d.signedUrl;
+  }
+  return rows.map((row) => toMediaAsset(row, base, signed));
+}
 
 /**
  * Owner reads through the user client, so RLS (photo_is_owner_user) is the
@@ -21,20 +52,22 @@ export async function listMediaAssets(filter: MediaFilter = {}): Promise<MediaAs
   let q = supabase.from("photo_media_assets").select("*").order("sort_order", { ascending: true }).order("created_at", { ascending: false });
   if (filter.status && filter.status !== "all" && isMediaStatus(filter.status)) q = q.eq("status", filter.status);
   if (filter.category && isMediaCategory(filter.category)) q = q.eq("category", filter.category);
-  if (filter.search?.trim()) {
-    const term = filter.search.trim().replace(/[%_,]/g, " ").slice(0, 80);
-    q = q.or(`alt.ilike.%${term}%,caption.ilike.%${term}%`);
+  const term = normalizeSearchTerm(filter.search);
+  if (term) {
+    const like = `%${term}%`;
+    q = q.or(`alt.ilike.${like},caption.ilike.${like}`);
   }
   q = q.limit(Math.min(Math.max(filter.limit ?? 500, 1), 2000));
   const { data } = await q;
-  const base = supabasePublicBase();
-  return (data ?? []).map((row) => toMediaAsset(row, base));
+  return toMediaAssetsWithPreview(supabase, data ?? []);
 }
 
 export async function getMediaAsset(id: string): Promise<MediaAsset | null> {
   const supabase = await createClient();
   const { data } = await supabase.from("photo_media_assets").select("*").eq("id", id).maybeSingle();
-  return data ? toMediaAsset(data, supabasePublicBase()) : null;
+  if (!data) return null;
+  const [asset] = await toMediaAssetsWithPreview(supabase, [data]);
+  return asset ?? null;
 }
 
 export type MediaCounts = Record<MediaStatus, number> & { total: number; needsReview: number; unconfirmedRights: number };

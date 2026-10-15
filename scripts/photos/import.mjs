@@ -23,7 +23,8 @@
 // Environment (shell only, never committed): SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL),
 // SUPABASE_SERVICE_ROLE_KEY, MEDIA_OWNER_ID. ANTHROPIC_API_KEY only with --vision.
 //
-// Guarantees: originals are read, never modified, renamed, moved or deleted; no
+// Guarantees: originals are read, never modified, renamed, moved or deleted; nothing
+// is written to the public bucket (web copies stay private until the owner publishes); no
 // local path is stored in the database (only a hash of the basename); every
 // imported photograph lands as `ready`, never `published`; the same bytes are
 // never stored twice for the same owner.
@@ -41,8 +42,9 @@ const PHOTOS = path.join(ROOT, "photos");
 const CACHE = path.join(PHOTOS, "cache");
 const REPORT_DIR = path.join(PHOTOS, "report");
 const STATE_FILE = path.join(CACHE, "import-state.json");
+// Originals and web copies both go to the private bucket; only publishMedia (in the website)
+// copies web copies to bbm-media-public, after the owner confirmed rights.
 const PRIVATE_BUCKET = "bbm-media-private";
-const PUBLIC_BUCKET = "bbm-media-public";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 // ---------------------------------------------------------------------------
@@ -295,7 +297,7 @@ async function main() {
         const derivatives = [];
         for (const d of web.derivatives) {
           const dkey = `${owner}/${r.sha256}/${d.width}.jpg`;
-          const put = await supabase.storage.from(PUBLIC_BUCKET).upload(dkey, d.buffer, { contentType: "image/jpeg", upsert: true, cacheControl: "31536000" });
+          const put = await supabase.storage.from(PRIVATE_BUCKET).upload(dkey, d.buffer, { contentType: "image/jpeg", upsert: true, cacheControl: "31536000" });
           if (put.error) throw new Error(`web copy ${d.width}: ${put.error.message}`);
           derivatives.push({ key: dkey, width: d.width, height: d.height, bytes: d.bytes });
         }

@@ -14,8 +14,8 @@ reference is `docs/media-library.md`.
 
 Neither path publishes anything by itself, and neither stores your folder
 paths or originals anywhere public. Web copies (sRGB JPEG, 640–2560 px, every
-EXIF/GPS/camera field removed) are made server-side; originals stay in a
-private bucket.
+EXIF/GPS/camera field removed) are rendered into the private bucket next to
+the originals; only **Publish** copies them to the public bucket.
 
 ## Path B: import the best portfolio photos from a folder
 

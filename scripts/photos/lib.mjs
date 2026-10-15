@@ -249,7 +249,8 @@ export function percentile(values, v) {
 }
 
 // ---------------------------------------------------------------------------
-// Media library import helpers (scripts/photos/import.mjs). Mirrors
+// Media library import helpers (scripts/photos/import.mjs). Web copies are
+// written to the PRIVATE bucket; publishing copies them. Mirrors
 // src/lib/media/process.ts: same widths, same JPEG settings, same metadata
 // policy, so a photograph imported from the PC and one uploaded in the
 // browser produce identical web copies.
@@ -259,7 +260,7 @@ export function percentile(values, v) {
 export const WEB_WIDTHS = [640, 1280, 1920, 2560];
 export const WEB_JPEG_QUALITY = 84;
 export const MEDIA_MIN_LONG_EDGE = 1200;
-export const MEDIA_MAX_EDGE = 12000;
+export const MEDIA_MAX_EDGE = 8000;
 export const MEDIA_MAX_BYTES = 40 * 1024 * 1024;
 
 /** The widths for an original of width `w`: standard widths below w plus min(w, largest) so there is always a "largest". */

@@ -25,6 +25,8 @@ export async function loadLibraryGallery({ preview = false }: { preview?: boolea
     services[slot] = (byPlacement[`service:${slot}`] ?? []).map(publicItemToSitePhoto);
     if (services[slot].length) any = true;
   }
-  if (!any && !pending) return null;
+  // Nothing visible to this viewer: fall back to the manifest selection rather than an empty gallery
+  // (a visitor must never see an empty library just because something is pending for the studio).
+  if (!any) return null;
   return { hero, featured, services, published, pending };
 }

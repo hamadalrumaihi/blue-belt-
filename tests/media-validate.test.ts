@@ -93,10 +93,11 @@ describe("decoded image rules", () => {
     expect(checkImageMeta({ format: "png", width: 3000, height: 3000, delay: [10, 10] }, "image/png").ok).toBe(false);
   });
 
-  it("enforces the 1200 px minimum long edge and the 12000 px maximum", () => {
+  it("enforces the 1200 px minimum long edge and the 8000 px maximum", () => {
     expect(checkImageMeta({ format: "jpeg", width: 1199, height: 800 }, "image/jpeg").ok).toBe(false);
     expect(checkImageMeta({ format: "jpeg", width: 800, height: 1200 }, "image/jpeg").ok).toBe(true);
-    expect(checkImageMeta({ format: "jpeg", width: 12001, height: 8000 }, "image/jpeg").ok).toBe(false);
+    expect(checkImageMeta({ format: "jpeg", width: 8001, height: 5000 }, "image/jpeg").ok).toBe(false);
+    expect(checkImageMeta({ format: "jpeg", width: 8000, height: 5000 }, "image/jpeg").ok).toBe(true);
     expect(checkImageMeta(null, "image/jpeg").ok).toBe(false);
     expect(checkImageMeta({ format: "jpeg" }, "image/jpeg").ok).toBe(false);
   });
