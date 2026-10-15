@@ -41,20 +41,20 @@ export default async function MorePage() {
                   </Link>
                 </li>
               ))}
-              {group === "account" && (
+              {group === "settings" && (
                 <li className="flex min-h-14 items-center gap-3 px-4 py-2 text-sm font-semibold text-ink">
                   <SunIcon size={20} className="text-primary" /> <span id="more-appearance" className="flex-1">Appearance</span>
                   <ThemeToggle aria-labelledby="more-appearance" />
                 </li>
               )}
-              {group === "account" && !collaboratorOnly && (
+              {group === "settings" && !collaboratorOnly && (
                 <li>
                   <Link href="/settings/danger" className="flex min-h-14 items-center gap-3 px-4 text-sm font-semibold text-ink hover:bg-page">
                     <ShieldIcon size={20} className="text-primary" /> <span className="flex-1">Danger zone / delete management</span> <ChevronRightIcon size={18} className="text-muted" />
                   </Link>
                 </li>
               )}
-              {group === "account" && (
+              {group === "settings" && (
                 <li>
                   <form action={signOut}>
                     <button type="submit" className="flex min-h-14 w-full items-center gap-3 px-4 text-left text-sm font-semibold text-danger hover:bg-page">
@@ -66,7 +66,7 @@ export default async function MorePage() {
             </ul>
           </section>
         ))}
-        <p className="pt-2 text-center text-[11px] text-muted">Galleries, photos and photo sales live in Pic-Time. Blue Belt Media Studio holds bookings, contracts, payments and the tournament watcher.</p>
+        <p className="pt-2 text-center text-[11px] text-muted">Galleries, photos and photo sales live in Pic-Time. The Blue Belt Media workspace holds leads, bookings, production, agreements, payments, website content and the tournament watcher.</p>
       </PageBody>
     </>
   );

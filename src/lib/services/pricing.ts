@@ -36,3 +36,25 @@ export const PRICE_MODES: readonly PriceMode[] = ["from", "fixed", "quote"];
 export function isPriceMode(v: unknown): v is PriceMode {
   return typeof v === "string" && (PRICE_MODES as readonly string[]).includes(v);
 }
+
+/**
+ * What a public request books at. ONE decision shared by the wizard's
+ * package list and summary, `submitPublicBooking` and lead conversion, so
+ * the website never shows "Quote on request" while the booking row carries a
+ * price (issue #10: `price_mode` was ignored and only a null price meant a
+ * quote).
+ *   quoteOnly  no package, a quote-first catalog service, or a package whose
+ *              public price is a quote (`price_mode = 'quote'`, or no usable
+ *              price): amount 0, payment mode `quote`, booking starts as an
+ *              inquiry.
+ *   priced     `fixed` / `from` with a price > 0: the package price, payment
+ *              link later (nothing is charged on the public form).
+ */
+export type BookableAmount = { quoteOnly: boolean; amountQr: number; paymentMode: "quote" | "link_later"; priceMode: PriceMode };
+
+export function bookableAmount(service: Pick<PhotoServiceRow, "price_qr" | "price_mode"> | null | undefined, options: { quoteFirst?: boolean } = {}): BookableAmount {
+  if (!service || options.quoteFirst) return { quoteOnly: true, amountQr: 0, paymentMode: "quote", priceMode: "quote" };
+  const price = publicPrice(service);
+  if (price.mode === "quote" || price.amount === null) return { quoteOnly: true, amountQr: 0, paymentMode: "quote", priceMode: "quote" };
+  return { quoteOnly: false, amountQr: Math.round(price.amount * 100) / 100, paymentMode: "link_later", priceMode: price.mode };
+}

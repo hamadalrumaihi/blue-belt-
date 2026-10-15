@@ -34,3 +34,32 @@ export type Bilingual<T = string> = { en: T; ar?: T };
 export function localized<T>(value: Bilingual<T>, locale: Locale): T {
   return locale === "ar" && value.ar !== undefined ? value.ar : value.en;
 }
+
+/** The language a switch should offer next to the current one. */
+export function otherLocale(locale: Locale): Locale {
+  return locale === "ar" ? "en" : "ar";
+}
+
+/** Native-script names for the language switch (each language names itself). */
+export const LOCALE_LABEL: Record<Locale, string> = { en: "English", ar: "العربية" };
+
+/** BCP 47 tags for `<html lang>` and Open Graph locale. */
+export const LOCALE_TAG: Record<Locale, string> = { en: "en", ar: "ar" };
+export const OG_LOCALE: Record<Locale, string> = { en: "en_QA", ar: "ar_QA" };
+
+/**
+ * The link that switches language and keeps the visitor on the same page:
+ * `?lang=ar` is turned into the cookie by the proxy, which then redirects
+ * back to the same URL without the parameter, so canonical URLs never carry
+ * a language.
+ */
+export function langSwitchHref(pathname: string, search: string | null | undefined, locale: Locale): string {
+  const params = new URLSearchParams(search ?? "");
+  params.set(LOCALE_QUERY, locale);
+  return `${pathname || "/"}?${params.toString()}`;
+}
+
+/** Localises an inline map of strings: `pick(locale, { en: "Work", ar: "أعمالنا" })`. */
+export function pick<T>(locale: Locale, value: Bilingual<T>): T {
+  return localized(value, locale);
+}

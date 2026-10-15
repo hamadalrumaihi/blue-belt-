@@ -6,9 +6,11 @@ import { normalizeInstagram } from "@/lib/people/match";
 import { requireStudioUser } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
 import { parseGalleryHosts } from "@/lib/galleries/form";
+import { isStoredStage, productionStage, settableStages, withStoredProduction, type StoredStage } from "@/lib/bookings/production";
 import { normalizePictimeGalleryUrl } from "@/lib/studio/site-content";
 import type { Json } from "@/lib/supabase/database.types";
 import { isValidEmail, trimOrNull } from "@/lib/utils";
+import { isUuid } from "@/lib/validation";
 
 export type StudioState = { error?: string; fieldErrors?: Record<string, string>; saved?: boolean } | null;
 
@@ -68,4 +70,43 @@ export async function saveStudio(_prev: StudioState, formData: FormData): Promis
   await writeAudit(supabase, { ownerId: user.id, actorId: user.id, entity: "studio", entityId: user.id, action: "studio.saved", data: { public_booking } });
   for (const p of ["/settings", "/", "/services", "/portfolio", "/contact", "/book", "/privacy", "/terms", "/galleries"]) revalidatePath(p);
   return { saved: true };
+}
+
+// ---------------------------------------------------------------------------
+// Production board: the three stored stages (culling / editing / review)
+// ---------------------------------------------------------------------------
+
+export type ProductionStageResult = { ok: true; stage: StoredStage | null } | { ok: false; error: string };
+
+/**
+ * Set (or clear) the stored editing stage of a booking. Only the stages
+ * without a column are stored, in `details.production`; the columns with a
+ * real column behind them (shoot complete, gallery ready, delivered) are
+ * never written here, so the board can never contradict the booking. Studio
+ * user (owner or staff), audited, pages revalidated.
+ */
+export async function setProductionStage(bookingId: string, stage: StoredStage | null): Promise<ProductionStageResult> {
+  if (!isUuid(bookingId)) return { ok: false, error: "Invalid booking." };
+  if (stage !== null && !isStoredStage(stage)) return { ok: false, error: "Unknown stage." };
+  const guard = await requireStudioUser();
+  if (!guard.ok) return { ok: false, error: guard.error };
+  const supabase = await createClient();
+  const { data: booking } = await supabase.from("photo_bookings").select("id,owner_id,booking_status,coverage_done_at,delivered_at,gallery_delivered_at,balance_state,balance_qr,details,gallery_id").eq("id", bookingId).maybeSingle();
+  if (!booking) return { ok: false, error: "Booking not found or you do not have access to it." };
+  const gallery = booking.gallery_id
+    ? (await supabase.from("photo_galleries").select("status").eq("id", booking.gallery_id).maybeSingle()).data
+    : (await supabase.from("photo_galleries").select("status").eq("booking_id", booking.id).order("created_at", { ascending: false }).limit(1).maybeSingle()).data;
+  const current = productionStage(booking, gallery);
+  if (!current) return { ok: false, error: "This booking is not in production yet. Mark the shoot complete first." };
+  if (stage && !settableStages(current).includes(stage)) return { ok: false, error: `The gallery is already ${current.stage === "ready" ? "ready" : "delivered"}; the editing stage no longer applies.` };
+  const now = new Date();
+  const details = withStoredProduction(booking.details, stage, now, guard.viewer.userId);
+  const { error, count } = await supabase.from("photo_bookings").update({ details }, { count: "exact" }).eq("id", bookingId);
+  if (error) return { ok: false, error: error.message };
+  if (!count) return { ok: false, error: "Booking not found or you do not have access to it." };
+  await writeAudit(supabase, { ownerId: booking.owner_id, actorId: guard.viewer.userId, actorKind: guard.viewer.role === "staff" ? "staff" : "owner", entity: "booking", entityId: bookingId, action: "booking.production_stage", data: { from: current.stage, to: stage ?? "shoot_complete" } });
+  revalidatePath("/production");
+  revalidatePath("/studio");
+  revalidatePath(`/bookings/${bookingId}`);
+  return { ok: true, stage };
 }

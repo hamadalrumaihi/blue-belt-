@@ -1,15 +1,19 @@
-import type { ReactNode } from "react";
+import { Suspense, type ReactNode } from "react";
 import { DesktopSidebar } from "./DesktopSidebar";
 import { MobileBottomNav } from "./MobileBottomNav";
 
 export function AppShell({ email, collaboratorOnly = false, children }: { email: string | null; collaboratorOnly?: boolean; children: ReactNode }) {
   return (
     <div className="min-h-dvh bg-page">
-      <DesktopSidebar email={email} collaboratorOnly={collaboratorOnly} />
+      <Suspense fallback={null}>
+        <DesktopSidebar email={email} collaboratorOnly={collaboratorOnly} />
+      </Suspense>
       <div className="lg:pl-64">
         {children}
       </div>
-      <MobileBottomNav collaboratorOnly={collaboratorOnly} />
+      <Suspense fallback={null}>
+        <MobileBottomNav collaboratorOnly={collaboratorOnly} />
+      </Suspense>
     </div>
   );
 }

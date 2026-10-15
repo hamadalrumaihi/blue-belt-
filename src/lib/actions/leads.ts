@@ -2,9 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { writeAudit } from "@/lib/audit";
+import { depositColumnsFor } from "@/lib/bookings/policy";
 import { composeDivision, type PublicBookingDetails } from "@/lib/bookings/public-form";
-import { makePublicRef } from "@/lib/bookings/state";
+import { initialBookingStatus, makePublicRef } from "@/lib/bookings/state";
+import { serviceForBookingType } from "@/lib/catalog";
 import { isLeadStatus } from "@/lib/leads/labels";
+import { bookableAmount } from "@/lib/services/pricing";
 import { requireStudioUser } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
 import type { Json, LeadStatus } from "@/lib/supabase/database.types";
@@ -29,9 +32,13 @@ export async function setLeadStatus(id: string, status: LeadStatus): Promise<Res
 }
 
 /**
- * Turn a lead into a booking the owner can work from Bookings. Starts as an
- * inquiry with a quote (no amount, no payment), linked both ways. Never
- * touches photo_athletes.
+ * Turn a lead into a booking the owner can work from Bookings. ONE pricing
+ * decision (`bookableAmount`) with the package the lead named: a quote-mode
+ * package or a quote-first service starts as an inquiry with no amount; a
+ * priced package carries its price and waits for the agreement. Linked both
+ * ways and race-safe: the lead is claimed with a `booking_id is null` guard
+ * after the booking row exists, so two concurrent clicks end on the one
+ * booking that won (the loser's row is removed). Never touches photo_athletes.
  */
 export async function convertLeadToBooking(id: string): Promise<(Result & { bookingId?: string })> {
   if (!isUuid(id)) return { ok: false, error: "Invalid lead id." };
@@ -47,9 +54,10 @@ export async function convertLeadToBooking(id: string): Promise<(Result & { book
   const org = lead.organization_id ? (await supabase.from("photo_organizations").select("id,name").eq("id", lead.organization_id).maybeSingle()).data : null;
   const details = (isPlainObject(lead.details) ? lead.details : {}) as PublicBookingDetails & { service_id?: string; service_name?: string };
   const serviceId = isUuid(details.service_id) ? details.service_id : null;
-  const service = serviceId ? (await supabase.from("photo_services").select("id,name,currency").eq("id", serviceId).maybeSingle()).data : null;
+  const service = serviceId ? (await supabase.from("photo_services").select("id,name,currency,price_qr,price_mode").eq("id", serviceId).maybeSingle()).data : null;
   const customerName = person?.full_name ?? "Unknown";
   const bookingType = lead.booking_type ?? "custom";
+  const price = bookableAmount(service, { quoteFirst: serviceForBookingType(bookingType).quoteFirst });
 
   const row = {
     owner_id: user.id,
@@ -59,7 +67,7 @@ export async function convertLeadToBooking(id: string): Promise<(Result & { book
     lead_id: lead.id,
     event_id: lead.event_id,
     booking_type: bookingType,
-    booking_status: "inquiry" as const,
+    booking_status: initialBookingStatus({ paymentMode: price.paymentMode, amountQr: price.amountQr, requiresContract: true }),
     athlete_name: details.athlete_name ?? customerName,
     customer_name: customerName,
     customer_email: person?.email ?? "",
@@ -67,11 +75,12 @@ export async function convertLeadToBooking(id: string): Promise<(Result & { book
     academy: details.academy ?? org?.name ?? null,
     division: composeDivision(details.age_division ?? null, details.weight_division ?? null),
     package_name: service?.name ?? details.service_name ?? "Custom",
-    amount_qr: 0,
+    amount_qr: price.amountQr,
     currency: service?.currency ?? "QAR",
-    payment_mode: "quote" as const,
+    payment_mode: price.paymentMode,
     details: details as Json,
     notes: lead.message,
+    ...depositColumnsFor(price.amountQr),
   };
   let bookingId: string | null = null;
   for (let attempt = 0; attempt < 3 && !bookingId; attempt += 1) {
@@ -80,8 +89,16 @@ export async function convertLeadToBooking(id: string): Promise<(Result & { book
     else if (error?.code !== "23505") return { ok: false, error: error?.message ?? "Could not create the booking." };
   }
   if (!bookingId) return { ok: false, error: "Could not allocate a booking reference. Try again." };
-  await supabase.from("photo_leads").update({ booking_id: bookingId, status: "converted" }).eq("id", lead.id).eq("owner_id", user.id);
-  await writeAudit(supabase, { ownerId: user.id, actorId: user.id, entity: "booking", entityId: bookingId, action: "booking.created", data: { source: "lead", lead_id: lead.id } });
+
+  // Claim the lead only while nobody else has: a concurrent conversion that won keeps its booking and ours is withdrawn.
+  const { error: linkError, count } = await supabase.from("photo_leads").update({ booking_id: bookingId, status: "converted" }, { count: "exact" }).eq("id", lead.id).eq("owner_id", user.id).is("booking_id", null);
+  if (linkError || !count) {
+    await supabase.from("photo_bookings").delete().eq("id", bookingId).eq("owner_id", user.id).eq("lead_id", lead.id);
+    const { data: winner } = await supabase.from("photo_leads").select("booking_id").eq("id", lead.id).eq("owner_id", user.id).maybeSingle();
+    if (winner?.booking_id) return { ok: true, bookingId: winner.booking_id };
+    return { ok: false, error: linkError?.message ?? "The lead changed while converting it. Reload and try again." };
+  }
+  await writeAudit(supabase, { ownerId: user.id, actorId: user.id, entity: "booking", entityId: bookingId, action: "booking.created", data: { source: "lead", lead_id: lead.id, payment_mode: price.paymentMode, amount_qr: price.amountQr } });
   revalidatePath("/leads");
   revalidatePath("/bookings");
   revalidatePath("/studio");
