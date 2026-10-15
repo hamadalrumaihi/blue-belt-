@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState, type DragEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
 import { ACCEPT_ATTRIBUTE } from "@/lib/media/mime";
 import { formatBytes } from "@/lib/media/rules";
 import type { MediaAsset } from "@/lib/media/types";
@@ -32,6 +32,7 @@ export function MediaUploader({ onAsset }: { onAsset: (asset: MediaAsset) => voi
   const inputRef = useRef<HTMLInputElement>(null);
   const running = useRef(0);
   const queue = useRef<string[]>([]);
+  const pumpRef = useRef<() => void>(() => undefined);
 
   // State and ref move together so the runner can read the latest list without re-rendering.
   const setItems = useCallback((fn: (list: UploadItem[]) => UploadItem[]) => {
@@ -54,10 +55,13 @@ export function MediaUploader({ onAsset }: { onAsset: (asset: MediaAsset) => voi
         .catch((err: unknown) => update(key, { stage: "failed", progress: 0, message: err instanceof Error ? err.message : String(err) }))
         .finally(() => {
           running.current--;
-          pump();
+          pumpRef.current();
         });
     }
   }, [onAsset, update]);
+  useEffect(() => {
+    pumpRef.current = pump;
+  }, [pump]);
 
   const add = useCallback(
     (files: FileList | File[]) => {
