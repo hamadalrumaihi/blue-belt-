@@ -68,7 +68,8 @@ export async function saveStudio(_prev: StudioState, formData: FormData): Promis
     .upsert({ owner_id: user.id, business_name: business_name!, tagline, about, city, email, phone, whatsapp, instagram, public_booking, settings }, { onConflict: "owner_id" });
   if (error) return { error: error.message };
   await writeAudit(supabase, { ownerId: user.id, actorId: user.id, entity: "studio", entityId: user.id, action: "studio.saved", data: { public_booking } });
-  for (const p of ["/settings", "/", "/services", "/portfolio", "/contact", "/book", "/privacy", "/terms", "/galleries"]) revalidatePath(p);
+  for (const p of ["/settings", "/", "/services", "/work", "/how-it-works", "/contact", "/book", "/privacy", "/terms", "/galleries"]) revalidatePath(p);
+  revalidatePath("/services", "layout");
   return { saved: true };
 }
 

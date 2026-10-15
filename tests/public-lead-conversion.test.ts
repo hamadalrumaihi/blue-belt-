@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/roles", () => ({ requireStudioUser: async () => ({ ok: true, viewer: { userId: OWNER, email: "owner@test", role: "owner" } }) }));
-const writeAudit = vi.fn(async (..._args: unknown[]) => ({ ok: true }));
+const writeAudit = vi.fn(async (...args: unknown[]) => { void args; return { ok: true }; });
 vi.mock("@/lib/audit", () => ({ writeAudit: (...args: unknown[]) => writeAudit(...args) }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => client }));
 

@@ -35,7 +35,7 @@ import { isPlainObject } from "@/lib/validation";
 export type WebsiteState = { error?: string; fieldErrors?: Record<string, string>; saved?: boolean; id?: string } | null;
 type Result = { ok: true } | { ok: false; error: string };
 
-const PUBLIC_PATHS = ["/", "/how-it-works", "/services", "/contact"];
+const PUBLIC_PATHS = ["/", "/how-it-works", "/services", "/work", "/contact"];
 const ID_RE = /^[a-z0-9_-]{1,64}$/i;
 
 type Client = SupabaseClient<Database>;
@@ -63,6 +63,7 @@ async function writeKey(supabase: Client, userId: string, key: string, value: Js
   if (error) return { ok: false, error: error.message };
   await writeAudit(supabase, { ownerId: userId, actorId: userId, entity: "studio", entityId: userId, action, data });
   for (const p of PUBLIC_PATHS) revalidatePath(p);
+  revalidatePath("/services", "layout");
   revalidatePath("/website/testimonials");
   revalidatePath("/website/faqs");
   revalidatePath("/studio");

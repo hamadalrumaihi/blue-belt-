@@ -36,8 +36,8 @@ export const maxDuration = 60;
 export async function POST(request: Request) {
   const { log, requestId } = requestLogger(request, "api/cron/payments");
   const headers = { "cache-control": "no-store", "x-request-id": requestId };
-  if (!isPaymentsEnabled()) return NextResponse.json({ error: "Not found" }, { status: 404, headers });
   if (!verifyCronSecret(request)) return NextResponse.json({ error: "Unauthorized", code: "UNAUTHORIZED" }, { status: 401, headers });
+  if (!isPaymentsEnabled()) return NextResponse.json({ error: "Not found" }, { status: 404, headers });
   if (!isServiceClientConfigured()) return NextResponse.json({ error: "SUPABASE_SERVICE_ROLE_KEY is not configured.", code: "NOT_CONFIGURED" }, { status: 503, headers });
   const limit = rateLimit("cron-payments", RULES.cron);
   if (!limit.ok) return NextResponse.json({ error: "Too many runs.", code: "RATE_LIMITED" }, { status: 429, headers: { ...headers, ...rateLimitHeaders(limit) } });

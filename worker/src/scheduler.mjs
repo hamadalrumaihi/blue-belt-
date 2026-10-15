@@ -29,7 +29,7 @@ const MAX_PAGES_PER_TICK = 10;
 const REFRESH_REQUEST_TIMEOUT_MS = 310_000;
 
 export function startScheduler(deps = {}) {
-  const { seconds, appUrl, cronSecret, deliverySeconds, paymentsSeconds, opsSeconds, pictimeIntakeSeconds } = config.schedule;
+  const { seconds, appUrl, cronSecret, deliverySeconds, paymentsSeconds, opsSeconds, pictimeIntakeSeconds, pricingSeconds, mediaCleanupSeconds } = config.schedule;
   const fetchImpl = deps.fetch ?? fetch;
   const handles = [];
 
@@ -144,6 +144,52 @@ export function startScheduler(deps = {}) {
     handles.push({ name: "ops", tick, first: setTimeout(tick, 20_000), timer: setInterval(tick, interval) });
   }
 
+  // Private pricing job: queued assessments + evidence staleness counts. Counts only in the response.
+  if (pricingSeconds && appUrl && cronSecret) {
+    const interval = Math.max(300, pricingSeconds) * 1000;
+    let running = false;
+    async function tick() {
+      if (running) return;
+      running = true;
+      const started = Date.now();
+      try {
+        const res = await fetchImpl(`${appUrl}/api/cron/pricing`, { method: "POST", headers: { authorization: `Bearer ${cronSecret}`, "content-type": "application/json" }, body: "{}", signal: AbortSignal.timeout(55_000) });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) log.warn("pricing.tick_failed", { status: res.status, code: body.code, elapsedMs: Date.now() - started });
+        else if (body.processed?.scanned) log.info("pricing.tick", { processed: body.processed, elapsedMs: Date.now() - started });
+      } catch (err) {
+        log.error("pricing.error", { error: err instanceof Error ? err.message : String(err), elapsedMs: Date.now() - started });
+      } finally {
+        running = false;
+      }
+    }
+    log.info("pricing.enabled", { everySeconds: interval / 1000, target: `${appUrl}/api/cron/pricing` });
+    handles.push({ name: "pricing", tick, first: setTimeout(tick, 30_000), timer: setInterval(tick, interval) });
+  }
+
+  // Media library housekeeping: delete private uploads that never finished.
+  if (mediaCleanupSeconds && appUrl && cronSecret) {
+    const interval = Math.max(900, mediaCleanupSeconds) * 1000;
+    let running = false;
+    async function tick() {
+      if (running) return;
+      running = true;
+      const started = Date.now();
+      try {
+        const res = await fetchImpl(`${appUrl}/api/media/cleanup?hours=24`, { method: "POST", headers: { authorization: `Bearer ${cronSecret}`, "content-type": "application/json" }, body: "{}", signal: AbortSignal.timeout(55_000) });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) log.warn("media_cleanup.tick_failed", { status: res.status, code: body.code, elapsedMs: Date.now() - started });
+        else if (body.deleted) log.info("media_cleanup.tick", { deleted: body.deleted, elapsedMs: Date.now() - started });
+      } catch (err) {
+        log.error("media_cleanup.error", { error: err instanceof Error ? err.message : String(err), elapsedMs: Date.now() - started });
+      } finally {
+        running = false;
+      }
+    }
+    log.info("media_cleanup.enabled", { everySeconds: interval / 1000, target: `${appUrl}/api/media/cleanup` });
+    handles.push({ name: "media-cleanup", tick, first: setTimeout(tick, 45_000), timer: setInterval(tick, interval) });
+  }
+
   // Pic-Time dashboard intake runs in this process (it needs the worker's own
   // Pic-Time session), off unless both PICTIME_INTAKE_SECONDS and
   // PICTIME_INTAKE_ENABLED=1 are set. Never overlaps itself; the run shares the
@@ -173,6 +219,8 @@ export function startScheduler(deps = {}) {
     tickDeliveries: () => handles.find((h) => h.name === "deliveries")?.tick(),
     tickPayments: () => handles.find((h) => h.name === "payments")?.tick(),
     tickOps: () => handles.find((h) => h.name === "ops")?.tick(),
+    tickPricing: () => handles.find((h) => h.name === "pricing")?.tick(),
+    tickMediaCleanup: () => handles.find((h) => h.name === "media-cleanup")?.tick(),
     tickPictimeIntake: () => handles.find((h) => h.name === "pictime-intake")?.tick(),
     stop: () => {
       for (const h of handles) {

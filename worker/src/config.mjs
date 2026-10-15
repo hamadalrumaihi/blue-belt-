@@ -59,6 +59,10 @@ export const config = {
     pictimeIntakeSeconds: int("PICTIME_INTAKE_SECONDS", 0),
     /** Ops self-checks tick (/api/cron/ops-health: silent order intake). 0 disables; defaults to 900 s when the refresh loop is on. */
     opsSeconds: process.env.OPS_HEALTH_SECONDS === undefined ? (int("SCHEDULE_SECONDS", 0) ? 900 : 0) : int("OPS_HEALTH_SECONDS", 0),
+    /** Private pricing job tick (/api/cron/pricing: queued assessments, evidence staleness counts). 0 (default) disables. */
+    pricingSeconds: int("PRICING_SECONDS", 0),
+    /** Media library housekeeping tick (/api/media/cleanup: abandoned draft uploads). 0 (default) disables. */
+    mediaCleanupSeconds: int("MEDIA_CLEANUP_SECONDS", 0),
     appUrl: (process.env.APP_URL ?? "").replace(/\/$/, ""),
     cronSecret: process.env.CRON_SECRET ?? "",
   },
@@ -103,7 +107,7 @@ export function validateConfig() {
   if (!["new", "shell", "headed"].includes(config.headless)) problems.push("HEADLESS must be new, shell or headed");
   if (!["playwright", "patchright"].includes(config.engine)) problems.push("ENGINE must be playwright or patchright");
   if (!isValidTimezone(config.timezone)) problems.push(`TZ_ID must be an IANA zone such as Europe/London (got "${config.timezone}")`);
-  if ((config.schedule.seconds || config.schedule.deliverySeconds || config.schedule.paymentsSeconds || config.schedule.opsSeconds) && (!config.schedule.appUrl || !config.schedule.cronSecret)) {
+  if ((config.schedule.seconds || config.schedule.deliverySeconds || config.schedule.paymentsSeconds || config.schedule.opsSeconds || config.schedule.pricingSeconds || config.schedule.mediaCleanupSeconds) && (!config.schedule.appUrl || !config.schedule.cronSecret)) {
     problems.push("SCHEDULE_SECONDS / DELIVERY_SECONDS require APP_URL and CRON_SECRET");
   }
   return problems;

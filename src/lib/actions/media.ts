@@ -27,7 +27,7 @@ type Owner = { ok: true; supabase: Client; userId: string } | { ok: false; error
 export type MediaResult = { ok: true } | { ok: false; error: string };
 export type MediaBatchResult = { ok: true; done: string[]; skipped: Array<{ id: string; reason: string }> } | { ok: false; error: string };
 
-const PUBLIC_PATHS = ["/", "/services", "/work", "/media"] as const;
+const PUBLIC_PATHS = ["/", "/services", "/work", "/how-it-works", "/media"] as const;
 
 async function owner(): Promise<Owner> {
   const guard = await requireOwner();
@@ -38,6 +38,7 @@ async function owner(): Promise<Owner> {
 
 function revalidateMedia() {
   for (const p of PUBLIC_PATHS) revalidatePath(p);
+  revalidatePath("/services", "layout");
 }
 
 async function audit(supabase: Client, userId: string, action: string, entityId: string | null, data: Record<string, Json | undefined> = {}) {

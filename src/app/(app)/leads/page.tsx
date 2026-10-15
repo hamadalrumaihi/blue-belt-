@@ -8,6 +8,7 @@ import { listBookings } from "@/lib/bookings/queries";
 import { BOOKING_TYPE_LABEL } from "@/lib/bookings/state";
 import { LEAD_STATUSES, LEAD_STATUS_LABEL, isLeadStatus } from "@/lib/leads/labels";
 import { listLeads } from "@/lib/leads/queries";
+import { latestAssessmentsForLeads } from "@/lib/pricing/queries";
 import { CAPACITY_NOTE, describeConflicts, overlaps, type CapacityEvent } from "@/lib/studio/capacity";
 import { createClient } from "@/lib/supabase/server";
 import { formatDateTime, formatStamp } from "@/lib/time";
@@ -54,6 +55,8 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
     supabase.from("photo_events").select("id,name,event_date,venue").eq("active", true).limit(200),
   ]);
   const eventById = new Map((events.data ?? []).map((e) => [e.id, e]));
+  // Owner-only badges: RLS returns nothing for staff, so the map is simply empty for them.
+  const assessments = await latestAssessmentsForLeads(leads);
   const now = new Date();
   return (
     <>
@@ -102,7 +105,7 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
                       )}
                     </div>
                     <div className="shrink-0">
-                      <LeadControls id={l.id} status={l.status} bookingId={l.booking_id} />
+                      <LeadControls id={l.id} status={l.status} bookingId={l.booking_id} assessment={assessments.get(l.id)} />
                     </div>
                   </div>
                 </li>
