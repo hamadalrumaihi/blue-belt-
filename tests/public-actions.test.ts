@@ -328,7 +328,9 @@ describe("submitPublicBooking", () => {
     expect(quoteText).toContain("quoted individually");
     expect(quoteText.indexOf("price first")).toBeLessThan(quoteText.indexOf("50% deposit"));
     expect(quoteText).toContain("Once you approve the price");
-    expect(JSON.stringify(service.upserts("photo_notification_deliveries"))).not.toContain("350");
+    // Only what the customer and owner receive: the delivery rows' timestamps can legitimately end in ".350Z".
+    const payloads = service.upserts("photo_notification_deliveries").map((n) => n.payload);
+    expect(JSON.stringify(payloads)).not.toMatch(/\b350\b/);
   });
 
   it("'from' and 'fixed' packages book at their price with the server-side deposit split, whatever the form says", async () => {
