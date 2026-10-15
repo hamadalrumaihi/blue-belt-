@@ -353,11 +353,13 @@ export function BookingWizard({ events, services, entry }: Props) {
             </button>
           )}
           {step < 3 ? (
-            <button type="button" onClick={next} className="btn-primary min-h-12 flex-1 text-base">
+            // Distinct keys: React must not reuse this node for the submit button below, or the click that
+            // moves to the review step would also trigger the browser's default submit on the re-typed button.
+            <button key="continue" type="button" onClick={(e) => { e.preventDefault(); next(); }} className="btn-primary min-h-12 flex-1 text-base">
               Continue <ChevronRightIcon size={18} />
             </button>
           ) : (
-            <button type="submit" className="btn-primary min-h-12 flex-1 text-base" disabled={pending || !idempotencyKey} aria-busy={pending}>
+            <button key="send" type="submit" className="btn-primary min-h-12 flex-1 text-base" disabled={pending || !idempotencyKey} aria-busy={pending}>
               {pending ? "Sending..." : "Send request"}
             </button>
           )}
