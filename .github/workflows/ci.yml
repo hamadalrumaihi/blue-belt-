@@ -37,6 +37,25 @@ jobs:
       - run: npm test
       - run: npm run build
 
+  db:
+    name: Database (migrations + SQL tests on PostgreSQL 16)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # The runner image ships PostgreSQL 16; scripts/db/shim.sql stands in for the Supabase-managed schemas.
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Start PostgreSQL
+        run: |
+          sudo systemctl start postgresql.service
+          sudo -u postgres psql -c "alter user postgres password 'postgres'"
+          pg_isready -h 127.0.0.1
+      - run: node scripts/db/sql-tests.mjs
+
   worker:
     name: Worker (syntax + unit tests)
     runs-on: ubuntu-latest

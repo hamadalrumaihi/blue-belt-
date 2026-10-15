@@ -1606,6 +1606,15 @@ export type Database = {
         Args: Record<string, never>;
         Returns: boolean;
       };
+      /** 20261016090000_studio_user_lookup: owner/staff accounts only; raises insufficient_privilege for clients and anon (F-10). */
+      photo_find_studio_user_by_email: {
+        Args: { p_email: string };
+        Returns: string | null;
+      };
+      photo_studio_user_emails: {
+        Args: { p_ids: string[] };
+        Returns: Array<{ user_id: string; email: string | null }>;
+      };
       /** 20261015100000_public_submission_rpc: person → organisation → lead → booking → audit in one transaction; replays by idempotency key. */
       photo_submit_public_booking: {
         Args: { p_owner_id: string; p_idempotency_key: string; p_person: Json; p_organization: Json | null; p_lead: Json; p_booking: Json; p_audit?: Json };

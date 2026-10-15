@@ -291,13 +291,13 @@ An independent reviewer re-read the branch against `main` after all workstreams 
 | F-01 | **Fixed** — `bookableAmount()` in `src/lib/services/pricing.ts`; regression test in `tests/public-actions.test.ts` ("issue #10 regression"). |
 | F-02 | **Fixed** — `/book` forwards `{ id, name, booking_type, price_label, quote, description }` only (`toPublicServiceOption`). |
 | F-03 | **Fixed** — `next.config.ts` `headers()`: nosniff, `X-Frame-Options: DENY`, `frame-ancestors 'none'`, `Referrer-Policy` (`no-referrer` on `/pay/*`, `/sign/*`), Permissions-Policy. |
-| F-04 | **Open** — webhook path unchanged; P-04 remains a recommended follow-up (owner question 3). |
+| F-04 | **Fixed (follow-up branch `claude/overhaul-followups-f04-f07-f10`)** — `confirmPaidMapping()` in `src/lib/payments/myfatoorah/webhook.ts` asks `GetPaymentStatus` by invoice id before any signed `paid` delivery is applied; the provider's status, amount and currency win (`payments.provider_confirmed` / `payments.provider_overrode_webhook`); when the provider cannot be reached the signed webhook is used as before and `payments.provider_confirm_unavailable` is logged. The route passes a client whenever `MYFATOORAH_API_KEY` is set. Tests: `tests/payments/webhook-provider-confirm.test.ts`. |
 | F-05 | **Open, accepted** — per-instance limiter; M-05 (Vercel WAF rules) recommended. |
 | F-06 | **Open, configuration** — set `STUDIO_OWNER_ID` in production. |
-| F-07 | **Open** — three more hand-run DO-block SQL tests were added (`public_submission`, `media_rls`, extended `pricing_rls`); the CI job in P-07 still needs `supabase init` + TAP conversion. |
+| F-07 | **Fixed (follow-up branch)** — `npm run test:db` (`scripts/db/sql-tests.mjs`) creates a disposable database on plain Postgres, applies `scripts/db/shim.sql` (Supabase roles, `auth.*`, `storage.*`), every migration, `scripts/db/seed.sql`, then runs all `supabase/tests/*.sql` (pass = `ROLLBACK_OK`); `rls.test.sql` was converted from pgTAP to the same DO-block convention. CI job **Database** in `.github/workflows/ci.yml` runs it on the runner's Postgres. No `supabase init` needed. |
 | F-08 | **Fixed** — `/work`, `/how-it-works`, `/faq` redirect public; `/testimonials` removed. |
 | F-09 | **Fixed** — `Buffer.byteLength`. |
-| F-10 | **Open** — unchanged (owner tooling hygiene). |
+| F-10 | **Fixed (follow-up branch)** — migration `20261016090000_studio_user_lookup.sql` adds `photo_find_studio_user_by_email(text)` and `photo_studio_user_emails(uuid[])` (SECURITY DEFINER, callable by studio users only, owner/staff profiles only, e-mails only for self or members of a shared event; no execute for anon). `inviteCollaborator` and `loadEventTeam` call them; `auth.admin.listUsers` paging and the service client are gone from both. Test: `supabase/tests/studio_user_lookup.test.sql`. |
 | F-11 | **Fixed** — cron secret checked before the payments flag. |
 | F-12/13/14 | Accepted, unchanged. |
 | F-15 | **Fixed** — `agent/package-lock.json` committed, agent CI job uses `npm ci` with lockfile cache. |
