@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { allCatalogCopy, AUDIENCE_COPY, cleanPublicDescription, MEDIA_SCOPE_COPY, mediaCategoryLabel, SERVICE_COPY, VIDEO_DELIVERABLE_COPY } from "@/lib/catalog/copy";
 import { applyFaqOverrides, buildFaqJsonLd, FAQ_CATEGORIES, FAQ_ITEMS, faqById, faqsForService, featuredFaqs, filterFaqs, normalizeForSearch, OPEN_POLICY_QUESTIONS } from "@/lib/catalog/faq";
 import { AUDIENCES, MEDIA_SCOPES, SERVICE_DEFINITIONS, SERVICES, VIDEO_DELIVERABLES } from "@/lib/catalog/index";
-import { UI } from "@/lib/i18n/ui";
+import { BOOK_UI, UI } from "@/lib/i18n/ui";
 
 const ARABIC = /[؀-ۿ]/;
 const EM_DASH = "—";
@@ -187,6 +187,8 @@ describe("interface strings", () => {
       for (const [k, v] of Object.entries(obj)) walk(v, `${path}.${k}`);
     };
     walk(UI, "UI");
+    walk(BOOK_UI, "BOOK_UI");
     expect(missing).toEqual([]);
+    expect(BOOK_UI.done.next).toHaveLength(3);
   });
 });

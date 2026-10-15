@@ -6,7 +6,7 @@ import { isLocale, LOCALE_COOKIE, LOCALE_QUERY } from "@/lib/i18n/locale";
  * Paths that never require the studio session: the public website, the
  * signing page, the client portal (which does its own sign-in) and auth.
  */
-const PUBLIC_PATHS = ["/login", "/forgot-password", "/reset-password", "/auth", "/services", "/work", "/how-it-works", "/faq", "/book", "/contact", "/portfolio", "/testimonials", "/sign", "/client", "/privacy", "/terms", "/pay", "/sitemap.xml", "/robots.txt", "/opengraph-image", "/twitter-image", "/photos", "/brand", "/manifest.webmanifest"];
+const PUBLIC_PATHS = ["/login", "/forgot-password", "/reset-password", "/auth", "/services", "/work", "/how-it-works", "/faq", "/book", "/contact", "/portfolio", "/sign", "/client", "/privacy", "/terms", "/pay", "/sitemap.xml", "/robots.txt", "/opengraph-image", "/twitter-image", "/photos", "/brand", "/manifest.webmanifest"];
 
 /** One year: the language choice outlives a session. */
 const LOCALE_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;

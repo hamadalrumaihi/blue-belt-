@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { requireOwner } from "@/lib/roles";
 import { BrandHeader } from "@/components/BrandHeader";
 import { PageBody } from "@/components/AppShell";
 import { ChevronRightIcon, FileTextIcon, ImageIcon, ReceiptIcon, UsersIcon } from "@/components/icons";
-import { resolveViewerMode } from "@/lib/collaborator";
 import { loadStudio } from "@/lib/studio/queries";
 import { openQuestionCounts, readFaqOverrides, readTestimonialRecords } from "@/lib/studio/site-content";
 
@@ -13,7 +13,8 @@ export const dynamic = "force-dynamic";
 
 /** Hub for everything the public website shows: media, service content, testimonials, FAQs. */
 export default async function WebsitePage() {
-  if ((await resolveViewerMode()).collaboratorOnly) redirect("/coverage");
+  // Owner only: money and website content are never for staff/collaborator accounts.
+  if (!(await requireOwner()).ok) redirect("/coverage");
   const studio = await loadStudio();
   const testimonials = readTestimonialRecords(studio?.settings);
   const faqs = readFaqOverrides(studio?.settings);

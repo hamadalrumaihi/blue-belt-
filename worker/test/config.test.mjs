@@ -66,7 +66,7 @@ describe("config + validateConfig", () => {
       "HEADLESS must be new, shell or headed",
       "ENGINE must be playwright or patchright",
       'TZ_ID must be an IANA zone such as Europe/London (got "London")',
-      "SCHEDULE_SECONDS / DELIVERY_SECONDS require APP_URL and CRON_SECRET",
+      "SCHEDULE_SECONDS / DELIVERY_SECONDS / PAYMENTS_SECONDS / OPS_HEALTH_SECONDS / PRICING_SECONDS / MEDIA_CLEANUP_SECONDS require APP_URL and CRON_SECRET",
     ]);
   });
 

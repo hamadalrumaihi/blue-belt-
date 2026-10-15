@@ -65,7 +65,7 @@ export default async function ContactPage({ searchParams }: Props) {
                 </li>
               )}
               <li className="inline-flex min-h-11 items-center gap-3 text-muted">
-                <MapPinIcon size={20} className="shrink-0 text-primary" /> {studio?.city || identity.location}
+                <MapPinIcon size={20} className="shrink-0 text-primary" /> <span className="sr-only">{t(UI.footer.basedIn)} </span>{studio?.city || identity.location}
               </li>
             </ul>
           </div>

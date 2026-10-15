@@ -2,15 +2,37 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import type { Locale } from "@/lib/i18n/locale";
-import { LOCALE_LABEL, otherLocale } from "@/lib/i18n/locale";
+import { langSwitchHref, LOCALE_LABEL, otherLocale } from "@/lib/i18n/locale";
 import { tr, UI } from "@/lib/i18n/ui";
 import { cn } from "@/lib/utils";
 import { CloseIcon, ExternalIcon, MoreIcon } from "../icons";
 import { Logo } from "../Logo";
 import { ThemeToggle } from "../ThemeToggle";
 import { LanguageSwitch } from "./LanguageSwitch";
+
+/**
+ * Shown only while the search-params-aware switch is suspended. It cannot
+ * read the query on the server, so it starts from the path alone and picks
+ * up the current query after mount, keeping every parameter.
+ */
+function SwitchFallback({ locale, pathname }: { locale: Locale; pathname: string }) {
+  const next = otherLocale(locale);
+  const [href, setHref] = useState(() => langSwitchHref(pathname, "", next));
+  useEffect(() => {
+    try {
+      setHref(langSwitchHref(window.location.pathname, window.location.search, next));
+    } catch {
+      // Keep the path-only link.
+    }
+  }, [next, pathname]);
+  return (
+    <a href={href} hrefLang={next} lang={next} rel="nofollow" className="inline-flex min-h-10 items-center rounded-xl px-3 text-sm font-semibold text-ink hover:bg-page">
+      {LOCALE_LABEL[next]}
+    </a>
+  );
+}
 
 type Props = {
   locale: Locale;
@@ -46,11 +68,7 @@ export function PublicHeader({ locale, accountLink, bookingOpen, galleryUrl }: P
       <span className="sr-only"> {t(UI.nav.opensGallery)}</span>
     </a>
   );
-  const switchFallback = (
-    <a href={`${pathname}?lang=${otherLocale(locale)}`} className="inline-flex min-h-10 items-center rounded-xl px-3 text-sm font-semibold text-ink hover:bg-page">
-      {LOCALE_LABEL[otherLocale(locale)]}
-    </a>
-  );
+  const switchFallback = <SwitchFallback locale={locale} pathname={pathname} />;
 
   return (
     <header className="sticky top-0 z-30 border-b border-line bg-white/90 backdrop-blur">

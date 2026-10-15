@@ -67,6 +67,35 @@ export async function computeAssessmentRow(supabase: Client, row: Pick<PhotoPric
   return { status };
 }
 
+export type QueuedInsert = { ok: true; row: Pick<PhotoPricingAssessmentRow, "id" | "owner_id" | "booking_id" | "lead_id">; version: number } | { ok: false; deduplicated: boolean; error: string | null };
+
+/**
+ * Inserts a `queued` row with version max+1. Two unique indexes can fire on
+ * 23505: the queued-fingerprint index (the same request is already queued →
+ * a dedupe) and the (owner, booking, version) index (a concurrent insert of a
+ * DIFFERENT request took this version → re-read the version and retry once).
+ * Postgres names the violated index in the message; an unnamed violation is
+ * retried once and then reported as a dedupe.
+ */
+export async function insertQueuedAssessment(supabase: Client, target: AssessmentTarget, input: { fingerprint: string; request: PricingRequest; reason: string }): Promise<QueuedInsert> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const version = await nextAssessmentVersion(supabase, target);
+    const { data, error } = await supabase
+      .from("photo_pricing_assessments")
+      .insert({ owner_id: target.ownerId, booking_id: target.bookingId, lead_id: target.leadId, version, status: "queued", request_fingerprint: input.fingerprint, request_snapshot: input.request as unknown as Json, trigger_reason: input.reason })
+      .select("id,owner_id,booking_id,lead_id")
+      .single();
+    if (data && !error) return { ok: true, row: data, version };
+    if (error?.code !== "23505") return { ok: false, deduplicated: false, error: error?.message ?? "Could not queue the assessment." };
+    const message = error.message ?? "";
+    if (/fingerprint/i.test(message)) return { ok: false, deduplicated: true, error: null };
+    const versionClash = /_version_idx/i.test(message) || !/_idx|constraint/i.test(message);
+    if (!versionClash || attempt === 1) return { ok: false, deduplicated: true, error: null };
+    // Version taken by a concurrent insert: loop once more with a fresh version.
+  }
+  return { ok: false, deduplicated: true, error: null };
+}
+
 /** Next version number for a booking (or a lead without a booking). */
 export async function nextAssessmentVersion(supabase: Client, target: AssessmentTarget): Promise<number> {
   let q = supabase.from("photo_pricing_assessments").select("version").eq("owner_id", target.ownerId);

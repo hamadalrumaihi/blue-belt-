@@ -47,20 +47,36 @@ async function owner(): Promise<{ supabase: Client; userId: string } | { error: 
   return { supabase, userId: guard.viewer.userId };
 }
 
-async function readSettings(supabase: Client, userId: string): Promise<{ exists: boolean; settings: Record<string, Json | undefined> }> {
-  const { data } = await supabase.from("photo_studio").select("settings").eq("owner_id", userId).maybeSingle();
+async function readSettings(supabase: Client, userId: string): Promise<{ exists: boolean; updatedAt: string | null; settings: Record<string, Json | undefined> }> {
+  const { data } = await supabase.from("photo_studio").select("settings, updated_at").eq("owner_id", userId).maybeSingle();
   const settings = data && isPlainObject(data.settings) ? { ...(data.settings as Record<string, Json | undefined>) } : {};
-  return { exists: Boolean(data), settings };
+  return { exists: Boolean(data), updatedAt: data?.updated_at ?? null, settings };
 }
 
-/** Replace one key of settings; the studio row is created with defaults when the owner never saved Settings → Public site. */
+/**
+ * Replace one key of settings; the studio row is created with defaults when
+ * the owner never saved Settings → Public site. The write is guarded by the
+ * row's updated_at (optimistic): a save from another tab in between is never
+ * overwritten; we re-read and merge once, then give up with a clear message.
+ */
 async function writeKey(supabase: Client, userId: string, key: string, value: Json, action: string, data: Record<string, Json | undefined>): Promise<Result> {
-  const current = await readSettings(supabase, userId);
-  const settings = { ...current.settings, [key]: value } as Json;
-  const { error } = current.exists
-    ? await supabase.from("photo_studio").update({ settings }).eq("owner_id", userId)
-    : await supabase.from("photo_studio").insert({ owner_id: userId, business_name: "Blue Belt Media", settings });
-  if (error) return { ok: false, error: error.message };
+  let written = false;
+  for (let attempt = 0; attempt < 2 && !written; attempt += 1) {
+    const current = await readSettings(supabase, userId);
+    const settings = { ...current.settings, [key]: value } as Json;
+    if (!current.exists) {
+      const { error } = await supabase.from("photo_studio").insert({ owner_id: userId, business_name: "Blue Belt Media", settings });
+      if (error) return { ok: false, error: error.message };
+      written = true;
+      break;
+    }
+    let q = supabase.from("photo_studio").update({ settings }, { count: "exact" }).eq("owner_id", userId);
+    if (current.updatedAt) q = q.eq("updated_at", current.updatedAt);
+    const { error, count } = await q;
+    if (error) return { ok: false, error: error.message };
+    written = Boolean(count);
+  }
+  if (!written) return { ok: false, error: "The website settings changed in another tab. Reload the page and try again." };
   await writeAudit(supabase, { ownerId: userId, actorId: userId, entity: "studio", entityId: userId, action, data });
   for (const p of PUBLIC_PATHS) revalidatePath(p);
   revalidatePath("/services", "layout");

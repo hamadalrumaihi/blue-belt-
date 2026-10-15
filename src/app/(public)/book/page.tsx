@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ShieldIcon } from "@/components/icons";
 import { resolveWizardEntry, toPublicServiceOption } from "@/lib/bookings/public-form";
+import { SERVICE_DEFINITIONS } from "@/lib/catalog";
 import { pageMetadata } from "@/lib/seo";
 import { listPublicEvents } from "@/lib/studio/public-events";
 import { loadPublicStudio } from "@/lib/studio/queries";
@@ -52,7 +53,7 @@ export default async function BookPage({ searchParams }: PageProps<"/book">) {
           <BookingWizard events={events} services={services} entry={entry} />
         </div>
         <p className="mt-6 text-center text-xs text-muted">
-          Prefer to talk first? <Link href="/contact" data-umami-event="contact-click" className="font-semibold text-primary">Send a message</Link> instead. What each service includes is on the <Link href="/services" className="font-semibold text-primary">services page</Link>.
+          Prefer to talk first? <Link href="/contact" data-umami-event="contact-click" className="font-semibold text-primary">Send a message</Link> instead. What each service includes is on the <Link href={entry.service ? `/services/${SERVICE_DEFINITIONS[entry.service].slug}` : "/services"} className="font-semibold text-primary">services page</Link>.
         </p>
       </div>
     </main>

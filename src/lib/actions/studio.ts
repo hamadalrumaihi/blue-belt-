@@ -57,16 +57,22 @@ export async function saveStudio(_prev: StudioState, formData: FormData): Promis
   if (instagramRaw && !instagram) fieldErrors.instagram = "Enter just the handle, e.g. @bluebeltmedia.";
   if (Object.keys(fieldErrors).length) return { fieldErrors };
 
-  const { data: current } = await supabase.from("photo_studio").select("settings").eq("owner_id", user.id).maybeSingle();
+  const { data: current } = await supabase.from("photo_studio").select("settings, updated_at").eq("owner_id", user.id).maybeSingle();
   const previous = current?.settings && typeof current.settings === "object" && !Array.isArray(current.settings) ? (current.settings as Record<string, Json | undefined>) : {};
   const merged: Record<string, Json | undefined> = { ...previous, galleryHosts: galleryHosts.hosts };
   if (pictimeGalleryUrl) merged.pictimeGalleryUrl = pictimeGalleryUrl;
   else delete merged.pictimeGalleryUrl; // empty field = back to the default client gallery
   const settings = merged as Json;
-  const { error } = await supabase
-    .from("photo_studio")
-    .upsert({ owner_id: user.id, business_name: business_name!, tagline, about, city, email, phone, whatsapp, instagram, public_booking, settings }, { onConflict: "owner_id" });
-  if (error) return { error: error.message };
+  const row = { owner_id: user.id, business_name: business_name!, tagline, about, city, email, phone, whatsapp, instagram, public_booking, settings };
+  if (current) {
+    // Optimistic guard: settings also carry testimonials / FAQs / media decisions saved from other pages; never overwrite a newer save.
+    const { error, count } = await supabase.from("photo_studio").update(row, { count: "exact" }).eq("owner_id", user.id).eq("updated_at", current.updated_at);
+    if (error) return { error: error.message };
+    if (!count) return { error: "Your studio settings were changed in another tab. Reload the page and try again." };
+  } else {
+    const { error } = await supabase.from("photo_studio").insert(row);
+    if (error) return { error: error.message };
+  }
   await writeAudit(supabase, { ownerId: user.id, actorId: user.id, entity: "studio", entityId: user.id, action: "studio.saved", data: { public_booking } });
   for (const p of ["/settings", "/", "/services", "/work", "/how-it-works", "/contact", "/book", "/privacy", "/terms", "/galleries"]) revalidatePath(p);
   revalidatePath("/services", "layout");

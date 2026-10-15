@@ -7,7 +7,7 @@ import { writeAudit } from "@/lib/audit";
 import { depositColumnsFor } from "@/lib/bookings/policy";
 import { BOOKING_STATUS_LABEL, bookingTransitionColumns, canTransitionBooking } from "@/lib/bookings/state";
 import { buildAcceptedQuote } from "@/lib/pricing/accept";
-import { computeAssessmentRow, loadAssessmentSource, nextAssessmentVersion, requestFor } from "@/lib/pricing/compute";
+import { computeAssessmentRow, insertQueuedAssessment, loadAssessmentSource, requestFor } from "@/lib/pricing/compute";
 import { assessmentFromRow } from "@/lib/pricing/engine";
 import { applyRequestOverrides, pricingRequestFromJson, type RequestOverrides } from "@/lib/pricing/engine/extract";
 import { requestFingerprint } from "@/lib/pricing/engine/fingerprint";
@@ -332,13 +332,10 @@ export async function recomputeAssessment(target: RecomputeTarget, overrides: Re
   const request = applyRequestOverrides(base ?? requestFor(loaded, now), overrides);
   const fingerprint = requestFingerprint(request);
   const t = { ownerId: user.id, bookingId: loaded.bookingId, leadId: loaded.leadId };
-  const version = await nextAssessmentVersion(supabase, t);
-  const { data: inserted, error } = await supabase
-    .from("photo_pricing_assessments")
-    .insert({ owner_id: user.id, booking_id: t.bookingId, lead_id: t.leadId, version, status: "queued", request_fingerprint: fingerprint, request_snapshot: request as unknown as Json, trigger_reason: "owner_request" })
-    .select("id,owner_id,booking_id,lead_id")
-    .single();
-  if (error || !inserted) return { ok: false, error: error?.code === "23505" ? "The same request is already queued; wait for it to finish." : (error?.message ?? "Could not create the assessment.") };
+  const queued = await insertQueuedAssessment(supabase, t, { fingerprint, request, reason: "owner_request" });
+  if (!queued.ok) return { ok: false, error: queued.deduplicated ? "The same request is already queued; wait for it to finish." : (queued.error ?? "Could not create the assessment.") };
+  const inserted = queued.row;
+  const version = queued.version;
   let status: "ready" | "needs_detail";
   try {
     status = (await computeAssessmentRow(supabase, inserted, request, now, options)).status;

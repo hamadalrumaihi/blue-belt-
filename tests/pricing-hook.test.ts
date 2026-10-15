@@ -98,4 +98,45 @@ describe("enqueuePricingAssessment", () => {
     expect(r).toMatchObject({ ok: true, deduplicated: false });
     expect(rows()[0]).toMatchObject({ status: "queued", error: "refs unavailable" });
   });
+
+  it("retries once with a fresh version when a concurrent insert took the version, and still dedupes on the fingerprint index", async () => {
+    db.seed("photo_bookings", [clubBooking({ athlete_count: 12, wants_photographer: true, hours_on_site: 8 })]);
+    const client = db.asClient();
+    const realFrom = db.from.bind(db);
+    const clashes: string[] = ["photo_pricing_assessments_booking_version_idx"];
+    const inserts: number[] = [];
+    (db as unknown as { from: (t: string) => unknown }).from = (table: string) => {
+      const q = realFrom(table) as unknown as { insert: (row: Record<string, unknown>) => unknown };
+      if (table !== "photo_pricing_assessments") return q;
+      const realInsert = q.insert.bind(q);
+      q.insert = (row: Record<string, unknown>) => {
+        inserts.push(row.version as number);
+        const clash = clashes.shift();
+        if (!clash) return realInsert(row);
+        const failing = { select: () => failing, single: () => failing, then: (resolve: (v: unknown) => unknown) => Promise.resolve({ data: null, error: { code: "23505", message: `duplicate key value violates unique constraint "${clash}"` } }).then(resolve) };
+        return failing;
+      };
+      return q;
+    };
+    const r = await enqueuePricingAssessment(client, { ownerId: OWNER, bookingId: BOOKING, leadId: null, reason: "public_submission" }, NOW);
+    expect(r).toMatchObject({ ok: true, deduplicated: false });
+    expect(inserts).toEqual([1, 1]);
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0]).toMatchObject({ version: 1, status: "ready" });
+
+    // A fingerprint clash is a dedupe: no retry, no row.
+    db.tables.photo_bookings[0].details = { athlete_count: 13, wants_photographer: true, hours_on_site: 8 };
+    clashes.push("photo_pricing_assessments_queued_fingerprint_idx");
+    inserts.length = 0;
+    const d = await enqueuePricingAssessment(client, { ownerId: OWNER, bookingId: BOOKING, leadId: null, reason: "public_submission" }, NOW);
+    expect(d).toEqual({ ok: true, assessmentId: null, deduplicated: true });
+    expect(inserts).toEqual([2]);
+    expect(rows()).toHaveLength(1);
+
+    // Two version clashes in a row: give up as a dedupe rather than loop.
+    clashes.push("photo_pricing_assessments_booking_version_idx", "photo_pricing_assessments_booking_version_idx");
+    inserts.length = 0;
+    expect(await enqueuePricingAssessment(client, { ownerId: OWNER, bookingId: BOOKING, leadId: null, reason: "public_submission" }, NOW)).toEqual({ ok: true, assessmentId: null, deduplicated: true });
+    expect(inserts).toEqual([2, 2]);
+  });
 });

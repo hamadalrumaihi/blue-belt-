@@ -45,7 +45,7 @@ export function LegalDocumentView({ doc, eyebrow, footer }: { doc: LegalDocument
                 <p key={j}>{p}</p>
               ))}
               {s.bullets && (
-                <ul className="list-disc space-y-2 pl-5">
+                <ul className="list-disc space-y-2 ps-5">
                   {s.bullets.map((b, j) => (
                     <li key={j}>{b}</li>
                   ))}

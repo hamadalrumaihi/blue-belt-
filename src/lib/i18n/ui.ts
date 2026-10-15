@@ -207,6 +207,59 @@ export const UI = {
   },
 } as const;
 
+/**
+ * Strings for the request wizard's chrome (/book, /book/done), ready for the
+ * catalog workstream to wire into its components. Same policy limits as the
+ * rest of the site: no reply-time promise, e-mail as the channel, a request
+ * is not a confirmed reservation until the agreement is signed and the
+ * deposit is paid.
+ */
+export const BOOK_UI = {
+  steps: {
+    what: { en: "What", ar: "ماذا" },
+    details: { en: "The day", ar: "اليوم" },
+    contact: { en: "About you", ar: "عنك" },
+    review: { en: "Review", ar: "المراجعة" },
+  },
+  stepOf: { en: "Step {n} of {total}", ar: "الخطوة {n} من {total}" },
+  continue: { en: "Continue", ar: "متابعة" },
+  back: { en: "Back", ar: "رجوع" },
+  send: { en: "Send request", ar: "إرسال الطلب" },
+  sending: { en: "Sending...", ar: "جارٍ الإرسال..." },
+  sendingLive: { en: "Sending your request", ar: "جارٍ إرسال طلبك" },
+  checkOne: { en: "Please check this field", ar: "يرجى مراجعة هذا الحقل" },
+  checkMany: { en: "Please check these {n} fields", ar: "يرجى مراجعة هذه الحقول ({n})" },
+  reviewIntro: { en: "Read and tick each box. Nothing is pre-selected.", ar: "اقرأ كل بند وضع علامة عليه. لا شيء محدد مسبقًا." },
+  quotedIndividually: { en: "This coverage is quoted individually. We send a price after reviewing your request.", ar: "تُسعَّر هذه التغطية بشكل فردي. نرسل السعر بعد مراجعة طلبك." },
+  done: {
+    eyebrow: { en: "Request received", ar: "تم استلام الطلب" },
+    title: { en: "Thank you. We are on it.", ar: "شكرًا لك. بدأنا العمل على طلبك." },
+    body: { en: "Your request is saved and a copy is on its way to your inbox. It is not a confirmed reservation yet: the date is held for you only once the agreement is signed and the deposit is paid.", ar: "تم حفظ طلبك ونسخة منه في طريقها إلى بريدك الإلكتروني. هو ليس حجزًا مؤكدًا بعد: يُحجز الموعد لك فقط بعد توقيع الاتفاقية ودفع العربون." },
+    reference: { en: "Your reference", ar: "رقمك المرجعي" },
+    referenceHint: { en: "Quote it if you message us. It is also in the e-mail we just sent.", ar: "اذكره عند مراسلتنا. وهو موجود أيضًا في البريد الإلكتروني الذي أرسلناه للتو." },
+    nextHeading: { en: "What happens next", ar: "ماذا يحدث بعد ذلك" },
+    next: [
+      {
+        title: { en: "We read your request", ar: "نقرأ طلبك" },
+        text: { en: "We check the date and reply by e-mail. If the date is free we confirm we can cover it; team days, events and anything quoted individually come back with a written quote first, and nothing is due until you approve it.", ar: "نتحقق من الموعد ونرد عبر البريد الإلكتروني. إذا كان الموعد متاحًا نؤكد إمكانية التغطية؛ أما أيام الفرق والفعاليات وكل ما يُسعَّر فرديًا فيصلك عرض سعر مكتوب أولًا، ولا يُستحق أي مبلغ حتى توافق عليه." },
+      },
+      {
+        title: { en: "You sign and pay the deposit", ar: "توقّع وتدفع العربون" },
+        text: { en: "Once the scope and the price are agreed in writing you sign the agreement online and pay the 50% deposit by online payment. That is the moment the date is reserved for you; until then it stays open.", ar: "بعد الاتفاق على النطاق والسعر كتابيًا توقّع الاتفاقية إلكترونيًا وتدفع عربون 50% عبر الدفع الإلكتروني. عندها يُحجز الموعد لك؛ وحتى ذلك الحين يبقى مفتوحًا." },
+      },
+      {
+        title: { en: "Shoot and delivery", ar: "التصوير والتسليم" },
+        text: { en: "After the shoot your edited photos and video arrive in a private online gallery sent to the e-mail you used. The remaining 50% is due after the gallery is delivered.", ar: "بعد التصوير تصلك الصور والفيديو بعد التحرير في معرض إلكتروني خاص يُرسل إلى البريد الإلكتروني الذي استخدمته. وتُستحق الـ50% المتبقية بعد تسليم المعرض." },
+      },
+    ],
+    noReply: { en: "No reply yet? Message us with your reference and we will look it up. Personal use of the photos is included; club, team, brand or commercial use is licensed in the quote.", ar: "لم يصلك رد بعد؟ راسلنا مع رقمك المرجعي وسنتحقق من طلبك. الاستخدام الشخصي للصور مشمول؛ أما استخدام النادي أو الفريق أو العلامة التجارية أو الاستخدام التجاري فيُرخَّص في عرض السعر." },
+    portalHint: { en: "The portal signs you in with the e-mail you used for this request.", ar: "تسجّل البوابة دخولك بالبريد الإلكتروني الذي استخدمته في هذا الطلب." },
+    missingEyebrow: { en: "Request", ar: "الطلب" },
+    missingTitle: { en: "No request reference", ar: "لا يوجد رقم مرجعي للطلب" },
+    missingBody: { en: "This page shows a request after it has been sent. If you just sent one and did not get a reference, it was not saved. Please send it again.", ar: "تعرض هذه الصفحة الطلب بعد إرساله. إذا أرسلت طلبًا للتو ولم تحصل على رقم مرجعي، فلم يتم حفظه. يرجى إرساله مرة أخرى." },
+  },
+} as const;
+
 /** Picker bound to a locale: `const t = tr(locale); t(UI.nav.work)`. */
 export function tr(locale: Locale): <T>(value: Bilingual<T>) => T {
   return (value) => localized(value, locale);

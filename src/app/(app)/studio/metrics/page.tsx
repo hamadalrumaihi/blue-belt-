@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { requireOwner } from "@/lib/roles";
 import { BrandHeader } from "@/components/BrandHeader";
 import { PageBody } from "@/components/AppShell";
 import { formatQr } from "@/lib/bookings/state";
-import { resolveViewerMode } from "@/lib/collaborator";
 import { loadStudioMetrics } from "@/lib/studio/dashboard";
 import { cn } from "@/lib/utils";
 
@@ -26,7 +26,8 @@ const days = (d: number | null) => (d === null ? "—" : `${d} days`);
 
 /** Internal numbers with their definitions spelled out; nothing here is shown to clients. */
 export default async function MetricsPage() {
-  if ((await resolveViewerMode()).collaboratorOnly) redirect("/coverage");
+  // Owner only: money and website content are never for staff/collaborator accounts.
+  if (!(await requireOwner()).ok) redirect("/coverage");
   const m = await loadStudioMetrics();
   const maxMonth = Math.max(1, ...m.months.map((x) => Math.max(x.forecastQr, x.collectedQr)));
   return (

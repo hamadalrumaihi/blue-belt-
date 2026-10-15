@@ -71,7 +71,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm install --no-audit --no-fund
+          cache: npm
+          cache-dependency-path: agent/package-lock.json
+      - run: npm ci
       - run: node --check src/*.mjs
       - run: npm test
 

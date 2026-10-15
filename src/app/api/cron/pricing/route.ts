@@ -1,5 +1,6 @@
 import { verifyCronSecret } from "@/lib/cron-auth";
 import { NextResponse } from "next/server";
+import { JOB_NAMES, recordJobHeartbeat } from "@/lib/jobs/heartbeat";
 import { requestLogger } from "@/lib/log";
 import { computeAssessmentRow, loadAssessmentSource, requestFor } from "@/lib/pricing/compute";
 import { pricingRequestFromJson } from "@/lib/pricing/engine/extract";
@@ -73,5 +74,11 @@ export async function POST(request: Request) {
 
   const durationMs = Date.now() - started;
   log.info("pricing.run", { ...processed, research: research.status, stale: stale?.needsReverification ?? null, refreshed, durationMs });
+  try {
+    // Counts and statuses only: never a price.
+    await recordJobHeartbeat(supabase, JOB_NAMES.pricing, processed.failed === 0, { scanned: processed.scanned, ready: processed.ready, needs_detail: processed.needs_detail, failed: processed.failed, research: research.status, durationMs }, now);
+  } catch (err) {
+    log.warn("pricing.heartbeat_failed", { error: err instanceof Error ? err.message : String(err) });
+  }
   return NextResponse.json({ ok: true, processed, research: { status: research.status, reason: research.reason, provider: research.provider, refreshed }, stale, durationMs, checkedAt: now.toISOString() }, { headers });
 }

@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { Locale } from "@/lib/i18n/locale";
 import { tr, UI } from "@/lib/i18n/ui";
 import { businessIdentity, businessLegalLine } from "@/lib/studio/business";
+import { dateInZone, DEFAULT_TIMEZONE } from "@/lib/time";
 import type { PhotoStudioRow } from "@/lib/supabase/database.types";
 import { ExternalIcon, InstagramIcon, MailIcon } from "../icons";
 import { Logo } from "../Logo";
@@ -35,9 +36,12 @@ export function PublicFooter({ studio, galleryUrl, locale = "en", accountLink }:
       <div className="container-x grid gap-8 py-10 sm:grid-cols-2 md:grid-cols-4">
         <div className="sm:col-span-2 md:col-span-1">
           <Logo inverted href="/" size={40} />
-          <p className="mt-3 max-w-xs text-sm text-white/70">
-            {studio?.tagline ?? t(UI.footer.tagline)} {studio?.city ? `${t(UI.footer.basedIn)} ${studio.city}.` : ""}
-          </p>
+          <p className="mt-3 max-w-xs text-sm text-white/70">{studio?.tagline ?? t(UI.footer.tagline)}</p>
+          {studio?.city && (
+            <p className="mt-1 max-w-xs text-sm text-white/70">
+              {t(UI.footer.basedIn)} {studio.city}.
+            </p>
+          )}
         </div>
         <nav aria-label={t(UI.nav.explore)}>
           <p className="eyebrow mb-2 !text-white/50">{t(UI.nav.explore)}</p>
@@ -86,7 +90,7 @@ export function PublicFooter({ studio, galleryUrl, locale = "en", accountLink }:
       </div>
       <div className="space-y-1 border-t border-white/10 px-gutter py-4 text-center text-xs text-white/50">
         <p>
-          © {new Date().getFullYear()} {name}. {t(UI.footer.delivered)}
+          © {dateInZone(new Date(), DEFAULT_TIMEZONE).year} {name}. {t(UI.footer.delivered)}
         </p>
         <p dir="ltr">{businessLegalLine(identity)}</p>
       </div>

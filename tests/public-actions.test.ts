@@ -247,6 +247,9 @@ describe("submitPublicBooking", () => {
     expect(args.p_owner_id).toBe(OWNER);
     expect(args.p_idempotency_key).toBe(KEY);
     expect(args.p_person).toEqual({ full_name: "Hamad", email: "hamad@example.com", phone: "+974 5555 1234", instagram: null, kind: "person", source: "website" });
+    service = new FakeService();
+    await expectRedirect(submitPublicBooking(null, fd({ ...ATHLETE, instagram: "https://instagram.com/Hamad.BJJ/", idempotency_key: "55555555-5555-4555-8555-555555555557" })));
+    expect((service.rpcCalls[0].args.p_person as Row).instagram).toBe("hamad.bjj");
     expect(args.p_organization).toBeNull();
     expect(args.p_lead).toMatchObject({ event_id: EVENT_ID, booking_type: "tournament_athlete", status: "new", source: "website", details: { service_id: SERVICE_ID, service_name: "Tournament photo", service_key: "tournament_athlete", media_scope: "photo" } });
     const booking = rpcBooking();
@@ -301,7 +304,7 @@ describe("submitPublicBooking", () => {
     expect(email).toMatchObject({ owner_id: OWNER, alert_key: `email:booking:${BOOKING_ID}:received`, kind: "BOOKING_RECEIVED" });
     expect((email!.payload as Row).to).toBe("hamad@example.com");
     const text = (email!.payload as Row).text as string;
-    expect(text).toContain("We confirm within 24 hours. Then you sign the agreement and pay the 50% deposit online to secure the date.");
+    expect(text).toContain("We confirm the date and the price within 24 hours. Then you sign the agreement and pay the 50% deposit online to secure the date.");
     expect(text).toContain("BB-7K3PQ2");
     expect(text.toLowerCase()).not.toMatch(/fatoorah|pic-?time|no payment is needed|after the shoot you pay|payment link follows|whatsapp/);
     expect(service.firstWriteSeq("photo_notification_deliveries")).toBeGreaterThan(service.rpcCalls[0].seq);
@@ -317,7 +320,10 @@ describe("submitPublicBooking", () => {
     expect(booking).toMatchObject({ service_id: QUOTE_SERVICE, package_name: "Tournament quoted", amount_qr: 0, payment_mode: "quote", booking_status: "inquiry", deposit_qr: 0, balance_qr: 0, deposit_state: "not_required" });
     expect((service.rpcCalls[0].args.p_audit as Row[])[0].data).toMatchObject({ price_mode: "quote", amount_qr: 0, payment_mode: "quote" });
     const email = service.upserts("photo_notification_deliveries").find((n) => n.channel === "email");
-    expect((email!.payload as Row).text).toContain("quoted individually");
+    const quoteText = (email!.payload as Row).text as string;
+    expect(quoteText).toContain("quoted individually");
+    expect(quoteText.indexOf("price first")).toBeLessThan(quoteText.indexOf("50% deposit"));
+    expect(quoteText).toContain("Once you approve the price");
     expect(JSON.stringify(service.upserts("photo_notification_deliveries"))).not.toContain("350");
   });
 
@@ -355,13 +361,16 @@ describe("submitPublicBooking", () => {
     expect(JSON.stringify(audit[2].data)).not.toContain("noora@example.com");
   });
 
-  it("a replayed idempotency key redirects to the existing reference and sends no second notice", async () => {
+  it("a replayed idempotency key redirects to the existing reference and re-enqueues the same alert keys (idempotent repair of a half-finished first attempt)", async () => {
     service.rpcResult = { data: { booking_id: BOOKING_ID, lead_id: LEAD_ID, person_id: PERSON_ID, public_ref: "BB-RACE22", replay: true }, error: null };
     const url = await expectRedirect(submitPublicBooking(null, fd(ATHLETE)));
     expect(url).toBe("/book/done?ref=BB-RACE22");
     expect(service.rpcCalls).toHaveLength(1);
-    expect(service.upserts("photo_notification_deliveries")).toEqual([]);
-    expect(enqueuePricingAssessment).not.toHaveBeenCalled();
+    const notices = service.upserts("photo_notification_deliveries");
+    expect(notices.map((n) => n.alert_key).sort()).toEqual([`booking:${BOOKING_ID}:new`, `email:booking:${BOOKING_ID}:received`]);
+    expect(JSON.stringify(notices)).toContain("BB-RACE22");
+    expect(enqueuePricingAssessment).toHaveBeenCalledTimes(1);
+    expect(enqueuePricingAssessment.mock.calls[0][1]).toMatchObject({ bookingId: BOOKING_ID, leadId: LEAD_ID });
   });
 
   it("a failed transaction returns a generic error and never notifies, assesses or redirects", async () => {

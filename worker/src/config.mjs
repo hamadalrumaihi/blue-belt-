@@ -108,7 +108,7 @@ export function validateConfig() {
   if (!["playwright", "patchright"].includes(config.engine)) problems.push("ENGINE must be playwright or patchright");
   if (!isValidTimezone(config.timezone)) problems.push(`TZ_ID must be an IANA zone such as Europe/London (got "${config.timezone}")`);
   if ((config.schedule.seconds || config.schedule.deliverySeconds || config.schedule.paymentsSeconds || config.schedule.opsSeconds || config.schedule.pricingSeconds || config.schedule.mediaCleanupSeconds) && (!config.schedule.appUrl || !config.schedule.cronSecret)) {
-    problems.push("SCHEDULE_SECONDS / DELIVERY_SECONDS require APP_URL and CRON_SECRET");
+    problems.push("SCHEDULE_SECONDS / DELIVERY_SECONDS / PAYMENTS_SECONDS / OPS_HEALTH_SECONDS / PRICING_SECONDS / MEDIA_CLEANUP_SECONDS require APP_URL and CRON_SECRET");
   }
   return problems;
 }

@@ -1,7 +1,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database, Json } from "@/lib/supabase/database.types";
-import { computeAssessmentRow, loadAssessmentSource, nextAssessmentVersion, requestFor } from "./compute";
+import type { Database } from "@/lib/supabase/database.types";
+import { computeAssessmentRow, insertQueuedAssessment, loadAssessmentSource, requestFor } from "./compute";
 import { requestFingerprint } from "./engine/fingerprint";
 
 /**
@@ -40,17 +40,13 @@ export async function enqueuePricingAssessment(supabase: SupabaseClient<Database
     const { data: existing } = await existingQ.order("created_at", { ascending: false }).limit(1).maybeSingle();
     if (existing) return { ok: true, assessmentId: existing.id, deduplicated: true };
 
-    const version = await nextAssessmentVersion(supabase, target);
-    const { data: inserted, error } = await supabase
-      .from("photo_pricing_assessments")
-      .insert({ owner_id: target.ownerId, booking_id: target.bookingId, lead_id: target.leadId, version, status: "queued", request_fingerprint: fingerprint, request_snapshot: request as unknown as Json, trigger_reason: trigger.reason })
-      .select("id,owner_id,booking_id,lead_id")
-      .single();
-    if (error || !inserted) {
+    const queued = await insertQueuedAssessment(supabase, target, { fingerprint, request, reason: trigger.reason });
+    if (!queued.ok) {
       // A concurrent insert of the same request (partial unique index) is a dedupe, not a failure.
-      if (error?.code === "23505") return { ok: true, assessmentId: null, deduplicated: true };
-      return { ok: false, error: error?.message ?? "Could not queue the assessment." };
+      if (queued.deduplicated) return { ok: true, assessmentId: null, deduplicated: true };
+      return { ok: false, error: queued.error ?? "Could not queue the assessment." };
     }
+    const inserted = queued.row;
 
     try {
       await computeAssessmentRow(supabase, inserted, request, now);

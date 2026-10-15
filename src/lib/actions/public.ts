@@ -12,7 +12,7 @@ import { createLogger } from "@/lib/log";
 import { enqueueClientEmail } from "@/lib/notifications/email/outbox";
 import { buildEmail } from "@/lib/notifications/email/templates";
 import { enqueueOwnerTelegram } from "@/lib/notifications/owner";
-import { findOrCreatePerson } from "@/lib/people/match";
+import { findOrCreatePerson, normalizeInstagram } from "@/lib/people/match";
 import { enqueuePricingAssessment } from "@/lib/pricing/assess-hook";
 import { RULES, rateLimit } from "@/lib/rate-limit";
 import { bookableAmount } from "@/lib/services/pricing";
@@ -159,7 +159,7 @@ export async function submitPublicBooking(_prev: PublicFormState, fd: FormData):
     const { data, error } = await supabase.rpc("photo_submit_public_booking", {
       p_owner_id: ownerId,
       p_idempotency_key: values.idempotency_key,
-      p_person: { full_name: values.full_name, email: values.email, phone: values.phone, instagram: values.instagram, kind: personKindFor(values), source: "website" },
+      p_person: { full_name: values.full_name, email: values.email, phone: values.phone, instagram: normalizeInstagram(values.instagram), kind: personKindFor(values), source: "website" },
       p_organization: isClub && values.club_name ? { name: values.club_name, kind: "club", email: values.email, phone: values.phone, instagram: values.instagram } : null,
       p_lead: { event_id: values.event_id, booking_type: values.booking_type, status: "new", source: "website", message: values.notes, details: { ...values.details, service_id: values.service_id, service_name: service?.name ?? null } },
       p_booking: bookingRow as unknown as Json,
@@ -175,11 +175,10 @@ export async function submitPublicBooking(_prev: PublicFormState, fd: FormData):
       return { error: GENERIC_ERROR };
     }
     const { booking_id: bookingId, public_ref: ref } = result;
-    if (result.replay) {
-      // A retry, a double click or a reload after a slow response: same key, same booking, no second notice.
-      log.info("public.booking.idempotent_replay", { bookingId });
-      return { ref };
-    }
+    // A retry, a double click or a reload after a slow response: same key, same booking. The notices
+    // below are keyed by alert_key, so re-enqueueing them is idempotent and repairs a first attempt
+    // that committed but died before notifying.
+    if (result.replay) log.info("public.booking.idempotent_replay", { bookingId });
 
     // From here on the booking exists; nothing below may change the outcome.
     const summary = summarizePublicBooking(values, offered);
@@ -215,10 +214,15 @@ export async function submitPublicBooking(_prev: PublicFormState, fd: FormData):
         kind: "BOOKING_RECEIVED",
         subject: `We received your booking request (${ref})`,
         greeting: `Hi ${values.full_name},`,
-        paragraphs: [
-          `Thanks for booking with ${studio.business_name}. We confirm within 24 hours. Then you sign the agreement and pay the 50% deposit online to secure the date. The remaining 50% is due after your gallery is delivered.`,
-          quoteOnly ? "This request is quoted individually: we send you a price first, and nothing is due until you approve it." : "Nothing is due until we have confirmed availability and the price with you.",
-        ],
+        paragraphs: quoteOnly
+          ? [
+              `Thanks for your request to ${studio.business_name}. This request is quoted individually: we send you a price first, within 24 hours, and nothing is due until you approve it.`,
+              "Once you approve the price you sign the agreement and pay the 50% deposit online to secure the date. The remaining 50% is due after your gallery is delivered.",
+            ]
+          : [
+              `Thanks for your request to ${studio.business_name}. We confirm the date and the price within 24 hours. Then you sign the agreement and pay the 50% deposit online to secure the date. The remaining 50% is due after your gallery is delivered.`,
+              "Nothing is due until we have confirmed availability and the price with you.",
+            ],
         facts: [["Reference", ref], ...summary.filter(([k]) => !["Name", "Phone", "E-mail", "Instagram", "Notes"].includes(k))],
         cta: { label: "View my bookings", url: `${siteUrl()}/client` },
         businessName: studio.business_name,

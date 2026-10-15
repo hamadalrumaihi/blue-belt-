@@ -62,6 +62,8 @@ export default async function ServicePage({ params }: Props) {
               <li><Link href="/" className="hover:text-white">{t(UI.nav.home)}</Link></li>
               <li aria-hidden><ChevronRightIcon size={12} className="rtl-flip" /></li>
               <li><Link href="/services" className="hover:text-white">{t(UI.nav.services)}</Link></li>
+              <li aria-hidden><ChevronRightIcon size={12} className="rtl-flip" /></li>
+              <li aria-current="page" className="text-white/80">{L(copy.title)}</li>
             </ol>
           </nav>
           <h1 className="heading-1 mt-4 max-w-3xl text-balance">{L(copy.title)}</h1>

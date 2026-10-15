@@ -179,7 +179,7 @@ export function startScheduler(deps = {}) {
         const res = await fetchImpl(`${appUrl}/api/media/cleanup?hours=24`, { method: "POST", headers: { authorization: `Bearer ${cronSecret}`, "content-type": "application/json" }, body: "{}", signal: AbortSignal.timeout(55_000) });
         const body = await res.json().catch(() => ({}));
         if (!res.ok) log.warn("media_cleanup.tick_failed", { status: res.status, code: body.code, elapsedMs: Date.now() - started });
-        else if (body.deleted) log.info("media_cleanup.tick", { deleted: body.deleted, elapsedMs: Date.now() - started });
+        else if (body.deletedRows || body.removedObjects) log.info("media_cleanup.tick", { deletedRows: body.deletedRows, removedObjects: body.removedObjects, elapsedMs: Date.now() - started });
       } catch (err) {
         log.error("media_cleanup.error", { error: err instanceof Error ? err.message : String(err), elapsedMs: Date.now() - started });
       } finally {

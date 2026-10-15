@@ -25,7 +25,7 @@ beforeEach(() => {
   vi.stubEnv("CRON_SECRET", CRON);
   vi.stubEnv("PRICING_RESEARCH_ENABLED", "");
   vi.stubEnv("PRICING_RESEARCH_API_KEY", "");
-  for (const t of ["photo_bookings", "photo_pricing_assessments", "photo_price_references", "photo_services", "photo_events", "photo_leads"]) db.tables[t] = [];
+  for (const t of ["photo_bookings", "photo_pricing_assessments", "photo_price_references", "photo_services", "photo_events", "photo_leads", "photo_job_heartbeats"]) db.tables[t] = [];
 });
 afterEach(() => vi.unstubAllEnvs());
 
@@ -44,6 +44,8 @@ describe("POST /api/cron/pricing", () => {
     const body = await res.json();
     expect(body).toMatchObject({ ok: true, processed: { scanned: 1, ready: 1, failed: 0 }, research: { status: "disabled", refreshed: 0 }, stale: { scanned: 1, needsReverification: 1 } });
     expect(db.tables.photo_pricing_assessments[0]).toMatchObject({ status: "ready" });
+    expect(db.tables.photo_job_heartbeats[0]).toMatchObject({ name: "pricing", ok: true, summary: { scanned: 1, ready: 1, failed: 0, research: "disabled" } });
+    expect(JSON.stringify(db.tables.photo_job_heartbeats[0])).not.toMatch(/recommend|price_from|customer/);
 
     vi.stubEnv("PRICING_RESEARCH_ENABLED", "1");
     const again = await (await post()).json();

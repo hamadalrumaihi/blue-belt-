@@ -4,27 +4,39 @@ import { CopyButton } from "@/components/CopyButton";
 import { CheckIcon } from "@/components/icons";
 import { isPublicRef } from "@/lib/bookings/public-form";
 import { loadPublicStudio } from "@/lib/studio/queries";
+import { createServiceClient, isServiceClientConfigured } from "@/lib/supabase/service";
+import type { PaymentMode } from "@/lib/supabase/database.types";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Request received | Blue Belt Media", robots: { index: false, follow: false } };
 
 /**
  * Shown only after `submitPublicBooking` redirected here with the reference
- * of a booking row it just wrote (or found again by idempotency key). Without
- * a valid reference the page does not claim anything was received.
+ * of a booking row it just wrote (or found again by idempotency key). The
+ * reference is looked up (id and payment mode only, nothing else leaves the
+ * studio); without a matching booking the page does not claim anything was
+ * received.
  *
  * The next steps repeat the approved policy only (the booking e-mail, the
  * FAQ and docs/studio-platform.md): a reply within 24 hours, a quote first
  * where the work is quoted, the agreement and the 50% deposit confirm the
  * date, the balance is due after delivery. Availability is never promised.
  */
+/** The booking behind a reference, for this studio only: id and payment mode, nothing more. */
+async function findBooking(ownerId: string, ref: string): Promise<{ id: string; payment_mode: PaymentMode } | null> {
+  if (!isServiceClientConfigured()) return null;
+  const { data } = await createServiceClient().from("photo_bookings").select("id,payment_mode").eq("owner_id", ownerId).eq("public_ref", ref).maybeSingle();
+  return data ?? null;
+}
+
 export default async function BookingDonePage({ searchParams }: PageProps<"/book/done">) {
   const [pub, params] = await Promise.all([loadPublicStudio(), searchParams]);
   const raw = Array.isArray(params.ref) ? params.ref[0] : params.ref;
-  const ref = isPublicRef(raw) ? raw : null;
+  const booking = pub && isPublicRef(raw) ? await findBooking(pub.studio.owner_id, raw) : null;
+  const ref = booking ? raw : null;
   const name = pub?.studio.business_name ?? "Blue Belt Media";
 
-  if (!ref) {
+  if (!ref || !booking) {
     return (
       <main className="bg-page">
         <div className="mx-auto max-w-2xl px-4 py-12 lg:px-8 lg:py-16">
@@ -42,8 +54,14 @@ export default async function BookingDonePage({ searchParams }: PageProps<"/book
     );
   }
 
+  const quoted = booking.payment_mode === "quote";
   const steps: Array<{ title: string; text: string }> = [
-    { title: "Within 24 hours", text: `${name} reads your request and replies by e-mail or WhatsApp. If the date is free we confirm we can cover it; team days, events and anything quoted individually come back with a price first, and nothing is due until you approve it.` },
+    {
+      title: "Within 24 hours",
+      text: quoted
+        ? `${name} reads your request and replies by e-mail with a price first. Nothing is due until you approve it.`
+        : `${name} reads your request and replies by e-mail. If the date is free we confirm the date and the price with you.`,
+    },
     { title: "You sign and pay the deposit", text: "Once the date and price are agreed you sign the agreement online and pay the 50% deposit on the secure payment page. That is the moment the date is reserved for you; until then it stays open." },
     { title: "Shoot and delivery", text: "After the shoot your edited photos and video arrive in a private online gallery sent to the e-mail you used. The remaining 50% is due after the gallery is delivered." },
   ];

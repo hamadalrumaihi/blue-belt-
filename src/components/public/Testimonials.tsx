@@ -16,7 +16,7 @@ export function Testimonials({ reviews, locale = "en" }: { reviews: Testimonial[
           <p className="eyebrow !text-primary">{ar ? "رياضيون · مدربون · أندية" : "Athletes · Coaches · Clubs"}</p>
           <h2 id="stories-heading" className="heading-2 mt-2 text-ink">{ar ? "من على البساط، بكلماتهم." : "From the mats, in their words."}</h2>
         </div>
-        <ul className="mt-8 flex snap-x snap-mandatory gap-4 overflow-x-auto pb-4 lg:grid lg:grid-cols-3 lg:overflow-visible lg:pb-0" tabIndex={reviews.length > 1 ? 0 : undefined} aria-label={ar ? "آراء العملاء" : "Client reviews"}>
+        <ul className="mt-8 flex snap-x snap-mandatory gap-4 overflow-x-auto pb-4 lg:grid lg:grid-cols-3 lg:overflow-visible lg:pb-0" tabIndex={reviews.length > 1 ? 0 : undefined} role={reviews.length > 1 ? "region" : undefined} aria-label={ar ? "آراء العملاء" : "Client reviews"}>
           {reviews.map((review, index) => (
             <li key={`${review.name}-${index}`} className="relative flex w-[85%] shrink-0 snap-start flex-col overflow-hidden rounded-card border border-line bg-surface p-6 shadow-card sm:w-[48%] lg:w-auto">
               <div aria-hidden className="absolute inset-x-0 top-0 h-1 bg-primary" />
