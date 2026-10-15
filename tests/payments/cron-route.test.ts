@@ -53,7 +53,8 @@ describe("POST /api/cron/payments (payment job)", () => {
 
   it("replays unmatched verified events and does NOT call the provider unless reconciliation is switched on; records a heartbeat", async () => {
     db.seed("photo_payment_events", [{ provider: "MYFATOORAH", provider_event_id: "WH-626519", event_type: "PAYMENT_STATUS_CHANGED", payload: paymentEvent(), signature_valid: true, processing_result: "booking_not_found", received_at: "2026-10-02T10:00:00.000Z" }]);
-    db.seed("photo_bookings", [booking({ created_at: "2026-10-01T00:00:00.000Z" })]);
+    // Inside the reconcile window (older than 10 minutes, younger than the max pending age), relative to the real clock the route reads.
+    db.seed("photo_bookings", [booking({ created_at: new Date(Date.now() - 60 * 60_000).toISOString() })]);
     const res = await (await route()).POST(post());
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -94,7 +95,8 @@ describe("POST /api/cron/payments (payment job)", () => {
 
   it("with PAYMENTS_RECONCILE_ENABLED=1 it asks the provider about old pending bookings", async () => {
     vi.stubEnv("PAYMENTS_RECONCILE_ENABLED", "1");
-    db.seed("photo_bookings", [booking({ created_at: "2026-10-01T00:00:00.000Z" })]);
+    // Inside the reconcile window (older than 10 minutes, younger than the max pending age), relative to the real clock the route reads.
+    db.seed("photo_bookings", [booking({ created_at: new Date(Date.now() - 60 * 60_000).toISOString() })]);
     getPaymentStatus.mockResolvedValue({ ok: true, data: { invoiceId: "6409988", invoiceStatus: "Pending", invoiceReference: "r", customerReference: "c", invoiceValue: 350, transactions: [], raw: {} } });
     const body = await (await (await route()).POST(post())).json();
     expect(body.reconcile).toMatchObject({ enabled: true, scanned: 1, changed: 0 });
