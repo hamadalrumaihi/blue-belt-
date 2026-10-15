@@ -28,13 +28,12 @@ import {
 } from "@/lib/bookings/public-form";
 import { BOOKING_TYPE_LABEL } from "@/lib/bookings/state";
 import { SERVICE_DEFINITIONS, isMediaScope, type ServiceKey } from "@/lib/catalog";
-import { publicPrice } from "@/lib/services/pricing";
 import { cn } from "@/lib/utils";
 import { formatEventDate } from "@/lib/time";
 
 type Props = {
   events: PublicEventOption[];
-  /** Public packages (descriptions already stripped of placeholders). */
+  /** Public packages: price as a label only, descriptions stripped of placeholders. */
   services: PublicServiceOption[];
   /** Resolved from `?service=`, `?audience=`, legacy `?type=` / `?kind=`, `?event=`. */
   entry: WizardEntry;
@@ -460,7 +459,7 @@ function FieldInput({ field, values, setValue, errors, events, services }: Field
         <select id={id} className="input" value={values[field.name] ?? ""} onChange={(e) => setValue(field.name, e.target.value)} {...a11y}>
           <option value="">Not sure yet, advise me</option>
           {services.map((s) => (
-            <option key={s.id} value={s.id}>{s.name}: {publicPrice(s).label}</option>
+            <option key={s.id} value={s.id}>{s.name}: {s.price_label}</option>
           ))}
         </select>
       </Wrap>
@@ -602,7 +601,7 @@ function Review({ service, steps, values, events, services, onEdit }: { service:
     }
     if (f.kind === "service") {
       const s = values.service_id ? services.find((x) => x.id === values.service_id) : null;
-      return s ? `${s.name}: ${publicPrice(s).label}` : services.some((x) => x.booking_type === bookingType) ? "Not sure yet, advise me" : null;
+      return s ? `${s.name}: ${s.price_label}` : services.some((x) => x.booking_type === bookingType) ? "Not sure yet, advise me" : null;
     }
     if (f.kind === "checkbox") {
       const on = (f.options ?? []).filter((o) => values[o.value] === "1").map((o) => o.label);

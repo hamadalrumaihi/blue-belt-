@@ -20,6 +20,7 @@ import {
   resolveWizardEntry,
   stepIndexForField,
   summarizePublicBooking,
+  toPublicServiceOption,
   videoFieldName,
   type PublicEventOption,
   type PublicServiceOption,
@@ -34,9 +35,9 @@ const QUOTE_SERVICE = "44444444-4444-4444-8444-444444444444";
 const KEY = "55555555-5555-4555-8555-555555555555";
 const events: PublicEventOption[] = [{ id: EVENT_ID, name: "AJP Qatar National", event_date: "2026-11-20" }];
 const services: PublicServiceOption[] = [
-  { id: SERVICE_ID, name: "Tournament photo", booking_type: "tournament_athlete", price_qr: 350, price_mode: "from", currency: "QAR" },
-  { id: OTHER_SERVICE, name: "Training 60", booking_type: "training_session", price_qr: null, price_mode: "quote", currency: "QAR" },
-  { id: QUOTE_SERVICE, name: "Tournament full day", booking_type: "tournament_athlete", price_qr: 900, price_mode: "quote", currency: "QAR" },
+  toPublicServiceOption({ id: SERVICE_ID, name: "Tournament photo", booking_type: "tournament_athlete", price_qr: 350, price_mode: "from", description: "All matches. Set your price." }),
+  toPublicServiceOption({ id: OTHER_SERVICE, name: "Training 60", booking_type: "training_session", price_qr: null, price_mode: "quote", description: null }),
+  toPublicServiceOption({ id: QUOTE_SERVICE, name: "Tournament full day", booking_type: "tournament_athlete", price_qr: 900, price_mode: "quote", description: "Quoted individually." }),
 ];
 const ctx = { events, services, today: "2026-10-06" };
 
@@ -361,6 +362,16 @@ describe("parsePublicBookingForm", () => {
   });
 });
 
+describe("toPublicServiceOption", () => {
+  it("sends the browser a price label and a quote flag, never the raw price, and strips placeholder text", () => {
+    expect(services[0]).toEqual({ id: SERVICE_ID, name: "Tournament photo", booking_type: "tournament_athlete", price_label: "from 350 QAR", quote: false, description: "All matches." });
+    expect(services[2]).toEqual({ id: QUOTE_SERVICE, name: "Tournament full day", booking_type: "tournament_athlete", price_label: "Quote on request", quote: true, description: null });
+    expect(JSON.stringify(services)).not.toMatch(/900|price_qr|Set your price/);
+    // A quote-first catalog service (clubs) is a quote even with a priced package.
+    expect(toPublicServiceOption({ id: "x", name: "Club day", booking_type: "club", price_qr: 1200, price_mode: "fixed", description: null })).toMatchObject({ price_label: "Quote on request", quote: true });
+  });
+});
+
 describe("resolveWizardEntry", () => {
   const ctxEntry = { events, services };
   it("opens on a catalog service, an audience's first service, a legacy type or kind, or nothing", () => {
@@ -369,6 +380,9 @@ describe("resolveWizardEntry", () => {
     expect(resolveWizardEntry({ type: "tournament_athlete" }, ctxEntry)).toMatchObject({ service: "tournament_athlete", media: null });
     expect(resolveWizardEntry({ kind: "tournament_athlete_photo_video" }, ctxEntry)).toMatchObject({ service: "tournament_athlete", media: "photo_video", legacyKind: "tournament_athlete_photo_video" });
     expect(resolveWizardEntry({ kind: "custom" }, ctxEntry)).toMatchObject({ service: "organizer_custom", legacyKind: "custom" });
+    expect(resolveWizardEntry({ service: "training_content", media: "video" }, ctxEntry)).toMatchObject({ service: "training_content", media: "video" });
+    expect(resolveWizardEntry({ service: "training_content", media: "audio" }, ctxEntry).media).toBeNull();
+    expect(resolveWizardEntry({ media: "video" }, ctxEntry)).toMatchObject({ service: null, media: null });
     expect(resolveWizardEntry({ type: "wedding", kind: "nope", service: "x", audience: "robots" }, ctxEntry)).toMatchObject({ service: null, media: null, audience: null });
   });
   it("accepts a package id as ?service= (the services page) and preselects it with its service", () => {

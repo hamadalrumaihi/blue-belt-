@@ -4,7 +4,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { writeAudit } from "@/lib/audit";
 import { depositColumnsFor } from "@/lib/bookings/policy";
-import { HONEYPOT_FIELD, SERVICE_LABEL, composeDivision, mediaChoiceLabel, parseContactForm, parsePublicBookingForm, summarizePublicBooking, type PublicBookingValues } from "@/lib/bookings/public-form";
+import { HONEYPOT_FIELD, SERVICE_LABEL, composeDivision, mediaChoiceLabel, parseContactForm, parsePublicBookingForm, summarizePublicBooking, toPublicServiceOption, type PublicBookingValues } from "@/lib/bookings/public-form";
 import { BOOKING_TYPE_LABEL, initialBookingStatus } from "@/lib/bookings/state";
 import { serviceByKey } from "@/lib/catalog";
 import { PRIVACY_VERSION, TERMS_VERSION } from "@/lib/legal/versions";
@@ -15,7 +15,7 @@ import { enqueueOwnerTelegram } from "@/lib/notifications/owner";
 import { findOrCreatePerson } from "@/lib/people/match";
 import { enqueuePricingAssessment } from "@/lib/pricing/assess-hook";
 import { RULES, rateLimit } from "@/lib/rate-limit";
-import { bookableAmount, publicPrice } from "@/lib/services/pricing";
+import { bookableAmount } from "@/lib/services/pricing";
 import { listPublicEvents } from "@/lib/studio/public-events";
 import { loadPublicStudio, siteUrl } from "@/lib/studio/queries";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -94,7 +94,7 @@ export async function submitPublicBooking(_prev: PublicFormState, fd: FormData):
   const run = async (): Promise<Outcome> => {
     const supabase = createServiceClient();
     const events = await listPublicEvents(ownerId, supabase);
-    const offered = services.map((s) => ({ id: s.id, name: s.name, booking_type: s.booking_type, price_qr: s.price_qr === null ? null : Number(s.price_qr), price_mode: s.price_mode, currency: s.currency, description: s.description }));
+    const offered = services.map(toPublicServiceOption);
     const { fieldErrors, values } = parsePublicBookingForm(fd, { events, services: offered, today: todayInZone() });
     if (!values) {
       if (fieldErrors[HONEYPOT_FIELD]) return { error: fieldErrors[HONEYPOT_FIELD] };
@@ -193,7 +193,7 @@ export async function submitPublicBooking(_prev: PublicFormState, fd: FormData):
         `${BOOKING_TYPE_LABEL[values.booking_type]}: ${SERVICE_LABEL[values.service_key].title}, ${mediaChoiceLabel(values.media_scope).toLowerCase()}`,
         isClub ? `${values.club_name ?? ""}, contact ${values.full_name}` : values.athlete_name,
         [pick("Event"), pick("Date") ?? pick("Preferred date")].filter(Boolean).join(" · ") || null,
-        service ? `${service.name} (${quoteOnly ? "quote" : publicPrice(service).label})` : "No package (quote)",
+        service ? `${service.name} (${quoteOnly ? "quote" : offered.find((s) => s.id === service.id)?.price_label ?? "priced"})` : "No package (quote)",
         pick("Budget") ? `Budget: ${pick("Budget")}` : null,
         values.subject_is_minor ? `Under 18, guardian: ${values.guardian?.name ?? "?"}` : null,
         `Phone: ${values.phone}`,

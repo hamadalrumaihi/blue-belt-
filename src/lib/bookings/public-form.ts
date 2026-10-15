@@ -28,8 +28,9 @@ import {
 } from "@/lib/catalog";
 import { BOOKING_TYPE_LABEL, isBookingType, type BookingDetails } from "@/lib/bookings/state";
 import { normalizeInstagram, phoneKey } from "@/lib/people/match";
-import { publicPrice } from "@/lib/services/pricing";
-import type { BookingType, ClientType, PriceMode, UsageType } from "@/lib/supabase/database.types";
+import { bookableAmount, publicPrice } from "@/lib/services/pricing";
+import { publicServiceDescription } from "@/lib/services/public";
+import type { BookingType, ClientType, PhotoServiceRow, UsageType } from "@/lib/supabase/database.types";
 import { isValidEmail, isValidHttpUrl, trimOrNull } from "@/lib/utils";
 import { isUuid, isValidCalendarDate } from "@/lib/validation";
 
@@ -60,7 +61,19 @@ export type StepKey = "what" | "details" | "contact" | "legal";
 export type PublicStep = { key: StepKey; title: string; intro: string; fields: PublicField[] };
 
 export type PublicEventOption = { id: string; name: string; event_date: string | null };
-export type PublicServiceOption = { id: string; name: string; booking_type: BookingType; price_qr: number | null; price_mode: PriceMode; currency: string; description?: string | null };
+/**
+ * A package as the public wizard sees it: no raw price. `price_label` is
+ * what the website shows ("from 350 QAR", "Quote on request") and `quote`
+ * is the booking decision (`bookableAmount`), so a quote-mode package never
+ * leaks its number to the browser or into a booking row.
+ */
+export type PublicServiceOption = { id: string; name: string; booking_type: BookingType; price_label: string; quote: boolean; description?: string | null };
+
+/** Projects a photo_services row for the wizard: price through publicPrice / bookableAmount, description through the placeholder guard. */
+export function toPublicServiceOption(row: Pick<PhotoServiceRow, "id" | "name" | "booking_type" | "price_qr" | "price_mode" | "description">): PublicServiceOption {
+  const quote = bookableAmount(row, { quoteFirst: serviceForBookingType(row.booking_type).quoteFirst }).quoteOnly;
+  return { id: row.id, name: row.name, booking_type: row.booking_type, price_label: quote ? "Quote on request" : publicPrice(row).label, quote, description: publicServiceDescription(row.description) };
+}
 
 /** What the home and services pages show per booking type, in display order (kept for pages that still key off the enum). */
 export const PUBLIC_BOOKING_TYPES: Array<{ value: BookingType; title: string; body: string }> = [
@@ -855,7 +868,7 @@ export function summarizePublicBooking(v: PublicBookingValues, services: PublicS
   const video = videoDeliverablesLabel(d);
   if (video) rows.push(["Video", video]);
   const service = v.service_id ? services.find((s) => s.id === v.service_id) : null;
-  if (service) rows.push(["Package", `${service.name} (${publicPrice(service).label})`]);
+  if (service) rows.push(["Package", `${service.name} (${service.price_label})`]);
   if (v.booking_type === "club") {
     rows.push(["Club", v.club_name ?? "Not given"]);
     if (d.athlete_count) rows.push(["Athletes", String(d.athlete_count)]);
@@ -902,12 +915,13 @@ export type WizardEntry = {
   eventId: string | null;
 };
 
-export type WizardEntryParams = { service?: string | null; audience?: string | null; type?: string | null; kind?: string | null; event?: string | null };
+export type WizardEntryParams = { service?: string | null; audience?: string | null; type?: string | null; kind?: string | null; event?: string | null; media?: string | null };
 
 /**
- * `/book?service=<catalog key>`, `?audience=`, legacy `?type=<booking type>`
- * and `?kind=<legacy kind>` all keep working; `?service=<package uuid>`
- * (the services page) preselects that package and its service.
+ * `/book?service=<catalog key>&media=<scope>`, `?audience=`, legacy
+ * `?type=<booking type>` and `?kind=<legacy kind>` all keep working;
+ * `?service=<package uuid>` (the services page) preselects that package and
+ * its service. A media scope the service does not offer is ignored.
  */
 export function resolveWizardEntry(params: WizardEntryParams, ctx: { events: PublicEventOption[]; services: PublicServiceOption[] }): WizardEntry {
   const pkg = isUuid(params.service) ? ctx.services.find((s) => s.id === params.service) ?? null : null;
@@ -915,9 +929,10 @@ export function resolveWizardEntry(params: WizardEntryParams, ctx: { events: Pub
   const service = resolved?.service ?? (pkg ? serviceForBookingType(pkg.booking_type) : null);
   const serviceId = pkg && service && pkg.booking_type === service.bookingType ? pkg.id : null;
   const legacyKind = isServiceKind(params.kind) && service && LEGACY_SERVICE_KIND[params.kind]?.service === service.key ? params.kind : null;
+  const media = isMediaScope(params.media) && service && service.mediaScopes.includes(params.media) ? params.media : resolved?.media ?? null;
   return {
     service: service?.key ?? null,
-    media: resolved?.media ?? null,
+    media,
     audience: isAudienceKey(params.audience) ? params.audience : null,
     legacyKind,
     serviceId,

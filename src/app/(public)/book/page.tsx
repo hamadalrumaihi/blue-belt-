@@ -1,8 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ShieldIcon } from "@/components/icons";
-import { resolveWizardEntry, type PublicServiceOption } from "@/lib/bookings/public-form";
-import { publicServiceDescription } from "@/lib/services/public";
+import { resolveWizardEntry, toPublicServiceOption } from "@/lib/bookings/public-form";
 import { pageMetadata } from "@/lib/seo";
 import { listPublicEvents } from "@/lib/studio/public-events";
 import { loadPublicStudio } from "@/lib/studio/queries";
@@ -23,9 +22,10 @@ function first(v: string | string[] | undefined): string | null {
 /**
  * The request wizard. Entry points keep working: `?service=<catalog key>`,
  * `?audience=`, legacy `?type=<booking type>` and `?kind=<legacy kind>`,
- * `?service=<package id>` from the services page and `?event=`. Prices
- * reach the wizard only through `price_mode` (quote-mode packages never
- * show or book a number) and descriptions are stripped of seed placeholders.
+ * `?media=<scope>`, `?service=<package id>` from the services page and
+ * `?event=`. Prices reach the wizard only as labels (quote-mode packages
+ * never show or book a number) and descriptions are stripped of seed
+ * placeholders.
  */
 export default async function BookPage({ searchParams }: PageProps<"/book">) {
   const [pub, params] = await Promise.all([loadPublicStudio(), searchParams]);
@@ -40,16 +40,9 @@ export default async function BookPage({ searchParams }: PageProps<"/book">) {
     );
   }
   const events = await listPublicEvents(pub.studio.owner_id);
-  const services: PublicServiceOption[] = pub.services.map((s) => ({
-    id: s.id,
-    name: s.name,
-    booking_type: s.booking_type,
-    price_qr: s.price_qr === null ? null : Number(s.price_qr),
-    price_mode: s.price_mode,
-    currency: s.currency,
-    description: publicServiceDescription(s.description),
-  }));
-  const entry = resolveWizardEntry({ service: first(params.service), audience: first(params.audience), type: first(params.type), kind: first(params.kind), event: first(params.event) }, { events, services });
+  // Prices reach the browser only as a label; quote-mode packages carry no number.
+  const services = pub.services.map(toPublicServiceOption);
+  const entry = resolveWizardEntry({ service: first(params.service), audience: first(params.audience), type: first(params.type), kind: first(params.kind), event: first(params.event), media: first(params.media) }, { events, services });
   return (
     <main className="bg-page">
       <div className="mx-auto max-w-2xl px-4 py-10 lg:px-8 lg:py-14">
