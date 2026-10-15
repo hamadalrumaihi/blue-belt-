@@ -18,7 +18,7 @@ export const metadata: Metadata = { title: "Request received | Blue Belt Media",
  * received.
  *
  * The next steps repeat the approved policy only (the booking e-mail, the
- * FAQ and docs/studio-platform.md): a reply within 24 hours, a quote first
+ * FAQ and docs/studio-platform.md): a reply by e-mail (no reply-time promise), a quote first
  * where the work is quoted, the agreement and the 50% deposit confirm the
  * date, the balance is due after delivery. Availability is never promised.
  */
@@ -57,7 +57,7 @@ export default async function BookingDonePage({ searchParams }: PageProps<"/book
   const quoted = booking.payment_mode === "quote";
   const steps: Array<{ title: string; text: string }> = [
     {
-      title: "Within 24 hours",
+      title: "We reply by e-mail",
       text: quoted
         ? `${name} reads your request and replies by e-mail with a price first. Nothing is due until you approve it.`
         : `${name} reads your request and replies by e-mail. If the date is free we confirm the date and the price with you.`,

@@ -301,7 +301,8 @@ describe("submitPublicBooking", () => {
     expect(email).toMatchObject({ owner_id: OWNER, alert_key: `email:booking:${BOOKING_ID}:received`, kind: "BOOKING_RECEIVED" });
     expect((email!.payload as Row).to).toBe("hamad@example.com");
     const text = (email!.payload as Row).text as string;
-    expect(text).toContain("We confirm the date and the price within 24 hours. Then you sign the agreement and pay the 50% deposit online to secure the date.");
+    expect(text).toContain("We confirm the date and the price with you by e-mail. Then you sign the agreement and pay the 50% deposit online to secure the date.");
+    expect(text).not.toMatch(/within 24 hours/i);
     expect(text).toContain("BB-7K3PQ2");
     expect(text.toLowerCase()).not.toMatch(/fatoorah|pic-?time|no payment is needed|after the shoot you pay|payment link follows|whatsapp/);
     expect(service.firstWriteSeq("photo_notification_deliveries")).toBeGreaterThan(service.rpcCalls[0].seq);

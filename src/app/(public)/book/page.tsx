@@ -11,7 +11,7 @@ import { BookingWizard } from "./BookingWizard";
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = pageMetadata({
   title: "Request jiu-jitsu photography or video in Doha",
-  description: "Request tournament, team, training, portrait or event photo and video coverage in Qatar. We reply within 24 hours; nothing is paid until confirmed.",
+  description: "Request tournament, team, training, portrait or event photo and video coverage in Qatar. We reply by e-mail; nothing is paid until the date and price are confirmed.",
   path: "/book",
 });
 

@@ -99,7 +99,7 @@ export function buildTerms(id: BusinessIdentity = businessIdentity()): LegalDocu
       id: "booking-requests",
       title: "Booking requests",
       paragraphs: [
-        "Sending the booking form is a request, not a booking. It reserves nothing until we confirm it. We check availability and reply within 24 hours on working days, by e-mail, phone or WhatsApp.",
+        "Sending the booking form is a request, not a booking. It reserves nothing until we confirm it. We check availability and reply by e-mail on working days, as soon as we can.",
         "You must give accurate details: the right name of the athlete, the event, the date and a working phone number and e-mail address. We rely on these to plan the day and to send your agreement, payment page and gallery.",
       ],
     },

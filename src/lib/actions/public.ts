@@ -216,11 +216,11 @@ export async function submitPublicBooking(_prev: PublicFormState, fd: FormData):
         greeting: `Hi ${values.full_name},`,
         paragraphs: quoteOnly
           ? [
-              `Thanks for your request to ${studio.business_name}. This request is quoted individually: we send you a price first, within 24 hours, and nothing is due until you approve it.`,
+              `Thanks for your request to ${studio.business_name}. This request is quoted individually: we send you a price first, by e-mail, and nothing is due until you approve it.`,
               "Once you approve the price you sign the agreement and pay the 50% deposit online to secure the date. The remaining 50% is due after your gallery is delivered.",
             ]
           : [
-              `Thanks for your request to ${studio.business_name}. We confirm the date and the price within 24 hours. Then you sign the agreement and pay the 50% deposit online to secure the date. The remaining 50% is due after your gallery is delivered.`,
+              `Thanks for your request to ${studio.business_name}. We confirm the date and the price with you by e-mail. Then you sign the agreement and pay the 50% deposit online to secure the date. The remaining 50% is due after your gallery is delivered.`,
               "Nothing is due until we have confirmed availability and the price with you.",
             ],
         facts: [["Reference", ref], ...summary.filter(([k]) => !["Name", "Phone", "E-mail", "Instagram", "Notes"].includes(k))],

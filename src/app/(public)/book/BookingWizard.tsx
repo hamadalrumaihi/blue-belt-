@@ -273,7 +273,7 @@ export function BookingWizard({ events, services, entry }: Props) {
       <p className="sr-only" aria-live="polite">Step {step + 1} of 4: {stepTitle}</p>
       {current?.intro && <p className="mt-2 text-base text-muted">{current.intro}</p>}
       {step === 0 && !service && <p className="mt-2 text-base text-muted">Pick the service, then photos, video or both. Prices are confirmed with you before anything is signed or paid.</p>}
-      {step === 3 && <p className="mt-2 text-base text-muted">Check the details, tick the boxes and send. This is a request, not a confirmed reservation: we come back within 24 hours. Nothing is paid until we have confirmed the date and the price.</p>}
+      {step === 3 && <p className="mt-2 text-base text-muted">Check the details, tick the boxes and send. This is a request, not a confirmed reservation: we reply by e-mail as soon as we can. Nothing is paid until we have confirmed the date and the price.</p>}
 
       {summaryErrors.length > 0 && (
         <div className="mt-5 rounded-xl border border-danger/30 bg-danger-soft p-4" role="alert" aria-labelledby="error-summary-heading">
@@ -646,7 +646,7 @@ function Review({ service, steps, values, events, services, onEdit }: { service:
         </div>
       ))}
       <ul className="space-y-1 text-sm text-muted">
-        <li className="flex items-start gap-2"><CheckIcon size={16} className="mt-0.5 shrink-0 text-success" /> You get a reference straight away; we come back within 24 hours. Quoted work gets a price first.</li>
+        <li className="flex items-start gap-2"><CheckIcon size={16} className="mt-0.5 shrink-0 text-success" /> You get a reference straight away; we reply by e-mail as soon as we can. Quoted work gets a price first.</li>
         <li className="flex items-start gap-2"><CheckIcon size={16} className="mt-0.5 shrink-0 text-success" /> Your date is confirmed once you sign the agreement and pay the 50% deposit online. The remaining 50% is due after delivery.</li>
       </ul>
     </div>
