@@ -223,7 +223,8 @@ npm run build
 - Live schedule reading from Railway is blocked by Cloudflare for AJP / Smoothcomp (verified 2 Oct 2026); the import page, the bookmarklet and the Windows agent are the working paths, and the worker's value today is the scheduler. Details and the switches that exist (residential proxy, hosted browser) are in [docs/watcher.md](docs/watcher.md).
 - Production payments, e-mail, the gallery Zaps, the Pic-Time approval and dashboard intake jobs and the Windows agent are implemented and tested but **not live-verified** — see [docs/overhaul/INTEGRATIONS.md](docs/overhaul/INTEGRATIONS.md) for what each needs.
 - Rate limits are in-memory per Vercel instance; a WAF rule or a shared store is the next step (register F-05).
-- No security headers (`X-Frame-Options`, `Referrer-Policy`, …) are sent yet (register F-03, patch P-03).
+- Security headers (`nosniff`, `X-Frame-Options: DENY`, `frame-ancestors 'none'`, `Referrer-Policy`, no-referrer on `/pay` and `/sign`) are set in `next.config.ts`; a full CSP is not (register F-03 closed).
+- Both languages share one URL (cookie `bbm_lang`, `?lang=` switch), so no `hreflang` alternates are declared on purpose; declaring two languages for one URL would be incorrect.
 - Per-device settings (timezone fallback, refresh interval, …) live in `localStorage` and sync to `photo_user_settings`.
 - Contract templates are drafts for legal review.
 

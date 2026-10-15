@@ -281,3 +281,41 @@ Forwards the signed-in client's own rows: no `notes`, `metadata`, `legal_accepta
 3. Are MyFatoorah webhooks expected to arrive from fixed provider IPs? If MyFatoorah publishes them, an allow-list at the Vercel WAF would close F-04 without code.
 4. May the integrator add `supabase/config.toml` (`supabase init`) so the pgTAP job can run in CI (F-07)?
 5. The overhaul's `/work` page will index curated photographs; confirm the manifest/media-library flags (`minors`, `sensitive`, `third-party branding`) remain a hard block on publishing, not a warning.
+
+## 8. Status after integration and independent review (15 Oct 2026, branch head)
+
+An independent reviewer re-read the branch against `main` after all workstreams landed. Verdicts per finding above:
+
+| Finding | Status on this branch |
+| --- | --- |
+| F-01 | **Fixed** — `bookableAmount()` in `src/lib/services/pricing.ts`; regression test in `tests/public-actions.test.ts` ("issue #10 regression"). |
+| F-02 | **Fixed** — `/book` forwards `{ id, name, booking_type, price_label, quote, description }` only (`toPublicServiceOption`). |
+| F-03 | **Fixed** — `next.config.ts` `headers()`: nosniff, `X-Frame-Options: DENY`, `frame-ancestors 'none'`, `Referrer-Policy` (`no-referrer` on `/pay/*`, `/sign/*`), Permissions-Policy. |
+| F-04 | **Open** — webhook path unchanged; P-04 remains a recommended follow-up (owner question 3). |
+| F-05 | **Open, accepted** — per-instance limiter; M-05 (Vercel WAF rules) recommended. |
+| F-06 | **Open, configuration** — set `STUDIO_OWNER_ID` in production. |
+| F-07 | **Open** — three more hand-run DO-block SQL tests were added (`public_submission`, `media_rls`, extended `pricing_rls`); the CI job in P-07 still needs `supabase init` + TAP conversion. |
+| F-08 | **Fixed** — `/work`, `/how-it-works`, `/faq` redirect public; `/testimonials` removed. |
+| F-09 | **Fixed** — `Buffer.byteLength`. |
+| F-10 | **Open** — unchanged (owner tooling hygiene). |
+| F-11 | **Fixed** — cron secret checked before the payments flag. |
+| F-12/13/14 | Accepted, unchanged. |
+| F-15 | **Fixed** — `agent/package-lock.json` committed, agent CI job uses `npm ci` with lockfile cache. |
+| F-18 | **Fixed** — footer year in Asia/Qatar. |
+| F-19 | **Honoured** — new pricing and media tables use `photo_is_owner_user()`; SQL and Vitest isolation tests extended. |
+| F-20 | **Fixed** — stale `tournament-watcher.vercel.app` examples replaced. |
+
+New findings from the independent review, all fixed on this branch before the PR left draft:
+
+| # | Sev | Where | Fix |
+| --- | --- | --- | --- |
+| R-1 | High | Media library: derivatives were written to the public bucket at processing time and the bucket had an anon listing policy, so unpublished/review-flagged photos were downloadable and enumerable. | Derivatives are rendered into the private bucket; `publishMedia` copies them to the public bucket, `unpublishMedia`/`archiveMedia` remove them; the listing policy is gone; studio preview uses short-lived signed URLs; `supabase/tests/media_rls.test.sql` asserts anon/authenticated cannot list the public bucket. |
+| R-2 | Medium | Idempotent replay of a public submission skipped the owner alert, client e-mail and pricing assessment. | Replay re-enqueues (alert keys make it idempotent); test inverted. |
+| R-3 | Medium | Anonymous visitors could see the studio "preview" notice and lose the manifest fallback when a `ready` asset was placed. | `pending` is studio-only; empty library gallery returns null so the manifest fallback applies. |
+| R-4 | Medium | Re-claiming an abandoned draft could sign an upload URL for a different key than the row. | Row key/mime updated before signing. |
+| R-5 | Medium | Signed upload used `upsert: true` without an UPDATE storage policy. | Owner UPDATE policy added on the private bucket. |
+| R-6 | Low | Concurrent pricing assessments with different fingerprints lost the newer one on the version index. | Version re-read + one retry; 23505 classified by index name. |
+| R-7 | Low | `/book/done` showed a success page for any well-formed reference. | The page now verifies the reference against the studio's bookings (id + payment mode only). |
+| R-8 | Low | `photo_studio.settings` read-modify-write from two pages could drop a key. | Optimistic `updated_at` guard in `website.ts` and `studio.ts`. |
+| R-9 | Low | Money/website pages gated by the collaborator flag, not the role. | `requireOwner()` on `/studio/metrics` and `/website`. |
+| R-10 | Low | Media search term, max decode size, Instagram normalisation in the RPC, worker tick field names, a11y/RTL nits (breadcrumb current page, region label, footer sentences, `ps-5`). | Fixed in the respective files. |
