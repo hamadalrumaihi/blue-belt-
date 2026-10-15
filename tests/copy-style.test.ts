@@ -36,6 +36,9 @@ const FILES = [
   join(ROOT, "src/lib/notifications/email/templates.ts"),
   join(ROOT, "src/lib/documents/templates.ts"),
   join(ROOT, "src/lib/seo.ts"),
+  join(ROOT, "src/lib/catalog/copy.ts"),
+  join(ROOT, "src/lib/catalog/faq.ts"),
+  join(ROOT, "src/lib/i18n/ui.ts"),
 ];
 
 const rel = (f: string) => relative(ROOT, f).split(sep).join("/");
@@ -45,6 +48,17 @@ const BANNED_PHRASES = ["offline", "arranged manually", "outside the website", "
 
 /** Vendor names, as a customer could read them: a standalone word, not part of an identifier. */
 const VENDOR_RE = /(?<![\w$.])(pic[\s-]?time|my\s?fatoorah|fatoorah|docusign)(?![\w$(])/gi;
+
+/**
+ * Sales-copy rules for the overhaul: no pricing placeholder, no promise
+ * wording ("guaranteed"), and no phone number anywhere a customer reads
+ * (the owner asked for e-mail only). A Qatari number is +974 followed by
+ * eight digits, so both the international and the bare local forms are
+ * looked for; a format hint such as "+974 …" has no digits and passes.
+ */
+const PLACEHOLDER_RE = /set your price/i;
+const PROMISE_RE = /\bguaranteed\b/i;
+const PHONE_RE = /(?:\+|00)?\s?974[\s-]?\d{4}[\s-]?\d{4}|(?<!\d)[3567]\d{3}[\s-]\d{4}(?!\d)/;
 
 /** Attribute names whose string value is internal (never read by a person). */
 const INTERNAL_ATTR_RE = /(?:^|[\s{(,])(?:id|name|key|htmlFor|className|src|href|rel|target|type|value|role|data-[\w-]+|aria-labelledby|aria-controls|aria-describedby)=$/;
@@ -143,6 +157,12 @@ describe("customer-facing copy", () => {
       "src/lib/bookings/emails.ts",
       "src/lib/documents/templates.ts",
       "src/lib/seo.ts",
+      "src/lib/catalog/copy.ts",
+      "src/lib/catalog/faq.ts",
+      "src/lib/i18n/ui.ts",
+      "src/app/(public)/services/[slug]/page.tsx",
+      "src/app/(public)/work/page.tsx",
+      "src/app/(public)/how-it-works/page.tsx",
     ]) {
       expect(files).toContain(expected);
     }
@@ -184,6 +204,23 @@ describe("customer-facing copy", () => {
   it.each(FILES.map((f) => [rel(f), f]))("%s never says payment is offline, outside the website, or not needed to book", (_rel, file) => {
     const text = readFileSync(file, "utf8").toLowerCase();
     for (const phrase of BANNED_PHRASES) expect(text, `found "${phrase}"`).not.toContain(phrase);
+  });
+
+  it("the sales-copy rules catch what they are meant to catch", () => {
+    expect("Prices from 300 QAR. Set your price.").toMatch(PLACEHOLDER_RE);
+    expect("Every match guaranteed").toMatch(PROMISE_RE);
+    expect("We cannot promise every match").not.toMatch(PROMISE_RE);
+    expect("Call +974 5555 1234").toMatch(PHONE_RE);
+    expect("WhatsApp 5555 1234").toMatch(PHONE_RE);
+    expect("+974 …").not.toMatch(PHONE_RE);
+    expect("CR 235175, Doha").not.toMatch(PHONE_RE);
+    expect("© 2026 Blue Belt Media").not.toMatch(PHONE_RE);
+  });
+
+  it.each(FILES.map((f) => [rel(f), f]))("%s shows no pricing placeholder, promise wording or phone number to customers", (_rel, file) => {
+    const hits = customerVisibleText(readFileSync(file, "utf8")).filter((h) => PLACEHOLDER_RE.test(h.text) || PROMISE_RE.test(h.text) || PHONE_RE.test(h.text));
+    const report = hits.map((h) => `${h.line}: ${h.text.trim().slice(0, 140)}`);
+    expect(report, `placeholder, promise or phone number in customer-visible text:\n${report.join("\n")}`).toEqual([]);
   });
 
   it.each(FILES.map((f) => [rel(f), f]))("%s shows no vendor name to customers", (_rel, file) => {

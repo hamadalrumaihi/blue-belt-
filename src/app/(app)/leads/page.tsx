@@ -3,11 +3,14 @@ import Link from "next/link";
 import { BrandHeader } from "@/components/BrandHeader";
 import { PageBody } from "@/components/AppShell";
 import { EmptyState } from "@/components/EmptyState";
-import { InboxIcon, InstagramIcon, MailIcon, PhoneIcon } from "@/components/icons";
+import { AlertIcon, InboxIcon, InstagramIcon, MailIcon, PhoneIcon } from "@/components/icons";
+import { listBookings } from "@/lib/bookings/queries";
 import { BOOKING_TYPE_LABEL } from "@/lib/bookings/state";
 import { LEAD_STATUSES, LEAD_STATUS_LABEL, isLeadStatus } from "@/lib/leads/labels";
 import { listLeads } from "@/lib/leads/queries";
-import { formatStamp } from "@/lib/time";
+import { CAPACITY_NOTE, describeConflicts, overlaps, type CapacityEvent } from "@/lib/studio/capacity";
+import { createClient } from "@/lib/supabase/server";
+import { formatDateTime, formatStamp } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { isPlainObject } from "@/lib/validation";
 import { LeadControls } from "./LeadRow";
@@ -29,15 +32,32 @@ function detailLine(details: unknown): string | null {
   return bits.length ? bits.join(" · ") : null;
 }
 
+/** The day a request asks for: an explicit requested / competition date, else the linked event's date. */
+function requestedDay(details: unknown, event: CapacityEvent | null): string | null {
+  if (isPlainObject(details)) {
+    for (const key of ["requested_date", "competition_date"]) {
+      const v = details[key];
+      if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v)) return v.slice(0, 10);
+    }
+  }
+  return event?.event_date ?? null;
+}
+
 export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
   const params = await searchParams;
   const raw = Array.isArray(params.status) ? params.status[0] : params.status;
   const filter = raw === "all" ? "all" : isLeadStatus(raw) ? raw : "open";
-  const leads = await listLeads(filter === "all" ? {} : { status: filter });
+  const supabase = await createClient();
+  const [leads, occupied, events] = await Promise.all([
+    listLeads(filter === "all" ? {} : { status: filter }),
+    listBookings({ filter: "confirmed", limit: 300 }),
+    supabase.from("photo_events").select("id,name,event_date,venue").eq("active", true).limit(200),
+  ]);
+  const eventById = new Map((events.data ?? []).map((e) => [e.id, e]));
   const now = new Date();
   return (
     <>
-      <BrandHeader title="Leads" subtitle="Website requests and messages. Convert the real ones into bookings." />
+      <BrandHeader title="Leads" subtitle={`Website requests and messages. Convert the real ones into bookings. ${CAPACITY_NOTE}`} />
       <PageBody>
         <nav className="-mx-4 mb-4 flex gap-2 overflow-x-auto px-4 pb-1" aria-label="Filter">
           {FILTERS.map((f) => (
@@ -53,6 +73,8 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
             {leads.map((l) => {
               const detail = detailLine(l.details);
               const name = l.person?.full_name ?? "Unknown";
+              const open = l.status === "new" || l.status === "contacted" || l.status === "quoted";
+              const conflicts = open ? overlaps(occupied, { date: requestedDay(l.details, l.event_id ? eventById.get(l.event_id) ?? null : null), eventId: l.event_id }, events.data ?? []) : [];
               return (
                 <li key={l.id} className="card p-4 sm:p-5">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -65,6 +87,12 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
                       <p className="mt-0.5 text-xs text-muted">{formatStamp(l.created_at, undefined, now)} · via {l.source}{l.event ? ` · ${l.event.name}` : ""}</p>
                       {detail && <p className="mt-2 text-sm text-ink">{detail}</p>}
                       {l.message && <p className="mt-2 whitespace-pre-line rounded-xl bg-page px-3 py-2 text-sm text-ink">{l.message}</p>}
+                      {conflicts.length > 0 && (
+                        <p className="mt-2 flex items-start gap-2 rounded-lg border border-warning/30 bg-warning-soft px-3 py-2 text-xs text-ink" role="status">
+                          <AlertIcon size={14} className="mt-0.5 shrink-0 text-warning" />
+                          <span><span className="font-semibold">{describeConflicts(conflicts)}</span> {conflicts.map((c) => <Link key={`${c.kind}:${c.id}`} href={c.href} className="font-semibold text-primary hover:underline">{c.title}{c.kind === "booking" && c.at ? ` (${formatDateTime(c.at)})` : ""}</Link>).reduce<React.ReactNode[]>((acc, el, i) => (i ? [...acc, ", ", el] : [el]), [])}. This request does not reserve the day.</span>
+                        </p>
+                      )}
                       {l.person && (
                         <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm">
                           {l.person.phone && <li><a href={`tel:${l.person.phone}`} className="inline-flex min-h-9 items-center gap-1.5 font-semibold text-primary"><PhoneIcon size={16} /> {l.person.phone}</a></li>}

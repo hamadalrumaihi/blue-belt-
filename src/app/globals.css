@@ -235,10 +235,10 @@ body:has(dialog[open].dialog-lock) {
 
   /* Inputs. */
   .textarea {
-    @apply input min-h-36 py-3;
+    @apply block min-h-36 w-full rounded-xl border border-line bg-surface px-3.5 py-3 text-base text-ink placeholder:text-muted/70 focus:border-primary focus:outline-none focus:ring-4 focus:ring-primary/15;
   }
   .select {
-    @apply input appearance-none pe-10;
+    @apply block min-h-11 w-full appearance-none rounded-xl border border-line bg-surface px-3.5 pe-10 text-base text-ink focus:border-primary focus:outline-none focus:ring-4 focus:ring-primary/15;
   }
 
   /* Badges and chips. Chips are links or buttons (44px target), badges are read-only. */

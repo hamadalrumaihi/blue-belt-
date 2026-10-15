@@ -10,6 +10,7 @@
  */
 import type { Bilingual, Locale } from "@/lib/i18n/locale";
 import { localized } from "@/lib/i18n/locale";
+import type { FaqCategory as OwnerFaqCategory, FaqOverride } from "@/lib/studio/site-content";
 import type { ServiceKey } from "./index";
 
 export const FAQ_CATEGORIES = ["booking", "coverage", "video", "delivery", "payment", "usage", "privacy", "account"] as const;
@@ -215,22 +216,52 @@ export const FAQ_ITEMS: readonly FaqItem[] = [
   },
 ];
 
-export function faqById(id: string): FaqItem | null {
-  return FAQ_ITEMS.find((f) => f.id === id) ?? null;
+/** The owner's FAQ editor uses its own category names; they map onto the public ones here. */
+const OWNER_CATEGORY: Record<OwnerFaqCategory, FaqCategory> = { booking: "booking", pricing: "payment", delivery: "delivery", rights: "usage", tournaments: "coverage", other: "booking" };
+
+/**
+ * Merges the owner's published FAQ overrides (photo_studio.settings,
+ * edited under /website) into the code catalog: an override whose id
+ * matches a catalog item replaces its words (keeping its place and, when
+ * the override has no Arabic, falling back to English); any other id is
+ * appended. Pure, so the pages and the tests share it.
+ */
+export function applyFaqOverrides(items: readonly FaqItem[], overrides: readonly FaqOverride[]): FaqItem[] {
+  if (!overrides.length) return [...items];
+  const byId = new Map(overrides.map((o) => [o.id, o] as const));
+  const toItem = (o: FaqOverride, base?: FaqItem): FaqItem => ({
+    id: o.id,
+    category: base?.category ?? OWNER_CATEGORY[o.category] ?? "booking",
+    featured: base?.featured,
+    keywords: base?.keywords,
+    question: { en: o.question_en, ar: o.question_ar ?? undefined },
+    answer: { en: o.answer_en, ar: o.answer_ar ?? undefined },
+  });
+  const merged = items.map((item) => {
+    const o = byId.get(item.id);
+    return o ? toItem(o, item) : item;
+  });
+  const known = new Set(items.map((i) => i.id));
+  for (const o of overrides) if (!known.has(o.id)) merged.push(toItem(o));
+  return merged;
 }
 
-export function faqsFor(ids: readonly string[]): FaqItem[] {
-  return ids.map(faqById).filter((f): f is FaqItem => f !== null);
+export function faqById(id: string, items: readonly FaqItem[] = FAQ_ITEMS): FaqItem | null {
+  return items.find((f) => f.id === id) ?? null;
 }
 
-export function featuredFaqs(limit = 5): FaqItem[] {
-  return FAQ_ITEMS.filter((f) => f.featured).slice(0, limit);
+export function faqsFor(ids: readonly string[], items: readonly FaqItem[] = FAQ_ITEMS): FaqItem[] {
+  return ids.map((id) => faqById(id, items)).filter((f): f is FaqItem => f !== null);
+}
+
+export function featuredFaqs(limit = 5, items: readonly FaqItem[] = FAQ_ITEMS): FaqItem[] {
+  return items.filter((f) => f.featured).slice(0, limit);
 }
 
 /** The FAQs a service page shows, in the order its copy lists them. */
-export function faqsForService(key: ServiceKey, faqIds: readonly string[]): FaqItem[] {
+export function faqsForService(key: ServiceKey, faqIds: readonly string[], items: readonly FaqItem[] = FAQ_ITEMS): FaqItem[] {
   void key;
-  return faqsFor(faqIds);
+  return faqsFor(faqIds, items);
 }
 
 /** Lower-cased, diacritics-free text for matching a query against a question and answer in either language. */
@@ -238,9 +269,9 @@ export function normalizeForSearch(text: string): string {
   return text
     .toLowerCase()
     .normalize("NFKD")
-    .replace(/[ً-ْٰ]/g, "")
+    .replace(/[ً-ٰٕ]/g, "")
     .replace(/[̀-ͯ]/g, "")
-    .replace(/[أإآ]/g, "ا")
+    .replace(/[أإآٱ]/g, "ا")
     .replace(/ة/g, "ه")
     .replace(/ى/g, "ي")
     .replace(/\s+/g, " ")

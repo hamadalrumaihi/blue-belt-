@@ -82,7 +82,7 @@ describe("catalog-driven steps", () => {
 
   it("asks for the roster size where a group is photographed and allows an unknown bracket for athletes", () => {
     expect(publicBookingFields("team_tournament")[1].fields.find((f) => f.name === "athlete_count")).toMatchObject({ required: true });
-    expect(publicBookingFields("training_content")[1].fields.find((f) => f.name === "athlete_count")).toMatchObject({ required: undefined });
+    expect(publicBookingFields("training_content")[1].fields.find((f) => f.name === "athlete_count")?.required).toBeFalsy();
     expect(publicBookingFields("organizer_custom")[1].fields.find((f) => f.name === "athlete_count")).toBeTruthy();
     for (const n of ["age_division", "belt", "weight_division", "gi", "competition_date"]) expect(publicBookingFields("tournament_athlete")[1].fields.find((f) => f.name === n)?.required).toBeFalsy();
   });

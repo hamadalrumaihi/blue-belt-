@@ -1,20 +1,35 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { CheckIcon, InstagramIcon, MailIcon, MapPinIcon } from "@/components/icons";
+import { getLocale } from "@/lib/i18n/server";
+import { tr, UI } from "@/lib/i18n/ui";
 import { pageMetadata } from "@/lib/seo";
 import { businessIdentity, businessLegalLine } from "@/lib/studio/business";
 import { loadPublicStudio } from "@/lib/studio/queries";
 import { ContactForm } from "./ContactForm";
 
 export const dynamic = "force-dynamic";
-export const metadata: Metadata = pageMetadata({
-  title: "Contact a martial arts photographer in Doha",
-  description: "Ask about jiu-jitsu tournament coverage, a club day, training session photography or an athlete photoshoot in Qatar. We reply within 24 hours.",
-  path: "/contact",
-});
 
-export default async function ContactPage({ searchParams }: PageProps<"/contact">) {
+type Props = { searchParams: Promise<Record<string, string | string[] | undefined>> };
+
+export async function generateMetadata({ searchParams }: Props): Promise<Metadata> {
+  const params = await searchParams;
+  const locale = await getLocale(params.lang);
+  return pageMetadata({
+    title: locale === "ar" ? "تواصل مع مصور فنون قتالية في الدوحة" : "Contact a martial arts photographer in Doha",
+    description:
+      locale === "ar"
+        ? "اسأل عن تغطية بطولة جوجيتسو، أو يوم فريق، أو تصوير تدريب، أو جلسة بورتريه لرياضي في قطر. نرد عبر البريد الإلكتروني."
+        : "Ask about jiu-jitsu tournament coverage, a team day, training content or an athlete portrait session in Qatar. We reply by e-mail.",
+    path: "/contact",
+    locale,
+  });
+}
+
+export default async function ContactPage({ searchParams }: Props) {
   const [pub, params] = await Promise.all([loadPublicStudio(), searchParams]);
+  const locale = await getLocale(params.lang);
+  const t = tr(locale);
   const studio = pub?.studio ?? null;
   const sent = params.sent === "1";
   const identity = businessIdentity();
@@ -24,53 +39,65 @@ export default async function ContactPage({ searchParams }: PageProps<"/contact"
 
   return (
     <main>
-      <section className="bg-navy text-white">
-        <div className="mx-auto max-w-6xl px-4 py-14 lg:px-8 lg:py-20">
-          <p className="eyebrow !text-white/60">Contact</p>
-          <h1 className="mt-3 max-w-2xl text-4xl font-extrabold tracking-tight sm:text-5xl">Contact Blue Belt Media</h1>
-          <p className="mt-4 max-w-xl text-base text-white/75">Questions, team days or something unusual: write to us. We reply within 24 hours.</p>
+      <section className="navy-pattern bg-navy text-white">
+        <div className="container-x py-12 lg:py-16">
+          <p className="eyebrow !text-white/60">{t(UI.contact.title)}</p>
+          <h1 className="heading-1 mt-3 max-w-2xl text-balance">{t(UI.contact.heading)}</h1>
+          <p className="mt-4 max-w-xl text-base text-white/75">{t(UI.contact.lead)}</p>
         </div>
       </section>
 
-      <div className="mx-auto grid max-w-6xl gap-10 px-4 py-14 md:grid-cols-[1fr_1.4fr] lg:px-8 lg:py-20">
+      <div className="container-x section-sm grid gap-10 md:grid-cols-[1fr_1.4fr]">
         <aside className="space-y-6">
           <div>
-            <p className="eyebrow">Direct</p>
+            <p className="eyebrow">{t(UI.contact.direct)}</p>
             <ul className="mt-3 space-y-1 text-sm">
-              <li><a href={`mailto:${email}`} data-umami-event="contact-click" className="inline-flex min-h-11 items-center gap-3 font-semibold text-ink hover:text-primary"><MailIcon size={20} className="text-primary" /> {email}</a></li>
-              {ig && <li><a href={`https://instagram.com/${ig}`} target="_blank" rel="noopener noreferrer" data-umami-event="contact-click" className="inline-flex min-h-11 items-center gap-3 font-semibold text-ink hover:text-primary"><InstagramIcon size={20} className="text-primary" /> @{ig}</a></li>}
-              <li className="inline-flex min-h-11 items-center gap-3 text-muted"><MapPinIcon size={20} className="text-primary" /> {studio?.city || identity.location}</li>
+              <li>
+                <a href={`mailto:${email}`} data-umami-event="contact-click" className="inline-flex min-h-11 items-center gap-3 break-all font-semibold text-ink hover:text-primary">
+                  <MailIcon size={20} className="shrink-0 text-primary" /> <span dir="ltr">{email}</span>
+                </a>
+              </li>
+              {ig && (
+                <li>
+                  <a href={`https://instagram.com/${ig}`} target="_blank" rel="noopener noreferrer" data-umami-event="contact-click" className="inline-flex min-h-11 items-center gap-3 font-semibold text-ink hover:text-primary">
+                    <InstagramIcon size={20} className="shrink-0 text-primary" /> <span dir="ltr">@{ig}</span>
+                  </a>
+                </li>
+              )}
+              <li className="inline-flex min-h-11 items-center gap-3 text-muted">
+                <MapPinIcon size={20} className="shrink-0 text-primary" /> {studio?.city || identity.location}
+              </li>
             </ul>
           </div>
           <div>
-            <p className="eyebrow">Business</p>
-            <p className="mt-3 text-sm text-muted">{businessLegalLine(identity)}</p>
+            <p className="eyebrow">{t(UI.contact.business)}</p>
+            <p className="mt-3 text-sm text-muted" dir="ltr">{businessLegalLine(identity)}</p>
           </div>
           {bookingOpen && (
-            <div className="rounded-card bg-page p-5">
-              <p className="text-sm font-bold text-ink">Ready to book?</p>
-              <p className="mt-1 text-sm text-muted">The booking form takes about two minutes and gives you a reference straight away. We confirm within 24 hours; the deposit is paid online after that.</p>
-              <Link href="/book" data-umami-event="book-start" className="btn-secondary mt-3">Go to booking</Link>
+            <div className="card-soft p-5">
+              <p className="text-sm font-bold text-ink">{t(UI.contact.readyTitle)}</p>
+              <p className="mt-1 text-sm text-muted">{t(UI.contact.readyBody)}</p>
+              <Link href="/book" data-umami-event="book-start" className="btn-secondary mt-3">{t(UI.contact.goToRequest)}</Link>
             </div>
           )}
           <p className="text-sm text-muted">
-            Prices for each option are on the <Link href="/services" className="font-semibold text-primary">services page</Link>.
+            <Link href="/services" className="font-semibold text-primary">{t(UI.nav.services)}</Link> · <Link href="/how-it-works#faq" className="font-semibold text-primary">{t(UI.common.allQuestions)}</Link>
           </p>
         </aside>
 
         <div>
           {sent ? (
             <div className="card p-6 sm:p-8" role="status" aria-live="polite">
-              <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-success-soft text-success"><CheckIcon size={24} /></span>
-              <h2 className="mt-4 text-2xl font-extrabold text-navy">Message received</h2>
-              <p className="mt-2 text-base text-muted">Thanks. We reply within 24 hours, usually sooner.</p>
+              <span className="flex size-12 items-center justify-center rounded-2xl bg-success-soft text-success"><CheckIcon size={24} /></span>
+              <h2 className="heading-2 mt-4 text-navy">{t(UI.contact.sentTitle)}</h2>
+              <p className="mt-2 text-base text-muted">{t(UI.contact.sentBody)}</p>
               <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-                <Link href="/" className="btn-secondary">Back to home</Link>
-                {bookingOpen && <Link href="/book" data-umami-event="book-start" className="btn-primary">Make a booking</Link>}
+                <Link href="/" className="btn-secondary">{t(UI.nav.backToHome)}</Link>
+                {bookingOpen && <Link href="/book" data-umami-event="book-start" className="btn-primary">{t(UI.nav.requestCoverage)}</Link>}
               </div>
             </div>
           ) : (
-            <ContactForm />
+            <ContactForm locale={locale} />
           )}
         </div>
       </div>

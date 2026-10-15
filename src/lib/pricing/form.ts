@@ -212,11 +212,14 @@ export function validatePriceReference(raw: Record<string, unknown>, now: Date =
   const duration = rawNumber(raw.duration_hours, PRICING_MAX.hours);
   if (duration === null) fieldErrors.duration_hours = "Enter a number of hours, 0 or more.";
   const duration_hours = duration ?? includes.hours ?? null;
+  // The legacy includes JSON and the first-class columns say the same thing.
+  if (duration_hours !== null && includes.hours === undefined) includes.hours = duration_hours;
   const staffing = rawNumber(raw.staffing_count, PRICING_MAX.staffing, { integer: true });
   if (staffing === null) fieldErrors.staffing_count = "Enter a whole number, 0 or more.";
   const athletesN = rawNumber(raw.athlete_count, PRICING_MAX.athletes, { integer: true });
   if (athletesN === null) fieldErrors.athlete_count = "Enter a whole number, 0 or more.";
   const athlete_count = athletesN ?? includes.athletes ?? null;
+  if (athlete_count !== null && includes.athletes === undefined) includes.athletes = athlete_count;
   const texts: Record<"deliverables" | "editing_revisions" | "usage_rights" | "travel_tax_notes" | "excluded_reason", string | null> = { deliverables: null, editing_revisions: null, usage_rights: null, travel_tax_notes: null, excluded_reason: null };
   for (const key of Object.keys(texts) as Array<keyof typeof texts>) {
     const v = rawString(raw[key]);

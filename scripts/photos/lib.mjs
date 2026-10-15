@@ -247,3 +247,54 @@ export function percentile(values, v) {
   const below = values.filter((x) => x < v).length;
   return below / values.length;
 }
+
+// ---------------------------------------------------------------------------
+// Media library import helpers (scripts/photos/import.mjs). Mirrors
+// src/lib/media/process.ts: same widths, same JPEG settings, same metadata
+// policy, so a photograph imported from the PC and one uploaded in the
+// browser produce identical web copies.
+// ---------------------------------------------------------------------------
+
+/** Derivative widths; never upscaled. Keep in sync with DERIVATIVE_WIDTHS in src/lib/media/types.ts. */
+export const WEB_WIDTHS = [640, 1280, 1920, 2560];
+export const WEB_JPEG_QUALITY = 84;
+export const MEDIA_MIN_LONG_EDGE = 1200;
+export const MEDIA_MAX_EDGE = 12000;
+export const MEDIA_MAX_BYTES = 40 * 1024 * 1024;
+
+/** The widths for an original of width `w`: standard widths below w plus min(w, largest) so there is always a "largest". */
+export function webWidthsFor(w) {
+  const largest = WEB_WIDTHS[WEB_WIDTHS.length - 1];
+  const set = new Set(WEB_WIDTHS.filter((x) => x < w));
+  set.add(Math.min(w, largest));
+  return [...set].sort((a, b) => a - b);
+}
+
+/**
+ * sRGB JPEG web copies at each width plus a 20 px blur placeholder. Every
+ * piece of metadata is dropped (no withMetadata call; the ICC profile is used
+ * for the sRGB conversion and then not attached). Returns buffers; the caller
+ * uploads them. `width`/`height` are the oriented dimensions.
+ */
+export async function buildWebDerivatives(buffer) {
+  const base = sharp(buffer, { failOn: "error", limitInputPixels: MEDIA_MAX_EDGE * MEDIA_MAX_EDGE }).rotate();
+  const meta = await base.metadata();
+  const swap = meta.orientation && meta.orientation >= 5;
+  const width = swap ? meta.height : meta.width;
+  const height = swap ? meta.width : meta.height;
+  const derivatives = [];
+  for (const w of webWidthsFor(width)) {
+    const out = await base.clone().resize({ width: w, withoutEnlargement: true }).withIccProfile("srgb", { attach: false }).jpeg({ quality: WEB_JPEG_QUALITY, mozjpeg: true, progressive: true }).toBuffer({ resolveWithObject: true });
+    derivatives.push({ width: out.info.width, height: out.info.height, bytes: out.info.size, buffer: out.data });
+  }
+  const blur = await base.clone().resize(20, 20, { fit: "inside" }).withIccProfile("srgb", { attach: false }).jpeg({ quality: 40 }).toBuffer();
+  return { width, height, format: meta.format, derivatives, blurDataURL: `data:image/jpeg;base64,${blur.toString("base64")}` };
+}
+
+/** Non-identifying origin label stored in the database: 12 hex characters of the basename's SHA-256. Never a path. */
+export function basenameHash(file) {
+  return createHash("sha256").update(path.basename(file).toLowerCase()).digest("hex").slice(0, 12);
+}
+
+export const MIME_FOR_FORMAT = { jpeg: "image/jpeg", png: "image/png", webp: "image/webp", tiff: "image/tiff", heif: "image/heic" };
+export const EXT_FOR_FORMAT = { jpeg: "jpg", png: "png", webp: "webp", tiff: "tif", heif: "heic" };

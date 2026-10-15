@@ -19,7 +19,7 @@ import type { PhotoServiceRow, PhotoStudioRow } from "@/lib/supabase/database.ty
 export const SITE_NAME = "Blue Belt Media";
 export const DEFAULT_TITLE = "Blue Belt Media: BJJ and martial arts photography and video in Qatar";
 export const DEFAULT_DESCRIPTION =
-  "Tournament, training and athlete photography and video for jiu-jitsu and martial arts in Doha, Qatar. Request coverage online. Photos delivered in a private gallery.";
+  "Tournament, training and athlete photography and video for jiu-jitsu and martial arts in Doha, Qatar. Request coverage online. Photos in a private gallery.";
 
 export const DEFAULT_TITLE_AR = "بلو بلت ميديا: تصوير فوتوغرافي وفيديو للجوجيتسو والفنون القتالية في قطر";
 export const DEFAULT_DESCRIPTION_AR = "تصوير فوتوغرافي وفيديو للبطولات والتدريب والرياضيين في الجوجيتسو والفنون القتالية في الدوحة، قطر. اطلب التغطية إلكترونيًا. تُسلَّم الصور في معرض خاص.";

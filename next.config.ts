@@ -1,6 +1,13 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  async redirects() {
+    return [
+      // The old gallery signpost is now the indexable showcase; the FAQ lives on the process page.
+      { source: "/portfolio", destination: "/work", permanent: true },
+      { source: "/faq", destination: "/how-it-works#faq", permanent: true },
+    ];
+  },
   images: {
     // Curated photographs (public/photos) are served as AVIF where the browser
     // accepts it, WebP otherwise, in the widths next/image needs.

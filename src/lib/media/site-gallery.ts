@@ -1,8 +1,10 @@
 import "server-only";
 import { EMPTY_GALLERY, type SiteGallery } from "@/lib/photos/featured";
-import { SERVICE_SLOTS, type PhotoCategory, type SitePhoto } from "@/lib/photos/manifest";
-import { isMediaCategory } from "./types";
-import { loadPlacedMedia, type PublicMediaItem } from "./public";
+import { SERVICE_SLOTS } from "@/lib/photos/manifest";
+import { loadPlacedMedia } from "./public";
+import { publicItemToSitePhoto } from "./site-gallery-pure";
+
+export { publicItemToSitePhoto };
 
 /**
  * Bridges the media library to the SiteGallery shape the home and services
@@ -11,27 +13,6 @@ import { loadPlacedMedia, type PublicMediaItem } from "./public";
  * library has nothing placed, which makes src/lib/photos/site.ts fall back
  * to the manifest selection.
  */
-export function publicItemToSitePhoto(item: PublicMediaItem): SitePhoto {
-  // The library has no "clean side" classification; the focal point decides where the headline can sit.
-  const textSpace: SitePhoto["textSpace"] = item.focal.x <= 0.4 ? "right" : item.focal.x >= 0.6 ? "left" : "none";
-  const category: PhotoCategory = isMediaCategory(item.category) ? item.category : "brand_general";
-  return {
-    id: item.id,
-    src: item.src,
-    width: item.width,
-    height: item.height,
-    alt: item.alt,
-    category,
-    focal: item.focal,
-    textSpace,
-    blurDataURL: item.blurDataURL,
-    needsReview: false,
-    score: 0,
-    takenAt: item.takenOn,
-    folder: null,
-  };
-}
-
 export async function loadLibraryGallery({ preview = false }: { preview?: boolean } = {}): Promise<SiteGallery | null> {
   const placed = await loadPlacedMedia({ preview });
   if (!placed) return null;

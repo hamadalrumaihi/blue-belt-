@@ -7,14 +7,14 @@ import { isLandscape } from "@/components/public/media";
 import { MediaImage } from "@/components/public/MediaImage";
 import { Testimonials } from "@/components/public/Testimonials";
 import { AUDIENCE_COPY } from "@/lib/catalog/copy";
-import { featuredFaqs } from "@/lib/catalog/faq";
+import { applyFaqOverrides, FAQ_ITEMS, featuredFaqs } from "@/lib/catalog/faq";
 import { AUDIENCES, SERVICE_DEFINITIONS, SERVICES } from "@/lib/catalog/index";
 import { localized } from "@/lib/i18n/locale";
 import { getLocale } from "@/lib/i18n/server";
 import { tr, UI } from "@/lib/i18n/ui";
 import { buildHomeJsonLd, DEFAULT_DESCRIPTION, DEFAULT_DESCRIPTION_AR, DEFAULT_TITLE, DEFAULT_TITLE_AR, pageMetadata, serializeJsonLd } from "@/lib/seo";
 import { DEFAULT_STUDIO, loadPublicStudio, pictimeGalleryUrl, siteUrl } from "@/lib/studio/queries";
-import { readTestimonials } from "@/lib/studio/site-content";
+import { readPublishedFaqOverrides, readTestimonials } from "@/lib/studio/site-content";
 import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -38,7 +38,7 @@ export default async function HomePage() {
   const primaryLabel = bookingOpen ? t(UI.nav.requestCoverage) : t(UI.nav.contact);
   const primaryEvent = bookingOpen ? "book-start" : "contact-click";
   const lead = locale === "en" && studio?.about?.trim() ? studio.about.trim() : t(UI.home.lead);
-  const faqs = featuredFaqs(4);
+  const faqs = featuredFaqs(4, applyFaqOverrides(FAQ_ITEMS, readPublishedFaqOverrides(studio?.settings)));
   const jsonLd = serializeJsonLd(buildHomeJsonLd({ base: siteUrl(), studio, services: rows, locale }));
 
   return (

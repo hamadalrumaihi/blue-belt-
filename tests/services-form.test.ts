@@ -51,6 +51,8 @@ describe("DEFAULT_SERVICES", () => {
       expect(s.code).toMatch(SERVICE_CODE_RE);
       expect(s.price_qr).toBeNull();
       expect(s.includes_photo || s.includes_video).toBe(true);
+      // Published as-is on the website: no setup instructions in the seed copy.
+      expect(s.description).not.toMatch(/set your price|quoted individually|quoted per/i);
     }
     expect(new Set(DEFAULT_SERVICES.map((s) => s.booking_type))).toEqual(new Set(["tournament_athlete", "club", "training_session", "private_session", "custom"]));
   });

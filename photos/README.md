@@ -1,14 +1,66 @@
 # Photographs for the website
 
-The website takes its photography from a curated set chosen by the pipeline in
-`scripts/photos/`. It reads your archive where it already is (your `H:\`
-drive), measures, judges, dedupes and ranks every frame, writes web copies for
-the ones it picks, and leaves a report for you to review. Originals are never
-modified, renamed, moved or deleted, and the archive is never copied into the
-repository. What goes live is decided afterwards in the website itself, under
-**Studio > Featured work**.
+There are two ways to get photographs onto the website. Both end in the same
+place: the owner's **Media library** (`Studio → Media library`, `/media`),
+where every photograph is described, confirmed, placed and published. The full
+reference is `docs/media-library.md`.
 
-## 1. Run it on your PC against H:\
+| | Path A: upload in the browser | Path B: import from your archive |
+| --- | --- | --- |
+| Good for | a few photographs at a time | hundreds of frames from a shoot or the whole `H:\` drive |
+| Where it runs | `/media` in the website | `npm run photos:import` on your PC |
+| What it needs | your owner login | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `MEDIA_OWNER_ID` in your shell (never committed); `ANTHROPIC_API_KEY` only with `--vision` |
+| Result | photographs **Ready** in the library | photographs **Ready** in the library, plus a report with placement suggestions |
+
+Neither path publishes anything by itself, and neither stores your folder
+paths or originals anywhere public. Web copies (sRGB JPEG, 640–2560 px, every
+EXIF/GPS/camera field removed) are made server-side; originals stay in a
+private bucket.
+
+## Path B: import the best portfolio photos from a folder
+
+On your PC, in the repository:
+
+```powershell
+cd C:\path\to\blue-belt-
+npm install
+$env:SUPABASE_URL = "https://<project-ref>.supabase.co"
+$env:SUPABASE_SERVICE_ROLE_KEY = "..."       # Supabase → Settings → API → service_role
+$env:MEDIA_OWNER_ID = "<your user UID>"       # Supabase → Authentication → Users
+
+npm run photos:import -- --source "H:\2026\Qatar Open" --dry-run            # measure, rank, report only
+npm run photos:import -- --source "H:\2026\Qatar Open" --limit 150 --suggest-placements
+```
+
+Or ask Claude in the repository: *"Import the best portfolio photos from this
+folder: H:\2026\Qatar Open. Dry run first and show me the report, then import
+with a cap of 150 and suggest placements. Do not publish anything."* Claude runs
+the dry run, summarises `photos/report/import-<timestamp>.md`, then runs the
+import (adding `--vision --vision-cap 60` when you want categories and alt text
+pre-filled and `ANTHROPIC_API_KEY` is set).
+
+Flags: `--source <dir>` (required; `H:\` only when you pass it explicitly),
+`--dry-run`, `--limit N`, `--batch N`, `--concurrency N`, `--resume`
+(`photos/cache/import-state.json`), `--suggest-placements`, `--vision`,
+`--vision-cap N`, `--min-score N`, `--report <path>`.
+
+The import reads your folder only, measures and dedupes every frame, drops
+technical failures (too small, blown out, unsupported), uploads the chosen
+originals privately, renders the web copies and leaves each photograph
+**Ready**. It never modifies, renames, moves or deletes an original, never
+publishes, and only stores a short hash of each file name (never a path).
+
+Then open `/media`, filter **Ready**, check or write alt text, tick **I hold the
+rights** (and **Permission confirmed** where flagged), place and publish.
+
+## Legacy path: the curated manifest (still supported)
+
+The pipeline below predates the media library. It writes web copies into
+`public/photos/` plus a manifest, which the legacy **Featured work** page
+approves and publishes. The site uses the manifest selection only while the
+media library has no placements; once it has, the library wins.
+
+### 1. Run it on your PC against H:\
 
 Requirements: Node.js 22 (already needed for the project), `npm install` once,
 and an Anthropic API key for the vision pass (keep it in your shell, never in
@@ -74,7 +126,7 @@ The hardware you described (i7-12700F, 32 GB RAM) handles this comfortably:
 the pipeline streams files in batches and never holds more than a handful of
 decoded images in memory. The GPU is not used.
 
-## 2. Review, approve, publish
+### 2. Review, approve, publish
 
 1. Open `photos/report/contact-sheet.html` and `photos/report/selection.md`.
    Rows marked **approve** need your confirmation before they go live: a
@@ -93,10 +145,11 @@ For the next pipeline run, `photos/overrides.json` lets you exclude files,
 pin a file to a slot or replace alt text without touching code; the Featured
 work page keeps working on top of whatever the pipeline produces.
 
-## 3. What the site does with it
+### 3. What the site does with it
 
-`src/lib/photos/manifest.ts` reads the manifest at build time;
-`src/lib/photos/site.ts` combines it with your approvals from the studio. The
+`src/lib/photos/site.ts` prefers the media library's published placements
+and falls back to the manifest (`src/lib/photos/manifest.ts`) combined with
+your approvals from the studio. The
 home hero, the featured section, the services cards and the service
 previews use whatever is approved; an empty slot falls back to the
 photo-free layout, so the site never breaks on an empty manifest.

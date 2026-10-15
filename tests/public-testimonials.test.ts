@@ -5,14 +5,15 @@ import { describe, expect, it } from "vitest";
 import { Testimonials } from "@/components/public/Testimonials";
 
 describe("native website testimonials", () => {
-  it("shows a working contact invitation instead of an empty embed when there are no reviews", () => {
+  it("renders nothing at all when there are no reviews: a sales page never asks for one", () => {
     const html = renderToStaticMarkup(createElement(Testimonials, { reviews: [] }));
-    expect(html).toContain("Shot with us? Tell us how it went.");
-    expect(html).toContain('href="/contact"');
-    expect(html).not.toContain("<blockquote");
-    expect(html).not.toContain("<iframe");
-    expect(html).not.toContain("<script");
-    expect(html).not.toMatch(/pic-?time/i);
+    expect(html).toBe("");
+  });
+
+  it("renders Arabic headings when asked", () => {
+    const html = renderToStaticMarkup(createElement(Testimonials, { reviews: [{ name: "Coach", quote: "Great", role: null }], locale: "ar" }));
+    expect(html).toContain("من على البساط");
+    expect(html).not.toContain("Share your experience");
   });
 
   it("renders supplied reviews safely, supports Arabic, and never invents a rating", () => {
@@ -26,6 +27,7 @@ describe("native website testimonials", () => {
     expect(html).toContain("&lt;script&gt;");
     expect(html).not.toContain("<script>");
     expect(html).not.toContain("Shot with us?");
+    expect(html).not.toContain("Share your experience");
     expect(html).not.toContain("rating");
     expect(html).toContain('tabindex="0"');
   });

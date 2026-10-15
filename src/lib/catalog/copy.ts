@@ -293,7 +293,7 @@ export function allCatalogCopy(): Array<{ path: string; value: Bilingual<string 
   return out;
 }
 
-const PLACEHOLDER_SENTENCE_RE = /[^.!?]*\bset your price\b[^.!?]*[.!?]?\s*/gi;
+const PLACEHOLDER_SENTENCE_RE = /\s*[^.!?]*\bset your price\b[^.!?]*[.!?]?/gi;
 
 /**
  * Package descriptions come from the database, where a seed placeholder
@@ -303,6 +303,6 @@ const PLACEHOLDER_SENTENCE_RE = /[^.!?]*\bset your price\b[^.!?]*[.!?]?\s*/gi;
  */
 export function cleanPublicDescription(description: string | null | undefined): string | null {
   if (!description) return null;
-  const cleaned = description.replace(PLACEHOLDER_SENTENCE_RE, "").replace(/\s{2,}/g, " ").trim();
+  const cleaned = description.replace(PLACEHOLDER_SENTENCE_RE, " ").replace(/\s{2,}/g, " ").trim();
   return cleaned.length ? cleaned : null;
 }
