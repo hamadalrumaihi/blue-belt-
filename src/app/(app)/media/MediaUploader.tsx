@@ -26,38 +26,36 @@ const PARALLEL = 2;
  * failed file can be retried; a duplicate is reported, not uploaded again.
  */
 export function MediaUploader({ onAsset }: { onAsset: (asset: MediaAsset) => void }) {
-  const [items, setItems] = useState<UploadItem[]>([]);
+  const [items, setItemsState] = useState<UploadItem[]>([]);
+  const itemsRef = useRef<UploadItem[]>([]);
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const running = useRef(0);
   const queue = useRef<string[]>([]);
 
-  const update = useCallback((key: string, patch: Partial<UploadItem>) => {
-    setItems((list) => list.map((i) => (i.key === key ? { ...i, ...patch } : i)));
+  // State and ref move together so the runner can read the latest list without re-rendering.
+  const setItems = useCallback((fn: (list: UploadItem[]) => UploadItem[]) => {
+    itemsRef.current = fn(itemsRef.current);
+    setItemsState(itemsRef.current);
   }, []);
+  const update = useCallback((key: string, patch: Partial<UploadItem>) => setItems((list) => list.map((i) => (i.key === key ? { ...i, ...patch } : i))), [setItems]);
 
   const pump = useCallback(() => {
     while (running.current < PARALLEL && queue.current.length) {
       const key = queue.current.shift() as string;
+      const item = itemsRef.current.find((i) => i.key === key);
+      if (!item) continue;
       running.current++;
-      setItems((list) => {
-        const item = list.find((i) => i.key === key);
-        if (!item) {
+      void runUpload(item.file, (stage, progress) => update(key, { stage, progress }))
+        .then((out) => {
+          update(key, { stage: out.stage, progress: out.stage === "failed" ? 0 : 1, message: out.message, asset: out.asset, assetId: out.assetId });
+          if (out.asset) onAsset(out.asset);
+        })
+        .catch((err: unknown) => update(key, { stage: "failed", progress: 0, message: err instanceof Error ? err.message : String(err) }))
+        .finally(() => {
           running.current--;
-          return list;
-        }
-        void runUpload(item.file, (stage, progress) => update(key, { stage, progress }))
-          .then((out) => {
-            update(key, { stage: out.stage, progress: out.stage === "failed" ? 0 : 1, message: out.message, asset: out.asset, assetId: out.assetId });
-            if (out.asset) onAsset(out.asset);
-          })
-          .catch((err: unknown) => update(key, { stage: "failed", progress: 0, message: err instanceof Error ? err.message : String(err) }))
-          .finally(() => {
-            running.current--;
-            pump();
-          });
-        return list;
-      });
+          pump();
+        });
     }
   }, [onAsset, update]);
 
@@ -67,16 +65,15 @@ export function MediaUploader({ onAsset }: { onAsset: (asset: MediaAsset) => voi
       if (!fresh.length) return;
       setItems((list) => [...fresh, ...list]);
       queue.current.push(...fresh.map((f) => f.key));
-      // Let React commit the new items before the runner looks them up.
-      setTimeout(pump, 0);
+      pump();
     },
-    [pump],
+    [pump, setItems],
   );
 
   function retry(key: string) {
     update(key, { stage: "queued", progress: 0, message: null });
     queue.current.push(key);
-    setTimeout(pump, 0);
+    pump();
   }
 
   function onDrop(e: DragEvent<HTMLDivElement>) {

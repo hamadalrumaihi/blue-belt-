@@ -63,3 +63,14 @@ export function langSwitchHref(pathname: string, search: string | null | undefin
 export function pick<T>(locale: Locale, value: Bilingual<T>): T {
   return localized(value, locale);
 }
+
+/**
+ * Inline script for the public layout: mirrors the wrapper's lang/dir onto
+ * <html> before first paint, so screen readers, hyphenation and scrollbars
+ * follow the language. The locale comes from our own enum, never from input.
+ */
+export function htmlLangScript(locale: Locale): string {
+  const lang = JSON.stringify(LOCALE_TAG[locale]);
+  const dir = JSON.stringify(dirFor(locale));
+  return `(function(){try{var d=document.documentElement;d.lang=${lang};d.dir=${dir};}catch(e){}})();`;
+}

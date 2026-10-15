@@ -4,7 +4,8 @@ vi.mock("server-only", () => ({}));
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn(async () => ({ auth: { getUser: async () => ({ data: { user: null } }) } })) }));
 vi.mock("@/lib/supabase/service", () => ({ createServiceClient: vi.fn(), isServiceClientConfigured: () => false }));
 
-import { describeAudit, summariseToday, upcomingItems } from "@/lib/studio/dashboard";
+import { deliveryDelays, describeAudit, forecastVsCollected, leadSourceCounts, median, prioritise, quoteConversion, requestsNeedingAction, responseTimes, splitMoney, summariseToday, upcomingItems } from "@/lib/studio/dashboard";
+import { normalizeSearchTerm } from "@/lib/studio/search";
 import { inRange, monthRange, outstandingOf, summariseMoney } from "@/lib/payments/ledger";
 import type { BookingListRow } from "@/lib/bookings/queries";
 import { booking } from "./payments/fixtures";
@@ -71,6 +72,10 @@ describe("describeAudit", () => {
     expect(describeAudit({ ...base, action: "booking.completed", data: { reason: "final balance paid" } }).text).toBe("Booking completed (final balance paid)");
     expect(describeAudit({ ...base, entity: "person", action: "person.created", data: {} })).toMatchObject({ text: "person created", href: "/people/abc" });
     expect(describeAudit({ ...base, entity: "studio", entity_id: null, action: "studio.updated", data: null })).toMatchObject({ href: null });
+    expect(describeAudit({ ...base, action: "booking.production_stage", data: { from: "shoot_complete", to: "culling" } })).toMatchObject({ text: "Production → culling", href: "/bookings/abc" });
+    expect(describeAudit({ ...base, entity: "lead", action: "lead.status", data: { status: "contacted" } })).toMatchObject({ text: "Lead → contacted", href: "/leads/abc" });
+    expect(describeAudit({ ...base, entity: "studio", entity_id: "owner", action: "website.testimonial_added", data: { published: true } })).toMatchObject({ text: "Testimonial added (published)", href: "/website/testimonials" });
+    expect(describeAudit({ ...base, entity: "studio", entity_id: "owner", action: "website.faq_updated", data: {} })).toMatchObject({ text: "FAQ updated", href: "/website/faqs" });
   });
 });
 
@@ -111,5 +116,105 @@ describe("ledger summarisers", () => {
       { id: "d", status: "pending", amount_qr: 500, amount_paid_qr: 500, manual_paid_at: "x" },
     ]);
     expect(out.map((b) => [b.id, b.payment.dueQr])).toEqual([["c", 300], ["a", 100]]);
+  });
+});
+
+describe("overview summarisers", () => {
+  it("splitMoney labels forecast (booked this month), collected (paid this month) and outstanding separately", () => {
+    const r = monthRange(NOW);
+    const out = splitMoney(
+      [
+        { booking_status: "confirmed", confirmed_at: "2026-10-02T00:00:00.000Z", amount_qr: 1000, status: "pending", amount_paid_qr: 0, manual_paid_at: null, deposit_state: "paid", deposit_qr: 500, balance_state: "not_due", balance_qr: 500 },
+        { booking_status: "delivered", confirmed_at: "2026-09-02T00:00:00.000Z", amount_qr: 600, status: "pending", amount_paid_qr: 0, manual_paid_at: null, deposit_state: "paid", deposit_qr: 300, balance_state: "due", balance_qr: 300 },
+        { booking_status: "quoted", confirmed_at: null, amount_qr: 999, status: "pending", amount_paid_qr: 0, manual_paid_at: null },
+        { booking_status: "completed", confirmed_at: "2026-10-03T00:00:00.000Z", amount_qr: 200, status: "paid", amount_paid_qr: 0, manual_paid_at: null, deposit_state: "paid", deposit_qr: 100, balance_state: "paid", balance_qr: 100 },
+      ],
+      [{ amount_qr: 500, paid_at: "2026-10-02T00:00:00.000Z" }, { amount_qr: 300, paid_at: "2026-09-02T00:00:00.000Z" }],
+      r,
+    );
+    expect(out).toEqual({ range: r, forecastMonthQr: 1200, collectedMonthQr: 500, outstandingQr: 800, forecastLiveQr: 1600, outstandingCount: 2 });
+  });
+
+  it("requestsNeedingAction merges new / contacted leads with inquiry / quoted bookings, oldest first", () => {
+    const out = requestsNeedingAction(
+      [
+        { id: "l1", status: "new", source: "website", created_at: "2026-10-05T00:00:00.000Z", booking_type: "club", message: null, person: { full_name: "Coach" } },
+        { id: "l2", status: "quoted", source: "website", created_at: "2026-10-01T00:00:00.000Z", booking_type: null, message: null, person: null },
+        { id: "l3", status: "contacted", source: "instagram", created_at: "2026-10-02T00:00:00.000Z", booking_type: null, message: "hi", person: null },
+      ],
+      [row({ id: "b1", booking_status: "inquiry", created_at: "2026-10-03T00:00:00.000Z" }), row({ id: "b2", booking_status: "confirmed", created_at: "2026-10-01T00:00:00.000Z" }), row({ id: "b3", booking_status: "quoted", created_at: "2026-10-04T00:00:00.000Z", public_ref: "BB-1" })],
+    );
+    expect(out.map((r) => `${r.kind}:${r.id}`)).toEqual(["lead:l3", "booking:b1", "booking:b3", "lead:l1"]);
+    expect(out[0]).toMatchObject({ title: "Unknown", subtitle: "Message · via instagram", href: "/leads?status=contacted" });
+    expect(out[3]).toMatchObject({ title: "Coach", subtitle: "Team / club · via website" });
+    expect(out[2].subtitle).toBe("Standard · BB-1");
+  });
+
+  it("prioritise returns the next action per live booking, soonest due first, capped", () => {
+    const out = prioritise(
+      [
+        row({ id: "a", booking_status: "quoted", quoted_at: "2026-10-05T00:00:00.000Z" }),
+        row({ id: "b", booking_status: "awaiting_payment" }),
+        row({ id: "c", booking_status: "confirmed", session_at: "2026-10-08T07:00:00.000Z" }),
+        row({ id: "d", booking_status: "cancelled" }),
+        row({ id: "e", booking_status: "in_progress" }),
+      ],
+      { pendingRequests: [{ booking_id: "b", stage: "deposit", status: "pending", created_at: "2026-10-01T00:00:00.000Z" }], galleries: [{ booking_id: "e", status: "ready", pictime_url: "https://x.pic-time.com/g" }], sentDocuments: [], now: NOW },
+      3,
+    );
+    expect(out.map((r) => `${r.booking.id}:${r.action.code}`)).toEqual(["b:chase_deposit", "c:prepare_brief", "a:follow_up_quote"]);
+    expect(out[0].action.overdue).toBe(true);
+  });
+});
+
+describe("metrics", () => {
+  it("responseTimes: lead created → first lead.status audit row, in hours; untouched leads are unanswered", () => {
+    const out = responseTimes(
+      [{ id: "l1", created_at: "2026-10-01T00:00:00.000Z" }, { id: "l2", created_at: "2026-10-01T00:00:00.000Z" }, { id: "l3", created_at: "2026-10-01T00:00:00.000Z" }],
+      [
+        { entity: "lead", entity_id: "l1", action: "lead.status", created_at: "2026-10-01T02:00:00.000Z" },
+        { entity: "lead", entity_id: "l1", action: "lead.status", created_at: "2026-10-01T01:00:00.000Z" },
+        { entity: "lead", entity_id: "l2", action: "lead.status", created_at: "2026-10-02T01:00:00.000Z" },
+        { entity: "booking", entity_id: "l3", action: "booking.status", created_at: "2026-10-01T01:00:00.000Z" },
+      ],
+    );
+    expect(out).toEqual({ count: 2, medianHours: 13, meanHours: 13, unanswered: 1 });
+    expect(median([])).toBeNull();
+    expect(median([3, 1, 2])).toBe(2);
+  });
+
+  it("leadSourceCounts, quoteConversion and deliveryDelays carry their definitions in the numbers", () => {
+    expect(leadSourceCounts([{ source: "website" }, { source: "instagram" }, { source: "website" }, { source: "" }])).toEqual([{ source: "website", count: 2 }, { source: "instagram", count: 1 }, { source: "unknown", count: 1 }]);
+    expect(quoteConversion([
+      { quoted_at: "x", confirmed_at: "y", booking_status: "confirmed" },
+      { quoted_at: "x", confirmed_at: "y", booking_status: "completed" },
+      { quoted_at: "x", confirmed_at: null, booking_status: "cancelled" },
+      { quoted_at: "x", confirmed_at: null, booking_status: "quoted" },
+      { quoted_at: null, confirmed_at: "y", booking_status: "confirmed" },
+    ])).toEqual({ quoted: 4, confirmed: 2, cancelled: 1, open: 1, rate: 66.7 });
+    expect(quoteConversion([]).rate).toBeNull();
+    expect(deliveryDelays([
+      { session_at: "2026-10-01T00:00:00.000Z", delivered_at: "2026-10-08T00:00:00.000Z", gallery_delivered_at: null, booking_status: "delivered" },
+      { session_at: "2026-09-01T00:00:00.000Z", delivered_at: null, gallery_delivered_at: "2026-09-21T00:00:00.000Z", booking_status: "completed" },
+      { session_at: "2026-09-01T00:00:00.000Z", delivered_at: "2026-09-02T00:00:00.000Z", gallery_delivered_at: null, booking_status: "in_progress" },
+      { session_at: null, delivered_at: "2026-09-02T00:00:00.000Z", gallery_delivered_at: null, booking_status: "delivered" },
+    ])).toEqual({ count: 2, medianDays: 13.5, meanDays: 13.5, over14: 1 });
+  });
+
+  it("forecastVsCollected walks back month by month, oldest first", () => {
+    const out = forecastVsCollected(
+      [{ booking_status: "confirmed", confirmed_at: "2026-09-10T00:00:00.000Z", amount_qr: 400, status: "pending", amount_paid_qr: 0, manual_paid_at: null }],
+      [{ amount_qr: 150, paid_at: "2026-10-02T00:00:00.000Z" }, { amount_qr: 50, paid_at: "2026-08-02T00:00:00.000Z" }],
+      NOW,
+      3,
+    );
+    expect(out.map((m) => [m.range.label, m.forecastQr, m.collectedQr])).toEqual([["August 2026", 0, 50], ["September 2026", 400, 0], ["October 2026", 0, 150]]);
+  });
+
+  it("normalizeSearchTerm strips filter-breaking characters and needs two characters", () => {
+    expect(normalizeSearchTerm("  BB-7K3,(x) ")).toBe("BB-7K3 x");
+    expect(normalizeSearchTerm("a")).toBeNull();
+    expect(normalizeSearchTerm(null)).toBeNull();
+    expect(normalizeSearchTerm("x".repeat(100))?.length).toBe(60);
   });
 });

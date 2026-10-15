@@ -60,19 +60,6 @@ export function MediaManager({ initialAssets, initialPlacements, counts, usage }
     setMessage({ kind: res.done.length ? "ok" : "error", text });
   }
 
-  /** Re-reads the changed rows by asking the server for each id (small batches; keeps one source of truth). */
-  async function refresh(ids: string[]) {
-    // The lifecycle actions return ids only; finalize returns the row, and a status flip is predictable, so patch locally.
-    setAssets((m) => {
-      const next = new Map(m);
-      for (const id of ids) {
-        const a = next.get(id);
-        if (a) next.set(id, { ...a });
-      }
-      return next;
-    });
-  }
-
   function run(action: "publish" | "unpublish" | "archive" | "restore" | "retry", ids: string[]) {
     if (!ids.length) return;
     setMessage(null);
@@ -104,14 +91,12 @@ export function MediaManager({ initialAssets, initialPlacements, counts, usage }
           return next;
         });
         if (action === "restore") {
-          // restore re-renders server-side; fetch the finished rows one by one.
+          // The server already rebuilt the web copies; finalize on a ready row just returns it.
           for (const id of res.done) {
             const fin = await finalizeMediaUpload(id);
             if (fin.asset) upsert(fin.asset);
-            else if (fin.ok) upsert(fin.asset);
           }
         }
-        await refresh(res.done);
         setSelected(new Set());
       }
     });
