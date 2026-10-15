@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { requireOwnedAthlete, requireOwnedEvent } from "@/lib/authz";
 import { createClient } from "@/lib/supabase/server";
-import { createServiceClient, isServiceClientConfigured } from "@/lib/supabase/service";
 import { isValidEmail } from "@/lib/utils";
 import { isUuid } from "@/lib/validation";
 
@@ -134,10 +133,11 @@ export async function inviteCollaborator(eventId: string, email: string, role: "
   const supabase = await createClient();
   const owned = await requireOwnedEvent(supabase, eventId);
   if (!owned.ok) return { ok: false, error: owned.error };
-  if (!isServiceClientConfigured()) return { ok: false, error: "Collaborator invites need SUPABASE_SERVICE_ROLE_KEY on the server." };
-
-  const target = await findUserByEmail(email.trim().toLowerCase());
-  if (!target) return { ok: false, error: "No account uses that email yet. Ask them to sign up first, then invite." };
+  // Studio-role accounts only, resolved with the caller's own session (no auth user enumeration, F-10).
+  const { data: found, error: lookupError } = await supabase.rpc("photo_find_studio_user_by_email", { p_email: email.trim().toLowerCase() });
+  if (lookupError) return { ok: false, error: `Could not look up that e-mail: ${lookupError.message}` };
+  const target = typeof found === "string" && isUuid(found) ? found : null;
+  if (!target) return { ok: false, error: "No studio account uses that e-mail. Create their account first (Supabase → Authentication, with the staff role), then invite." };
   if (target === owned.ownerId) return { ok: false, error: "You are already the owner of this event." };
 
   const { error } = await supabase.from("photo_event_members").upsert({ event_id: eventId, user_id: target, role, invited_by: owned.ownerId }, { onConflict: "event_id,user_id" });
@@ -164,18 +164,6 @@ export async function removeCollaborator(eventId: string, userId: string): Promi
 }
 
 /** Resolves an email to a user id using the service (admin) client. Server-side only. */
-async function findUserByEmail(email: string): Promise<string | null> {
-  const admin = createServiceClient();
-  // Small user base: scan the first pages of the admin user list.
-  for (let page = 1; page <= 10; page += 1) {
-    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 200 });
-    if (error || !data?.users?.length) return null;
-    const hit = data.users.find((u) => (u.email ?? "").toLowerCase() === email);
-    if (hit) return hit.id;
-    if (data.users.length < 200) return null;
-  }
-  return null;
-}
 
 function friendly(message: string): string {
   if (/not authorized/i.test(message)) return "You are not assigned to this coverage.";

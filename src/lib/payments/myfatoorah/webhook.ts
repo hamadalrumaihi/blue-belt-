@@ -37,6 +37,12 @@ export type WebhookDeps = {
   supabase: SupabaseClient<Database>;
   now: () => Date;
   log: Logger;
+  /**
+   * When present, a signed "paid" webhook is confirmed with GetPaymentStatus
+   * before anything is marked paid (the V2 signature does not cover Amount.*).
+   * Absent in tests of the signature-only path and when MYFATOORAH_API_KEY is unset.
+   */
+  provider?: PaymentProvider | null;
 };
 
 export type WebhookEvent = {
@@ -214,6 +220,39 @@ export function mapInquiry(inquiry: PaymentStatusOutput): StatusMapping {
     return { kind: "apply", status: "failed", paymentId: latest?.paymentId ?? null, transaction: (latest?.raw ?? null) as Json, ...base };
   }
   return { kind: "ignore", reason: `invoice_status:${invoiceStatus || "empty"}` };
+}
+
+export type PaidConfirmation = "skipped" | "confirmed" | "overridden" | "unavailable";
+
+/**
+ * SECURITY-REGISTER F-04. MyFatoorah's Webhook V2 signature covers Invoice.Id,
+ * the statuses, PaymentId and ExternalIdentifier, but NOT Amount.*. A signed
+ * "paid" delivery is therefore confirmed with GetPaymentStatus before any
+ * booking or order is marked paid, and the provider's answer wins: its amount
+ * and currency replace the webhook's (the existing amount check then runs on
+ * verified numbers), and a provider status other than paid replaces the
+ * webhook's status (pending → ignored, cancelled/failed → applied as such).
+ * When the provider cannot be reached the signed webhook stands, as before
+ * this check existed, and the log says so.
+ */
+export async function confirmPaidMapping(mapping: Extract<StatusMapping, { kind: "apply" }>, deps: WebhookDeps): Promise<{ mapping: StatusMapping; confirmation: PaidConfirmation }> {
+  if (mapping.status !== "paid" || !deps.provider) return { mapping, confirmation: "skipped" };
+  const res = await deps.provider.getPaymentStatus({ key: mapping.invoiceId, keyType: "InvoiceId" });
+  if (!res.ok) {
+    deps.log.warn("payments.provider_confirm_unavailable", { invoiceId: mapping.invoiceId, code: res.error.code });
+    return { mapping, confirmation: "unavailable" };
+  }
+  const inquiry = mapInquiry(res.data);
+  if (inquiry.kind === "apply" && inquiry.status === "paid") {
+    deps.log.info("payments.provider_confirmed", { invoiceId: mapping.invoiceId, webhookAmount: mapping.amount, providerAmount: inquiry.amount });
+    return {
+      mapping: { ...mapping, amount: inquiry.amount ?? mapping.amount, currency: inquiry.currency ?? mapping.currency, externalIdentifier: mapping.externalIdentifier ?? inquiry.externalIdentifier ?? null },
+      confirmation: "confirmed",
+    };
+  }
+  deps.log.warn("payments.provider_overrode_webhook", { invoiceId: mapping.invoiceId, webhookStatus: mapping.status, provider: inquiry.kind === "apply" ? inquiry.status : inquiry.reason });
+  if (inquiry.kind === "apply") return { mapping: { ...inquiry, paymentId: inquiry.paymentId ?? mapping.paymentId, transaction: inquiry.transaction ?? mapping.transaction }, confirmation: "overridden" };
+  return { mapping: { kind: "ignore", reason: `provider:${inquiry.reason}` }, confirmation: "overridden" };
 }
 
 // ---------------------------------------------------------------------------
@@ -973,7 +1012,10 @@ export async function processWebhook(event: WebhookEvent, deps: WebhookDeps): Pr
   }
 
   // (3) Map to a booking status and apply the transition.
-  const mapping = mapWebhookEvent(eventName, isRecord(body.Data) ? body.Data : {});
+  const signedMapping = mapWebhookEvent(eventName, isRecord(body.Data) ? body.Data : {});
+  if (signedMapping.kind === "ignore") return finish("ignored_event", null, undefined, signedMapping.reason);
+  // (3b) The signature does not cover the amount: confirm a "paid" with the provider first (F-04).
+  const { mapping } = await confirmPaidMapping(signedMapping, deps);
   if (mapping.kind === "ignore") return finish("ignored_event", null, undefined, mapping.reason);
 
   const target = await resolveMapping(mapping, deps);

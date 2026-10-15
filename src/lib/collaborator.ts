@@ -1,7 +1,6 @@
 import "server-only";
 import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
-import { createServiceClient, isServiceClientConfigured } from "@/lib/supabase/service";
 import type { CollaboratorBoardRow, CollaboratorEventRow, PhotoCoverageRow } from "@/lib/supabase/database.types";
 
 /** Events the signed-in user collaborates on (via the SECURITY DEFINER RPC). */
@@ -43,14 +42,21 @@ export async function loadCollaboratorBoard(eventId: string): Promise<Collaborat
 
 export type EventTeamMember = { userId: string; email: string | null; role: string };
 
-/** Owner view: event collaborators with emails (service lookup) for the assignment UI. */
+/**
+ * Owner view: event collaborators with e-mails for the assignment UI. The
+ * e-mails come from the SECURITY DEFINER RPC photo_studio_user_emails with
+ * the caller's own session: only owner/staff profiles that share an event
+ * with the caller are ever resolved, and no auth user list is enumerated
+ * (SECURITY-REGISTER F-10).
+ */
 export async function loadEventTeam(eventId: string): Promise<EventTeamMember[]> {
   const supabase = await createClient();
   const { data: members } = await supabase.from("photo_event_members").select("user_id, role").eq("event_id", eventId);
   const rows = members ?? [];
-  if (!rows.length || !isServiceClientConfigured()) return rows.map((m) => ({ userId: m.user_id, email: null, role: m.role }));
-  const emails = await emailsFor(rows.map((m) => m.user_id));
-  return rows.map((m) => ({ userId: m.user_id, email: emails.get(m.user_id) ?? null, role: m.role }));
+  if (!rows.length) return [];
+  const { data: emails } = await supabase.rpc("photo_studio_user_emails", { p_ids: rows.map((m) => m.user_id) });
+  const byId = new Map((emails ?? []).map((e) => [e.user_id, e.email]));
+  return rows.map((m) => ({ userId: m.user_id, email: byId.get(m.user_id) ?? null, role: m.role }));
 }
 
 /** Owner view: coverage rows (assignments + completion) for an event, keyed by athlete. */
@@ -60,20 +66,3 @@ export async function loadEventCoverage(eventId: string): Promise<Map<string, Ph
   return new Map((data ?? []).map((c) => [c.athlete_id, c]));
 }
 
-async function emailsFor(ids: string[]): Promise<Map<string, string>> {
-  const admin = createServiceClient();
-  const want = new Set(ids);
-  const out = new Map<string, string>();
-  for (let page = 1; page <= 10 && want.size; page += 1) {
-    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 200 });
-    if (error || !data?.users?.length) break;
-    for (const u of data.users) {
-      if (want.has(u.id)) {
-        out.set(u.id, u.email ?? "");
-        want.delete(u.id);
-      }
-    }
-    if (data.users.length < 200) break;
-  }
-  return out;
-}

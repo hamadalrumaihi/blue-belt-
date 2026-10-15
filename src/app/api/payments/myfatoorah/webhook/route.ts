@@ -3,6 +3,7 @@ import { requestLogger } from "@/lib/log";
 import { rateLimit, rateLimitHeaders, RULES } from "@/lib/rate-limit";
 import { createServiceClient, isServiceClientConfigured } from "@/lib/supabase/service";
 import { getPaymentsConfig, isPaymentsEnabled } from "@/lib/payments/config";
+import { createMyFatoorahClient } from "@/lib/payments/myfatoorah/client";
 import { isSupportedWebhookVersion, SIGNATURE_HEADER, VERSION_HEADER, verifySignature } from "@/lib/payments/myfatoorah/signature";
 import { processWebhook } from "@/lib/payments/myfatoorah/webhook";
 
@@ -71,7 +72,9 @@ export async function POST(request: Request) {
   }
   const verdict = verifySignature(request.headers.get(SIGNATURE_HEADER), body as Record<string, unknown>, config.webhookSecret);
 
-  const outcome = await processWebhook({ body: body as Record<string, unknown>, signatureValid: verdict.valid }, { supabase: createServiceClient(), now: () => new Date(), log });
+  // The signature does not cover the amount: with an API key the paid path is re-asked of the provider (F-04).
+  const provider = config.apiKey ? createMyFatoorahClient({ apiKey: config.apiKey, baseUrl: config.baseUrl }) : undefined;
+  const outcome = await processWebhook({ body: body as Record<string, unknown>, signatureValid: verdict.valid }, { supabase: createServiceClient(), now: () => new Date(), log, provider });
 
   log.info("payments.webhook", {
     result: outcome.result,
