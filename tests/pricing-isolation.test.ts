@@ -59,7 +59,8 @@ describe("pricing isolation", () => {
   it("the pricing library never reads customer identifiers into a request or research scope", () => {
     // The files that read a booking / lead or describe a research job: no customer column, no free text.
     for (const file of ["src/lib/pricing/engine/extract.ts", "src/lib/pricing/compute.ts", "src/lib/pricing/assess-hook.ts", "src/lib/pricing/capacity.ts", "src/lib/pricing/research.ts"]) {
-      const text = readFileSync(join(ROOT, file), "utf8");
+      // Code only: the doc comments are allowed to say what is NOT read.
+      const text = readFileSync(join(ROOT, file), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
       expect(text, file).not.toMatch(/customer_|guardian|athlete_name|club_name|instagram|\bnotes\b|\bemail\b|\bphone\b/);
     }
     const hook = readFileSync(join(ROOT, "src/lib/pricing/assess-hook.ts"), "utf8");
