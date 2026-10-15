@@ -94,7 +94,8 @@ describe("POST /api/cron/payments (payment job)", () => {
 
   it("with PAYMENTS_RECONCILE_ENABLED=1 it asks the provider about old pending bookings", async () => {
     vi.stubEnv("PAYMENTS_RECONCILE_ENABLED", "1");
-    db.seed("photo_bookings", [booking({ created_at: "2026-10-01T00:00:00.000Z" })]);
+    // Two days old: past the 10-minute grace, well inside the 14-day reconcile window.
+    db.seed("photo_bookings", [booking({ created_at: new Date(Date.now() - 2 * 86_400_000).toISOString() })]);
     getPaymentStatus.mockResolvedValue({ ok: true, data: { invoiceId: "6409988", invoiceStatus: "Pending", invoiceReference: "r", customerReference: "c", invoiceValue: 350, transactions: [], raw: {} } });
     const body = await (await (await route()).POST(post())).json();
     expect(body.reconcile).toMatchObject({ enabled: true, scanned: 1, changed: 0 });
