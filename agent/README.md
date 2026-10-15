@@ -40,3 +40,20 @@ npm test        # node --test: schedule, spool, config, one full tick against a 
 npm start       # needs agent.env
 npm run once    # one tick, then exit (useful for checking the setup)
 ```
+
+## Configuration reference
+
+`agent.env.example` lists the common settings. The rest are read in `src/config.mjs` with these defaults:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `PROFILE_DIR` / `SPOOL_DIR` | `<AGENT_DATA_DIR>/profile`, `<AGENT_DATA_DIR>/spool` | dedicated browser profile and the durable upload queue |
+| `JOBS_REFRESH_SECONDS` | 300 | how often `GET /api/capture/jobs` is re-read |
+| `HEARTBEAT_SECONDS` | 60 | `POST /api/capture/heartbeat` cadence |
+| `NAV_TIMEOUT_MS` | 45000 | page navigation timeout |
+| `MAX_HTML_BYTES` | 3 MB | cap per capture (the app enforces the same) |
+| `MAX_SPOOL_FILES` | 200 | oldest spooled captures are dropped beyond this |
+
+`APP_URL` is the app origin, `https://www.bluebeltmedia.com` (the `tournament-watcher.vercel.app` example in
+`agent.env.example` is the historical alias); see [docs/overhaul/INTEGRATIONS.md](../docs/overhaul/INTEGRATIONS.md).
+Live status of the agent path: [docs/windows-agent.md](../docs/windows-agent.md) ("Status").
