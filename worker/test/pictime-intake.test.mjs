@@ -173,6 +173,19 @@ test("a refused session logs the code and where it landed, without query or digi
   assert.doesNotMatch(JSON.stringify(fields), /secret|123/);
 });
 
+test("an order page without its heading logs digit-count facts once, never values", async () => {
+  const lines = [];
+  const log = { info: (msg, f) => lines.push([msg, f]), warn: () => {}, error() {} };
+  const dash = fakeDashboard({ refs: ["1234567", "7654321"], orders: {} });
+  const out = await runPictimeIntake({ env: baseEnv, open: dash.open, log });
+  assert.deepEqual(out.skipped, { ORDER_NOT_SHOWN: 2 });
+  const [, fields] = lines.find(([m]) => m === "pictime_intake.run");
+  assert.equal(fields.facts.stage, "order_page");
+  assert.equal(fields.facts.refDigits, 7);
+  assert.equal(fields.facts.landedHash, "");
+  assert.doesNotMatch(JSON.stringify(fields), /1234567|7654321/);
+});
+
 test("read-only by construction: the adapter never clicks, types, fills or submits", async () => {
   const src = await readFile(new URL("../src/pictime-intake.mjs", import.meta.url), "utf8");
   const code = src.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");

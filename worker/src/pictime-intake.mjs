@@ -153,6 +153,23 @@ async function pageFacts(page) {
   return { landedPath: u.pathname.replace(/\d+/g, "N"), landedHash: u.hash.slice(0, 60).replace(/\d+/g, "N"), ...facts };
 }
 
+// Why an order page did not show "Order #<ref>": where it landed and which
+// "Order #<n>" headings it did show, as digit counts only (no values or text).
+async function orderPageFacts(page, ref) {
+  const u = new URL(page.url());
+  const facts = await page.evaluate(() => {
+    const leaves = [...document.querySelectorAll("div, span, a, h1, h2, h3")].filter((el) => !el.children.length && el.getClientRects().length);
+    const headings = leaves.map((el) => el.textContent.trim().match(/^Order #(\d{1,20})$/)).filter(Boolean);
+    return {
+      orderHeadings: headings.length,
+      orderHeadingDigits: headings.slice(0, 5).map((m) => m[1].length),
+      itemStatuses: document.querySelectorAll(".itemStatus").length,
+      salePrices: document.querySelectorAll(".totalSale .salePrice").length,
+    };
+  });
+  return { stage: "order_page", refDigits: ref.length, landedHash: u.hash.slice(0, 60).replace(/\d+/g, "N"), ...facts };
+}
+
 async function readBuyerName(page, selector) {
   if (!selector) return null;
   const names = await page.locator(selector).allTextContents().catch(() => []);
@@ -211,7 +228,12 @@ export async function runPictimeIntake(deps = {}) {
       await page.goto(`${ORIGIN}/professional#dash|store|orders|order_${ref}`, { waitUntil: "domcontentloaded", timeout: 10_000 });
       if (!onDashboard(page)) return fail("SESSION_REQUIRED");
       const visible = await page.getByText(`Order #${ref}`, { exact: true }).waitFor({ state: "visible" }).then(() => true, () => false);
-      if (!visible) { skip("ORDER_NOT_SHOWN"); continue; }
+      if (!visible) {
+        skip("ORDER_NOT_SHOWN");
+        // First miss only: what the order page showed instead (digit counts, never values).
+        if (!summary.facts) summary.facts = await orderPageFacts(page, ref).catch(() => ({ unreadable: true }));
+        continue;
+      }
       summary.opened += 1;
       const snap = await snapshot(page);
       if (snap.orderRef !== ref) { skip("ORDER_MISMATCH"); continue; }
