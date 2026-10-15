@@ -71,7 +71,7 @@ export function AssessmentActions({ assessmentId, status, hasBooking, quoteId, f
         </div>
       )}
       {error && <p className="text-xs font-semibold text-danger" role="alert">{error}</p>}
-      <p className="text-[11px] text-muted">Accepting creates a private draft only. The amount reaches the booking through "Apply", and the client only through you.</p>
+      <p className="text-[11px] text-muted">Accepting creates a private draft only. The amount reaches the booking through &ldquo;Apply&rdquo;, and the client only through you.</p>
     </div>
   );
 }

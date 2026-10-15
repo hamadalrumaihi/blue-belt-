@@ -22,7 +22,7 @@ describe("seed dataset", () => {
     expect(rows.filter((r) => r.provider === "Shutter Qatar").every((r) => r.confidence === "unverified")).toBe(true);
     expect(rows.filter((r) => r.comparable_scope === "sports_event_athlete")).toHaveLength(0);
     expect(rows.filter((r) => referenceNeedsReverification(r, NOW)).map((r) => r.provider)).toEqual(expect.arrayContaining(["Shutter Qatar", "Litrato Qatar", "Ghassen Oueslati"]));
-    expect(rows.find((r) => r.seed_key.startsWith("share-agency-video"))?.deliverables).toMatch(/not full reels/i);
+    expect(rows.find((r) => r.seed_key?.startsWith("share-agency-video"))?.deliverables).toMatch(/not full reels/i);
   });
 
   it("the raw seed file carries every field the schema has, so the owner script and the UI import agree", () => {

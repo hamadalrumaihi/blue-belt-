@@ -87,7 +87,7 @@ export function ImportForm() {
           </ul>
         </div>
       )}
-      <p className="text-[11px] text-muted">Nothing is overwritten. To update an existing observation, open it and choose "Save as new observation".</p>
+      <p className="text-[11px] text-muted">Nothing is overwritten. To update an existing observation, open it and choose &ldquo;Save as new observation&rdquo;.</p>
     </div>
   );
 }

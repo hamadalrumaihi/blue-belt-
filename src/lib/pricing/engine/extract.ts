@@ -76,7 +76,8 @@ export function extractPricingRequest(src: ExtractSource, now: Date = new Date()
   // Service ------------------------------------------------------------------
   let service: ServiceKey;
   let mediaHint: MediaScope | null = null;
-  if (isServiceKey(d.service)) service = d.service;
+  const serviceRaw = d.service_key ?? d.service;
+  if (isServiceKey(serviceRaw)) service = serviceRaw;
   else if (typeof d.service_kind === "string" && LEGACY_SERVICE_KIND[d.service_kind]) {
     service = LEGACY_SERVICE_KIND[d.service_kind].service;
     mediaHint = LEGACY_SERVICE_KIND[d.service_kind].media;
@@ -92,7 +93,8 @@ export function extractPricingRequest(src: ExtractSource, now: Date = new Date()
 
   // Media ---------------------------------------------------------------------
   let media: MediaScope | null = null;
-  if (isMediaScope(d.media)) media = d.media;
+  const mediaRaw = d.media_scope ?? d.media; // "not_sure" from the wizard is simply not a scope
+  if (isMediaScope(mediaRaw)) media = mediaRaw;
   else if (d.coverage === "photo" || d.coverage === "video" || d.coverage === "both") media = d.coverage === "both" ? "photo_video" : d.coverage;
   else if (d.wants_photographer === true || d.wants_videographer === true) media = d.wants_photographer && d.wants_videographer ? "photo_video" : d.wants_videographer ? "video" : "photo";
   else if (mediaHint) media = mediaHint;
@@ -119,7 +121,7 @@ export function extractPricingRequest(src: ExtractSource, now: Date = new Date()
 
   // Hours / days ------------------------------------------------------------------
   const days = int(d.days, 30) ?? 1;
-  let hours = num(d.hours_on_site) ?? hoursBetween(src.sessionAt, src.sessionEndAt);
+  let hours = num(d.hours_on_site ?? d.coverage_hours) ?? hoursBetween(src.sessionAt, src.sessionEndAt);
   if (hours === null && src.service?.duration_minutes) hours = Math.round((src.service.duration_minutes / 60) * 10) / 10;
   if (hours === null) {
     missing.push("hours_on_site");
@@ -158,7 +160,8 @@ export function extractPricingRequest(src: ExtractSource, now: Date = new Date()
   const eventDate = typeof dateRaw === "string" ? dateRaw : null;
   if (!eventDate) missing.push("event_date");
   let deadlineDays = int(d.deadline_days, 365);
-  if (deadlineDays === null && isValidCalendarDate(d.deadline_date) && eventDate) deadlineDays = daysBetween(eventDate, d.deadline_date);
+  const deadlineDate = [d.deadline_date, d.deadline].find((v) => isValidCalendarDate(v));
+  if (deadlineDays === null && typeof deadlineDate === "string" && eventDate) deadlineDays = daysBetween(eventDate, deadlineDate);
   if (deadlineDays !== null && deadlineDays < 0) deadlineDays = 0;
   void now;
 

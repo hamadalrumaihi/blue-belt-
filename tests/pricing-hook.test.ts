@@ -6,7 +6,7 @@ vi.mock("server-only", () => ({}));
 
 import { enqueuePricingAssessment } from "@/lib/pricing/assess-hook";
 import { assessmentFromRow } from "@/lib/pricing/engine";
-import type { PhotoPricingAssessmentRow } from "@/lib/supabase/database.types";
+import type { Json, PhotoPricingAssessmentRow } from "@/lib/supabase/database.types";
 
 const NOW = new Date("2026-10-15T09:00:00.000Z");
 const BOOKING = "22222222-2222-4222-8222-222222222222";
@@ -15,7 +15,7 @@ const LEAD = "55555555-5555-4555-8555-555555555555";
 let db: FakeSupabase;
 
 function clubBooking(details: Record<string, unknown>, overrides: Record<string, unknown> = {}) {
-  return { ...booking({ id: BOOKING, booking_type: "club", booking_status: "inquiry", details, usage_type: "club_team", customer_email: "secret@example.com", customer_name: "Secret Person", customer_phone: "+97455551234", notes: "private note" }), ...overrides } as unknown as Record<string, unknown>;
+  return { ...booking({ id: BOOKING, booking_type: "club", booking_status: "inquiry", details: details as Json, usage_type: "club_team", customer_email: "secret@example.com", customer_name: "Secret Person", customer_phone: "+97455551234", notes: "private note" }), ...overrides } as unknown as Record<string, unknown>;
 }
 
 function rows(): PhotoPricingAssessmentRow[] {

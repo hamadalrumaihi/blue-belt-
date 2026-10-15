@@ -172,7 +172,7 @@ export function PriceReferenceForm({ action, initial, today, submitLabel = "Save
           {pending ? "Saving…" : submitLabel}
         </button>
       </div>
-      {initial && <p className="text-[11px] text-muted">"Save changes" corrects this row in place (typos). "Save as new observation" keeps history: the old row is marked superseded and stops pricing anything.</p>}
+      {initial && <p className="text-[11px] text-muted">&ldquo;Save changes&rdquo; corrects this row in place (typos). &ldquo;Save as new observation&rdquo; keeps history: the old row is marked superseded and stops pricing anything.</p>}
     </form>
   );
 }

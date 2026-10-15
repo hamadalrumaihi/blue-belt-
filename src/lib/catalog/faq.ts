@@ -269,11 +269,11 @@ export function normalizeForSearch(text: string): string {
   return text
     .toLowerCase()
     .normalize("NFKD")
-    .replace(/[ً-ٰٕ]/g, "")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/[أإآٱ]/g, "ا")
-    .replace(/ة/g, "ه")
-    .replace(/ى/g, "ي")
+    .replace(/[\u064B-\u0655\u0670]/g, "")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\u0623\u0625\u0622\u0671]/g, "\u0627")
+    .replace(/\u0629/g, "\u0647")
+    .replace(/\u0649/g, "\u064A")
     .replace(/\s+/g, " ")
     .trim();
 }

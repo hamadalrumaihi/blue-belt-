@@ -43,6 +43,15 @@ describe("extractPricingRequest", () => {
     expect(b).toMatchObject({ media: "photo_video", hoursOnSite: 1.5 });
   });
 
+  it("reads the wizard's catalog keys (service_key, media_scope, video_deliverables, coverage_hours, deadline) and treats 'not sure' as missing", () => {
+    const a = extractPricingRequest({ bookingType: "club", details: { service_key: "team_tournament", media_scope: "photo_video", video_deliverables: ["reels"], coverage_hours: 6, athlete_count: 8, competition_date: "2026-11-20", deadline: "2026-11-27" } }, NOW);
+    expect(a).toMatchObject({ service: "team_tournament", media: "photo_video", videoDeliverables: ["reels"], hoursOnSite: 6, deadlineDays: 7 });
+    expect(a.criticalMissing).toEqual([]);
+    const b = extractPricingRequest({ bookingType: "custom", details: { service_key: "organizer_custom", media_scope: "not_sure", video_deliverables_unknown: true } }, NOW);
+    expect(b.media).toBe("photo");
+    expect(b.criticalMissing).toEqual(expect.arrayContaining(["media", "hours_on_site"]));
+  });
+
   it("derives a location KIND from keywords without keeping the text", () => {
     expect(locationKindFrom("Our studio in West Bay")).toBe("studio");
     expect(locationKindFrom("Evolve academy, Al Sadd")).toBe("academy");

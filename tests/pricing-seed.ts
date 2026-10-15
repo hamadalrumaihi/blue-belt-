@@ -1,12 +1,13 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { ReferenceRow } from "@/lib/pricing/engine/market";
-import { validatePriceReference } from "@/lib/pricing/form";
+import { validatePriceReference, type PriceReferenceValues } from "@/lib/pricing/form";
 
 export const SEED_NOW = new Date("2026-10-15T09:00:00.000Z");
 
 /** The seeded evidence as reference rows, validated through the same parser the import uses. */
-export function seedRows(now: Date = SEED_NOW): ReferenceRow[] {
+export type SeedRow = PriceReferenceValues & { id: string; superseded_by: null };
+
+export function seedRows(now: Date = SEED_NOW): SeedRow[] {
   const doc = JSON.parse(readFileSync(join(__dirname, "..", "scripts/pricing/seed-references.json"), "utf8")) as { references: Record<string, unknown>[] };
   return doc.references.map((raw, i) => {
     const { values, fieldErrors } = validatePriceReference(raw, now);
