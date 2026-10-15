@@ -24,7 +24,8 @@ type Props = { params: Promise<{ slug: string }> };
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const [{ slug }, locale] = await Promise.all([params, getLocale()]);
   const def = serviceBySlug(slug);
-  if (!def) return { title: "Service not found", robots: { index: false, follow: false } };
+  // Thrown here as well as in the page so the response status is 404 for crawlers, which get metadata before any streaming.
+  if (!def) notFound();
   const copy = SERVICE_COPY[def.key];
   return pageMetadata({ title: localized(copy.metaTitle, locale), description: localized(copy.metaDescription, locale), path: `/services/${def.slug}`, locale });
 }

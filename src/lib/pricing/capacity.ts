@@ -14,15 +14,15 @@ const TENTATIVE: readonly BookingStatus[] = ["awaiting_contract", "awaiting_paym
 
 export async function findCapacityConflicts(supabase: SupabaseClient<Database>, ownerId: string, date: string | null, excludeBookingId: string | null): Promise<CapacityCheck> {
   if (!date) return { date: null, conflicts: [], tentative: [] };
-  // The day in Qatar (UTC+3, no DST) as a UTC window.
-  const start = new Date(`${date}T00:00:00+03:00`).toISOString();
+  // The day in Qatar (UTC+3, no DST) as a UTC window: (midnight − 1 ms, 23:59:59].
+  const start = new Date(new Date(`${date}T00:00:00+03:00`).getTime() - 1).toISOString();
   const end = new Date(`${date}T23:59:59+03:00`).toISOString();
   const { data } = await supabase
     .from("photo_bookings")
     .select("id,public_ref,booking_status,session_at")
     .eq("owner_id", ownerId)
     .in("booking_status", [...CONFIRMED, ...TENTATIVE])
-    .gte("session_at", start)
+    .gt("session_at", start)
     .lte("session_at", end)
     .limit(50);
   const rows = (data ?? []).filter((b) => b.id !== excludeBookingId);

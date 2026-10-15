@@ -14,7 +14,7 @@ except solve a human check in the browser window if the site asks for one.
 | Node.js LTS (20 or newer) | <https://nodejs.org> (default install, "Add to PATH" ticked) |
 | This repository (the `agent/` and `worker/` folders) | `git clone …` or the ZIP from GitHub |
 | A **capture credential** | App → Settings → Capture agent → *Create credential* |
-| The app origin | e.g. `https://tournament-watcher.vercel.app` |
+| The app origin | e.g. `https://www.bluebeltmedia.com` |
 
 The credential is the agent's only secret. It is scoped to your account (and
 optionally one event), expires after 1–14 days, and the Revoke button stops it
@@ -29,7 +29,7 @@ start with anything but a `bbmc_…` credential.
 3. Open `C:\BlueBelt\blue-belt\agent`, copy `agent.env.example` to `agent.env`
    and set:
    ```ini
-   APP_URL=https://tournament-watcher.vercel.app
+   APP_URL=https://www.bluebeltmedia.com
    CAPTURE_TOKEN=bbmc_xxxxxxxx_…   (from Settings → Capture agent)
    ```
 4. Double-click `start-agent.cmd`. The first run installs dependencies
