@@ -101,7 +101,7 @@ const onDashboard = (page) => {
 };
 
 // The orders list route (#dash|store|orders) was confirmed on 12 Oct 2026; its
-// rows carry an OrderLink_<digits> class token. Refs are also collected from
+// rows carry an OrderLink_<position> class token. Refs are also collected from
 // links / attributes naming order_<digits> and from visible "Order #<digits>"
 // leaves. Every ref is only a candidate: the order page must then show the
 // same "Order #<ref>" heading, or it is skipped. Finding none is reported.
@@ -114,11 +114,17 @@ async function discoverOrderRefs(page) {
         if (m) refs.add(m[1]);
       }
     }
-    // Observed 12 Oct 2026: list rows carry a class token OrderLink_<order number>.
-    for (const el of document.querySelectorAll("[class*='OrderLink_']")) {
-      for (const t of String(el.className).split(/\s+/)) {
-        const m = t.match(/^OrderLink_(\d{1,20})$/);
-        if (m) refs.add(m[1]);
+    // List rows carry a class token OrderLink_<n>, where n is the row's
+    // position (1, 2, …; confirmed 15 Oct 2026), not the order number. The
+    // order number is read from the row itself: any 8–12 digit run in its
+    // text or attribute values. Still only a candidate (see above).
+    for (const row of document.querySelectorAll("[class*='OrderLink_']")) {
+      const sources = [row.textContent ?? ""];
+      for (const el of [row, ...row.querySelectorAll("*")]) {
+        for (const a of el.attributes) sources.push(a.value);
+      }
+      for (const text of sources) {
+        for (const m of text.matchAll(/(?<!\d)(\d{8,12})(?!\d)/g)) refs.add(m[1]);
       }
     }
     for (const el of document.querySelectorAll("div, span, a")) {
@@ -144,7 +150,10 @@ async function pageFacts(page) {
         if (/order/i.test(t) && t.length <= 40) tokens.set(t, (tokens.get(t) ?? 0) + 1);
       }
     }
+    const rows = [...document.querySelectorAll("[class*='OrderLink_']")].slice(0, 4);
     return {
+      // Per row: lengths of the digit runs in its text (never the digits).
+      orderRowDigitRuns: rows.map((r) => [...(r.textContent ?? "").matchAll(/\d+/g)].slice(0, 8).map((m) => m[0].length)),
       orderTextLeaves: leaves.filter((el) => /^Order #\d{1,20}$/.test(el.textContent.trim())).length,
       orderAttrLinks: document.querySelectorAll("[href*='order_'], [data-hash*='order_'], [onclick*='order_']").length,
       orderClassTokens: [...tokens.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([t, n]) => `${t.replace(/\d+/g, "N")}:${n}`),
