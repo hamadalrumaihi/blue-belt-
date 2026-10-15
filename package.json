@@ -13,6 +13,7 @@
     "test:coverage": "vitest run --coverage",
     "test:worker": "npm --prefix worker test",
     "test:agent": "npm --prefix agent test",
+    "test:db": "node scripts/db/sql-tests.mjs",
     "check": "npm run typecheck && npm run lint && npm test && npm run test:worker && npm run test:agent",
     "ops:coherence": "node scripts/ops/prod-coherence.mjs",
     "photos": "node scripts/photos/run.mjs",

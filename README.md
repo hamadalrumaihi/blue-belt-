@@ -139,7 +139,7 @@ Before pushing:
 ```bash
 npm run check        # typecheck + lint + vitest + worker and agent node --test
 npm run build        # next build with the same placeholders CI uses
-supabase test db     # pgTAP (supabase/tests/rls.test.sql) — needs Docker and `supabase init` once; see Testing and CI
+npm run test:db      # migrations + every supabase/tests/*.sql on a disposable local Postgres (DATABASE_URL); see Testing and CI
 ```
 
 `npm run typecheck` runs `next typegen` first (Next 16 route types), so run it after adding routes.
@@ -216,7 +216,7 @@ npm run build
 
 `.github/workflows/ci.yml` runs type-check, lint, unit tests and the build with placeholder public Supabase values (no secrets), the worker and agent checks, and the worker's real-Chromium integration test in the Playwright container. `.github/dependabot.yml` keeps the three npm roots and the actions current (weekly, grouped minor/patch).
 
-**Database tests** (`supabase/tests/*.sql`) run against a real Postgres: `rls.test.sql` is pgTAP (`supabase test db`); the other files (`captures_rls`, `coverage_rls`, `coverage_commands`, `deliveries_claim`, `orders_rls`, `pricing_rls`, `refresh_overrides`, `capture_ordering`, `rpc_grants`) are `DO` blocks you paste into psql against a disposable database — each ends with `ERROR: ROLLBACK_OK: …` on success and rolls everything back. They are **not in CI yet**: the repo has no `supabase/config.toml` and the `DO`-block files are not TAP, so `supabase test db` would fail; the register (`docs/overhaul/SECURITY-REGISTER.md`, P-07) has the job to add once both are fixed.
+**Database tests** (`supabase/tests/*.sql`) run against a real Postgres with `npm run test:db` (`scripts/db/sql-tests.mjs`): it creates a disposable `bbm_sql_tests` database on the server `DATABASE_URL` points at (default `postgres://postgres:postgres@127.0.0.1:5432/postgres`; Supabase hosts are refused), applies `scripts/db/shim.sql` (the Supabase roles, `auth.*` and `storage.*` a plain Postgres lacks), every migration and `scripts/db/seed.sql`, then runs each test file. Every file is a `DO` block that ends with `ERROR: ROLLBACK_OK: …` on success and rolls everything back. CI runs the same script in the **Database** job on the runner's Postgres. Flags: `--only <name>`, `--keep`, `--no-shim`, `--no-seed`.
 
 ## Current limitations
 
