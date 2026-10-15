@@ -1,0 +1,58 @@
+# Dependabot: weekly, grouped minor/patch updates for the three npm roots and
+# the GitHub Actions used by .github/workflows/ci.yml. Majors stay separate so
+# a Next.js / Playwright / Supabase major is reviewed on its own.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Qatar
+    open-pull-requests-limit: 5
+    groups:
+      app-minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    labels: ["dependencies", "app"]
+
+  - package-ecosystem: npm
+    directory: /worker
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Qatar
+    open-pull-requests-limit: 3
+    groups:
+      worker-minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    labels: ["dependencies", "worker"]
+
+  - package-ecosystem: npm
+    directory: /agent
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Qatar
+    open-pull-requests-limit: 3
+    groups:
+      agent-minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    labels: ["dependencies", "agent"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Qatar
+    groups:
+      actions:
+        patterns: ["*"]
+    labels: ["dependencies", "ci"]

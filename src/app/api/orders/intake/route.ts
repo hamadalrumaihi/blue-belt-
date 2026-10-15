@@ -45,7 +45,7 @@ export async function POST(request: Request) {
   let raw: unknown;
   try {
     const text = await request.text();
-    if (text.length > MAX_BODY_BYTES) return NextResponse.json({ error: "Body too large.", code: "TOO_LARGE" }, { status: 413, headers: auth.ctx.headers });
+    if (Buffer.byteLength(text, "utf8") > MAX_BODY_BYTES) return NextResponse.json({ error: "Body too large.", code: "TOO_LARGE" }, { status: 413, headers: auth.ctx.headers });
     raw = JSON.parse(text);
   } catch {
     return NextResponse.json({ error: "Request body must be valid JSON.", code: "INVALID_JSON" }, { status: 400, headers: auth.ctx.headers });

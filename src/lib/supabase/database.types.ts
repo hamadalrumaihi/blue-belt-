@@ -812,7 +812,60 @@ export type PhotoPriceReferenceRow = {
   /** Free-form scope (see src/lib/pricing/form.ts PriceReferenceIncludes). */
   includes: Json;
   notes: string | null;
+  /** Observation columns (20261015120000_pricing_intelligence). Null on rows older than that migration except where backfilled. */
+  observed_on: string | null;
+  source_type: PriceSourceType | null;
+  confidence: PriceConfidence | null;
+  region: PriceRegion;
+  media_type: PriceMediaType | null;
+  duration_hours: number | null;
+  staffing_count: number | null;
+  athlete_count: number | null;
+  deliverables: string | null;
+  editing_revisions: string | null;
+  usage_rights: string | null;
+  travel_tax_notes: string | null;
+  promotion_expires_on: string | null;
+  excluded: boolean;
+  excluded_reason: string | null;
+  comparable_scope: string | null;
+  /** The newer observation of the same offer; a superseded row is history, never used for a range. */
+  superseded_by: string | null;
+  /** Idempotent seeding / import key, unique per owner. */
+  seed_key: string | null;
   created_at: string;
+  updated_at: string;
+};
+
+export type PriceSourceType = "provider_site" | "social_post" | "search_index" | "marketplace" | "directory" | "private_quote" | "other";
+export type PriceConfidence = "verified" | "likely" | "unverified";
+export type PriceRegion = "qatar" | "gcc" | "other";
+export type PriceMediaType = "photo" | "video" | "photo_video" | "other";
+
+export type PricingAssessmentStatus = "queued" | "researching" | "ready" | "needs_detail" | "failed";
+
+/** One immutable version of a private price assessment (see src/lib/pricing/engine). */
+export type PhotoPricingAssessmentRow = {
+  id: string;
+  owner_id: string;
+  booking_id: string | null;
+  lead_id: string | null;
+  version: number;
+  status: PricingAssessmentStatus;
+  request_fingerprint: string;
+  /** PUBLIC scope only (PricingRequest): never names, e-mails, phones or notes. */
+  request_snapshot: Json;
+  reference_ids: string[];
+  cost_assumptions: Json;
+  market: Json;
+  cost_floor: Json;
+  recommendation: Json;
+  missing_inputs: string[];
+  confidence: "low" | "medium" | "high" | null;
+  error: string | null;
+  trigger_reason: string | null;
+  created_at: string;
+  computed_at: string | null;
   updated_at: string;
 };
 
@@ -832,6 +885,10 @@ export type PhotoQuoteRow = {
   chosen_amount_qr: number | null;
   currency: string;
   notes: string | null;
+  /** The assessment this draft was accepted from (null for the legacy suggest flow). */
+  assessment_id: string | null;
+  /** Set only by the owner's explicit "Issue quote"; nothing is e-mailed from pricing. */
+  issued_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -925,7 +982,62 @@ export type ApplyRefreshResult =
 // Database
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Media library (20261015110000_media_library.sql), owner only
+// ---------------------------------------------------------------------------
+
+export type MediaAssetStatus = "draft" | "processing" | "ready" | "published" | "archived" | "failed";
+export type MediaAssetSource = "web_upload" | "cli_import" | "manifest";
+export type MediaAssetCategory = "tournament_action" | "athlete_portrait" | "training_session" | "team_club" | "coaching_moment" | "victory_podium" | "behind_the_scenes" | "brand_general";
+
+export type PhotoMediaAssetRow = {
+  id: string;
+  owner_id: string;
+  status: MediaAssetStatus;
+  content_sha256: string;
+  /** "<owner_id>/<sha256>.<ext>" in the private bucket bbm-media-private. Never public. */
+  original_key: string;
+  original_bytes: number;
+  original_width: number | null;
+  original_height: number | null;
+  mime: string;
+  /** [{ key, width, height, bytes }] in the public bucket bbm-media-public (see src/lib/media/types.ts). */
+  derivatives: Json;
+  blur_data_url: string | null;
+  alt: string;
+  caption: string | null;
+  category: MediaAssetCategory;
+  tags: string[];
+  focal_x: number;
+  focal_y: number;
+  sort_order: number;
+  taken_on: string | null;
+  source: MediaAssetSource;
+  /** 12-hex hash of the original basename; never a path, never public. */
+  source_label: string | null;
+  rights_confirmed: boolean;
+  guardian_ok: boolean;
+  needs_review: boolean;
+  review_note: string | null;
+  error: string | null;
+  published_at: string | null;
+  archived_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PhotoMediaPlacementRow = {
+  id: string;
+  owner_id: string;
+  asset_id: string;
+  /** hero | featured | work | service:<slot> */
+  placement: string;
+  position: number;
+  created_at: string;
+};
+
 type GeneratedCols = "id" | "owner_id" | "created_at" | "updated_at";
+type PriceReferenceObservationCols = "observed_on" | "source_type" | "confidence" | "region" | "media_type" | "duration_hours" | "staffing_count" | "athlete_count" | "deliverables" | "editing_revisions" | "usage_rights" | "travel_tax_notes" | "promotion_expires_on" | "excluded" | "excluded_reason" | "comparable_scope" | "superseded_by" | "seed_key";
 
 export type Database = {
   public: {
@@ -1377,14 +1489,56 @@ export type Database = {
       };
       photo_price_references: {
         Row: PhotoPriceReferenceRow;
-        Insert: Optional<PhotoPriceReferenceRow, GeneratedCols | "source_url" | "checked_on" | "location" | "price_to" | "currency" | "includes" | "notes">;
+        Insert: Optional<PhotoPriceReferenceRow, GeneratedCols | "source_url" | "checked_on" | "location" | "price_to" | "currency" | "includes" | "notes" | PriceReferenceObservationCols>;
         Update: Partial<PhotoPriceReferenceRow>;
         Relationships: [];
       };
       photo_quotes: {
         Row: PhotoQuoteRow;
-        Insert: Optional<PhotoQuoteRow, GeneratedCols | "booking_id" | "status" | "suggested_from" | "suggested_to" | "chosen_amount_qr" | "currency" | "notes">;
+        Insert: Optional<PhotoQuoteRow, GeneratedCols | "booking_id" | "status" | "suggested_from" | "suggested_to" | "chosen_amount_qr" | "currency" | "notes" | "assessment_id" | "issued_at">;
         Update: Partial<PhotoQuoteRow>;
+        Relationships: [];
+      };
+      photo_pricing_assessments: {
+        Row: PhotoPricingAssessmentRow;
+        Insert: Optional<PhotoPricingAssessmentRow, "id" | "created_at" | "updated_at" | "booking_id" | "lead_id" | "version" | "status" | "request_snapshot" | "reference_ids" | "cost_assumptions" | "market" | "cost_floor" | "recommendation" | "missing_inputs" | "confidence" | "error" | "trigger_reason" | "computed_at">;
+        Update: Partial<PhotoPricingAssessmentRow>;
+        Relationships: [];
+      };
+      photo_media_assets: {
+        Row: PhotoMediaAssetRow;
+        Insert: Optional<
+          PhotoMediaAssetRow,
+          | GeneratedCols
+          | "status"
+          | "original_width"
+          | "original_height"
+          | "derivatives"
+          | "blur_data_url"
+          | "alt"
+          | "caption"
+          | "category"
+          | "tags"
+          | "focal_x"
+          | "focal_y"
+          | "sort_order"
+          | "taken_on"
+          | "source_label"
+          | "rights_confirmed"
+          | "guardian_ok"
+          | "needs_review"
+          | "review_note"
+          | "error"
+          | "published_at"
+          | "archived_at"
+        >;
+        Update: Partial<PhotoMediaAssetRow>;
+        Relationships: [];
+      };
+      photo_media_placements: {
+        Row: PhotoMediaPlacementRow;
+        Insert: Optional<PhotoMediaPlacementRow, "id" | "owner_id" | "created_at" | "position">;
+        Update: Partial<PhotoMediaPlacementRow>;
         Relationships: [];
       };
     };
@@ -1451,6 +1605,15 @@ export type Database = {
       photo_is_owner_user: {
         Args: Record<string, never>;
         Returns: boolean;
+      };
+      /** 20261015100000_public_submission_rpc: person → organisation → lead → booking → audit in one transaction; replays by idempotency key. */
+      photo_submit_public_booking: {
+        Args: { p_owner_id: string; p_idempotency_key: string; p_person: Json; p_organization: Json | null; p_lead: Json; p_booking: Json; p_audit?: Json };
+        Returns: Json;
+      };
+      photo_make_public_ref: {
+        Args: Record<string, never>;
+        Returns: string;
       };
     };
     Enums: Record<string, never>;

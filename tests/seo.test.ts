@@ -4,7 +4,8 @@ vi.mock("server-only", () => ({}));
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn(async () => ({ auth: { getUser: async () => ({ data: { user: null } }) } })) }));
 vi.mock("@/lib/supabase/service", () => ({ createServiceClient: vi.fn(), isServiceClientConfigured: () => false }));
 
-import { buildHomeJsonLd, buildRobots, buildSitemap, DEFAULT_DESCRIPTION, DEFAULT_TITLE, pageMetadata, ROBOTS_DISALLOW, serializeJsonLd, siteMetadata, SITEMAP_PATHS } from "@/lib/seo";
+import { buildHomeJsonLd, buildRobots, buildServiceJsonLd, buildSitemap, DEFAULT_DESCRIPTION, DEFAULT_TITLE, pageMetadata, ROBOTS_DISALLOW, serializeJsonLd, SERVICE_PATHS, siteMetadata, SITEMAP_PATHS } from "@/lib/seo";
+import { SERVICE_DEFINITIONS } from "@/lib/catalog/index";
 import { DEFAULT_PICTIME_GALLERY_URL, pictimeGalleryUrl } from "@/lib/studio/queries";
 import sitemap from "@/app/sitemap";
 import robots from "@/app/robots";
@@ -90,19 +91,34 @@ describe("pageMetadata", () => {
   it("uses an absolute title on the home page and noindex for thin pages", () => {
     const home = pageMetadata({ title: DEFAULT_TITLE, description: DEFAULT_DESCRIPTION, path: "/" });
     expect(home.title).toEqual({ absolute: DEFAULT_TITLE });
-    const thin = pageMetadata({ title: "View and buy photos", description: "x", path: "/portfolio", index: false });
+    const thin = pageMetadata({ title: "Client sign-in", description: "x", path: "/client/login", index: false });
     expect(thin.robots).toEqual({ index: false, follow: true });
+  });
+
+  it("keeps one canonical per path in both languages and only changes the Open Graph locale", () => {
+    const en = pageMetadata({ title: "Work", description: "x", path: "/work" });
+    const ar = pageMetadata({ title: "أعمالنا", description: "x", path: "/work", locale: "ar" });
+    expect(en.alternates).toEqual({ canonical: "/work" });
+    expect(ar.alternates).toEqual({ canonical: "/work" });
+    expect(en.openGraph).toMatchObject({ locale: "en_QA" });
+    expect(ar.openGraph).toMatchObject({ locale: "ar_QA" });
+    // The same URL serves both languages, so no hreflang alternates are declared.
+    expect(ar.alternates).not.toHaveProperty("languages");
   });
 });
 
 describe("sitemap", () => {
-  it("lists only the public pages, with absolute URLs", () => {
+  it("lists the home, services, every service page, how it works, work, contact and the legal pages, with absolute URLs", () => {
     const urls = buildSitemap(`${BASE}/`).map((e) => e.url);
-    expect(urls).toEqual([`${BASE}/`, `${BASE}/services`, `${BASE}/book`, `${BASE}/contact`, `${BASE}/privacy`, `${BASE}/terms`]);
-    for (const excluded of ["/portfolio", "/client", "/sign", "/pay", "/studio", "/api"]) {
+    expect(urls).toEqual([`${BASE}/`, `${BASE}/services`, ...SERVICE_PATHS.map((p) => `${BASE}${p}`), `${BASE}/how-it-works`, `${BASE}/work`, `${BASE}/contact`, `${BASE}/privacy`, `${BASE}/terms`]);
+    expect(SERVICE_PATHS).toEqual(Object.values(SERVICE_DEFINITIONS).map((d) => `/services/${d.slug}`));
+    expect(SERVICE_PATHS).toHaveLength(5);
+    for (const excluded of ["/portfolio", "/faq", "/client", "/sign", "/pay", "/studio", "/api", "/book"]) {
       expect(urls.some((u) => u.endsWith(excluded) || u.includes(`${excluded}/`))).toBe(false);
     }
     expect(SITEMAP_PATHS).not.toContain("/portfolio");
+    const work = buildSitemap(BASE).find((e) => e.url.endsWith("/work"));
+    expect(work?.changeFrequency).toBe("weekly");
   });
 
   it("the app route uses the configured site URL", () => {
@@ -122,11 +138,11 @@ describe("robots", () => {
     expect(rules.userAgent).toBe("*");
     expect(rules.allow).toBe("/");
     const disallow = rules.disallow as string[];
-    for (const p of ["/studio", "/dashboard", "/events", "/clients", "/watcher", "/bookings", "/people", "/clubs", "/documents", "/galleries", "/payments", "/orders", "/notifications", "/settings", "/pricing", "/packages", "/featured-work", "/client", "/sign", "/pay", "/api"]) {
+    for (const p of ["/studio", "/dashboard", "/events", "/clients", "/watcher", "/bookings", "/people", "/clubs", "/documents", "/galleries", "/payments", "/orders", "/notifications", "/settings", "/pricing", "/packages", "/featured-work", "/media", "/website", "/production", "/login", "/auth", "/client", "/sign", "/pay", "/api"]) {
       expect(disallow).toContain(p);
     }
     expect(disallow).toEqual([...ROBOTS_DISALLOW]);
-    for (const pub of ["/services", "/book", "/contact", "/privacy", "/terms"]) expect(disallow).not.toContain(pub);
+    for (const pub of ["/services", "/work", "/how-it-works", "/book", "/contact", "/privacy", "/terms"]) expect(disallow).not.toContain(pub);
   });
 
   it("the app route uses the configured site URL", () => {
@@ -137,7 +153,7 @@ describe("robots", () => {
 });
 
 describe("buildHomeJsonLd", () => {
-  it("describes the studio and the five booking types, with no prices when everything is quoted", () => {
+  it("describes the studio and the five catalog services, with no prices when everything is quoted", () => {
     const ld = buildHomeJsonLd({ base: BASE, studio: studio(), services: [service(), service({ id: "x", booking_type: "club", price_qr: null })] });
     expect(ld["@context"]).toBe("https://schema.org");
     const [business, ...services] = ld["@graph"];
@@ -151,12 +167,23 @@ describe("buildHomeJsonLd", () => {
     expect(business).not.toHaveProperty("sameAs");
     expect(services).toHaveLength(5);
     expect(services.map((s) => s["@type"])).toEqual(["Service", "Service", "Service", "Service", "Service"]);
-    expect(services.map((s) => s.name)).toEqual(["Tournament athlete coverage", "Team / club coverage", "Training session", "Private athlete session", "Other / custom coverage"]);
+    expect(services.map((s) => s.name)).toEqual(["Tournament athlete coverage", "Team tournament coverage", "Training and gym content", "Athlete portraits and private sessions", "Event and organizer coverage"]);
+    expect(services.map((s) => s.url)).toEqual(SERVICE_PATHS.map((p) => `${BASE}${p}`));
     const json = serializeJsonLd(ld);
     expect(json).not.toContain("offers");
     expect(json).not.toContain("price\"");
+    expect(json).not.toContain("telephone");
+    expect(json).not.toContain("aggregateRating");
+    expect(json).not.toContain("review");
     expect(json).not.toContain("\u2014");
     expect(json).not.toMatch(/pic-?time|fatoorah|docusign/i);
+  });
+
+  it("names the services in Arabic when asked, without changing their ids", () => {
+    const ld = buildHomeJsonLd({ base: BASE, studio: studio(), services: [], locale: "ar" });
+    const [, first] = ld["@graph"];
+    expect(first.name).toBe("تغطية رياضي في بطولة");
+    expect(first["@id"]).toBe(`${BASE}/services/tournament-athlete-coverage#service`);
   });
 
   it("adds a QAR offer only for a type with a real price, and contact details only when present", () => {
@@ -171,12 +198,35 @@ describe("buildHomeJsonLd", () => {
     expect(priv).not.toHaveProperty("offers");
   });
 
+  it("never attaches an offer to a quote-first service, even when a package row carries a number", () => {
+    const rows = [service({ id: "club", booking_type: "club", price_qr: 2500, price_mode: "fixed" }), service({ id: "custom", booking_type: "custom", price_qr: 900, price_mode: "from" })];
+    const ld = buildHomeJsonLd({ base: BASE, studio: studio(), services: rows });
+    const [, , club, , , custom] = ld["@graph"];
+    expect(club).not.toHaveProperty("offers");
+    expect(custom).not.toHaveProperty("offers");
+  });
+
   it("escapes < so the JSON can never close the script tag", () => {
     const ld = buildHomeJsonLd({ base: BASE, studio: studio({ about: "</script><script>alert(1)</script>" }), services: [] });
     const json = serializeJsonLd(ld);
     expect(json).not.toContain("</script");
     expect(json).toContain("\\u003c/script");
     expect(JSON.parse(json)["@graph"][0].description).toBe("</script><script>alert(1)</script>");
+  });
+});
+
+describe("buildServiceJsonLd", () => {
+  it("describes one service with its provider and a breadcrumb trail, in the requested language", () => {
+    const def = SERVICE_DEFINITIONS.tournament_athlete;
+    const ld = buildServiceJsonLd({ base: BASE, def, studio: studio(), services: [service({ price_qr: 400, price_mode: "from" })], locale: "en" });
+    const [business, svc, crumbs] = ld["@graph"];
+    expect(business).toMatchObject({ "@id": `${BASE}/#business` });
+    expect(svc).toMatchObject({ "@type": "Service", url: `${BASE}/services/tournament-athlete-coverage`, offers: { price: 400, priceCurrency: "QAR" } });
+    expect(crumbs).toMatchObject({ "@type": "BreadcrumbList" });
+    expect((crumbs.itemListElement as Array<{ item: string }>).map((c) => c.item)).toEqual([`${BASE}/`, `${BASE}/services`, `${BASE}/services/tournament-athlete-coverage`]);
+    const ar = buildServiceJsonLd({ base: BASE, def, studio: studio(), services: [], locale: "ar" });
+    expect((ar["@graph"][2].itemListElement as Array<{ name: string }>)[1].name).toBe("الخدمات");
+    expect(serializeJsonLd(ld)).not.toContain("telephone");
   });
 });
 

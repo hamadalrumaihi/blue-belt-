@@ -8,7 +8,7 @@ export type AuditInput = {
   ownerId: string;
   actorId?: string | null;
   actorKind?: AuditActorKind;
-  entity: "booking" | "document" | "payment" | "gallery" | "lead" | "person" | "organization" | "order" | "service" | "studio";
+  entity: "booking" | "document" | "payment" | "gallery" | "lead" | "person" | "organization" | "order" | "service" | "studio" | "media";
   entityId?: string | null;
   action: string;
   data?: Record<string, Json | undefined>;

@@ -1,11 +1,15 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { isLocale, LOCALE_COOKIE, LOCALE_QUERY } from "@/lib/i18n/locale";
 
 /**
  * Paths that never require the studio session: the public website, the
  * signing page, the client portal (which does its own sign-in) and auth.
  */
-const PUBLIC_PATHS = ["/login", "/forgot-password", "/reset-password", "/auth", "/services", "/book", "/contact", "/portfolio", "/testimonials", "/sign", "/client", "/privacy", "/terms", "/pay", "/sitemap.xml", "/robots.txt", "/opengraph-image", "/twitter-image", "/photos", "/brand", "/manifest.webmanifest"];
+const PUBLIC_PATHS = ["/login", "/forgot-password", "/reset-password", "/auth", "/services", "/work", "/how-it-works", "/faq", "/book", "/contact", "/portfolio", "/sign", "/client", "/privacy", "/terms", "/pay", "/sitemap.xml", "/robots.txt", "/opengraph-image", "/twitter-image", "/photos", "/brand", "/manifest.webmanifest"];
+
+/** One year: the language choice outlives a session. */
+const LOCALE_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 
 function isPublic(pathname: string) {
   if (pathname === "/") return true;
@@ -17,6 +21,20 @@ function isPublic(pathname: string) {
  * private app behind authentication. Uses only the public anon key.
  */
 export async function proxy(request: NextRequest) {
+  // Public site language: `?lang=ar` becomes the cookie and the visitor is
+  // sent back to the same URL without the parameter, so every page keeps one
+  // canonical URL per language-free path. Unknown values are dropped.
+  const requestedLang = request.nextUrl.searchParams.get(LOCALE_QUERY);
+  if (requestedLang !== null && isPublic(request.nextUrl.pathname)) {
+    const clean = request.nextUrl.clone();
+    clean.searchParams.delete(LOCALE_QUERY);
+    const redirect = NextResponse.redirect(clean);
+    if (isLocale(requestedLang)) {
+      redirect.cookies.set(LOCALE_COOKIE, requestedLang, { path: "/", maxAge: LOCALE_COOKIE_MAX_AGE, sameSite: "lax", secure: request.nextUrl.protocol === "https:" });
+    }
+    return redirect;
+  }
+
   let response = NextResponse.next({ request });
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;

@@ -17,7 +17,8 @@
     "ops:coherence": "node scripts/ops/prod-coherence.mjs",
     "photos": "node scripts/photos/run.mjs",
     "photos:analyze": "node scripts/photos/run.mjs analyze",
-    "photos:select": "node scripts/photos/run.mjs select"
+    "photos:select": "node scripts/photos/run.mjs select",
+    "photos:import": "node scripts/photos/import.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",
@@ -29,7 +30,8 @@
     "pdf-lib": "^1.17.1",
     "react": "19.2.8",
     "react-dom": "19.2.8",
-    "server-only": "^0.0.1"
+    "server-only": "^0.0.1",
+    "sharp": "^0.35.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -42,7 +44,6 @@
     "msw": "^2.15.0",
     "tailwindcss": "^4",
     "typescript": "^5",
-    "vitest": "^5.0.3",
-    "sharp": "^0.35.5"
+    "vitest": "^5.0.3"
   }
 }

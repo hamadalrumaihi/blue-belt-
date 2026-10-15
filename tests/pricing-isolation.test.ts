@@ -10,7 +10,9 @@ import { describe, expect, it } from "vitest";
  */
 const ROOT = join(__dirname, "..");
 const SURFACES = ["src/app/(public)", "src/app/(client)", "src/lib/client-portal", "src/lib/notifications/email", "src/lib/documents", "src/app/api"];
-const FORBIDDEN = ["photo_price_references", "photo_quotes", "lib/pricing"];
+const FORBIDDEN = ["photo_price_references", "photo_quotes", "photo_pricing_assessments", "lib/pricing"];
+/** The one API route that may touch pricing: CRON_SECRET-protected, service role, returns counts only (asserted below). */
+const ALLOWED = ["src/app/api/cron/pricing/route.ts"];
 
 function walk(dir: string, out: string[] = []): string[] {
   let entries: string[] = [];
@@ -32,11 +34,53 @@ describe("pricing isolation", () => {
     const hits: string[] = [];
     for (const surface of SURFACES) {
       for (const file of walk(join(ROOT, surface))) {
+        if (ALLOWED.some((a) => file.endsWith(a))) continue;
         const text = readFileSync(file, "utf8");
         for (const needle of FORBIDDEN) if (text.includes(needle)) hits.push(`${file.replace(ROOT, "")}: ${needle}`);
       }
     }
     expect(hits).toEqual([]);
+  });
+
+  it("the e-mail templates and every public page never import the pricing module", () => {
+    const templates = readFileSync(join(ROOT, "src/lib/notifications/email/templates.ts"), "utf8");
+    expect(templates).not.toMatch(/lib\/pricing|photo_pricing_assessments|photo_quotes|photo_price_references/);
+    for (const file of walk(join(ROOT, "src/app/(public)"))) expect(readFileSync(file, "utf8"), file).not.toMatch(/lib\/pricing/);
+  });
+
+  it("the cron pricing route only ever answers with counts and statuses", () => {
+    const route = readFileSync(join(ROOT, "src/app/api/cron/pricing/route.ts"), "utf8");
+    expect(route).toContain("verifyCronSecret");
+    expect(route).toContain("createServiceClient");
+    expect(route).not.toMatch(/recommendation|recommended|price_from|customer_/);
+    expect(route).toContain('research');
+  });
+
+  it("the pricing library never reads customer identifiers into a request or research scope", () => {
+    // The files that read a booking / lead or describe a research job: no customer column, no free text.
+    for (const file of ["src/lib/pricing/engine/extract.ts", "src/lib/pricing/compute.ts", "src/lib/pricing/assess-hook.ts", "src/lib/pricing/capacity.ts", "src/lib/pricing/research.ts"]) {
+      // Code only: the doc comments are allowed to say what is NOT read.
+      const text = readFileSync(join(ROOT, file), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+      expect(text, file).not.toMatch(/customer_|guardian|athlete_name|club_name|instagram|\bnotes\b|\bemail\b|\bphone\b/);
+    }
+    const hook = readFileSync(join(ROOT, "src/lib/pricing/assess-hook.ts"), "utf8");
+    expect(hook).toContain("try {");
+    expect(hook).not.toMatch(/notifications\/(owner|email)/);
+    const research = readFileSync(join(ROOT, "src/lib/pricing/research.ts"), "utf8");
+    expect(research).toContain("not_configured");
+    expect(research).not.toMatch(/fetch\(|WebSearch|puppeteer|playwright/);
+  });
+
+  it("the pricing-intelligence migration's assessments policy requires the owner role and revokes anon", () => {
+    const sql = readFileSync(join(ROOT, "supabase/migrations/20261015120000_pricing_intelligence.sql"), "utf8");
+    const start = sql.indexOf("create policy photo_pricing_assessments_owner_all");
+    expect(start).toBeGreaterThan(-1);
+    const body = sql.slice(start, sql.indexOf(";", start));
+    expect(body).toContain("photo_is_owner_user()");
+    expect(body).toContain("with check (");
+    expect(body).not.toContain("photo_is_studio_user");
+    expect(sql).toMatch(/revoke all on table public\.photo_pricing_assessments from anon/);
+    expect(sql).toMatch(/alter table public\.photo_pricing_assessments enable row level security/);
   });
 
   it("the migration's two policies require the owner role in the database", () => {

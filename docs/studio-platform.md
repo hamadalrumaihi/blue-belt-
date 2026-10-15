@@ -10,10 +10,10 @@ groundwork and Pic-Time order intake that already existed.
 
 | Surface | Routes | Who | Auth |
 | --- | --- | --- | --- |
-| Public website | `/`, `/services`, `/portfolio`, `/contact`, `/book`, `/book/done`, `/privacy`, `/terms` | anyone | none (service-role reads of `photo_studio` + public services only) |
+| Public website | `/`, `/services`, `/services/<slug>`, `/work`, `/how-it-works`, `/contact`, `/book`, `/book/done`, `/privacy`, `/terms` (`/portfolio` redirects to `/work`) | anyone | none (service-role reads of `photo_studio`, public services and published media only) |
 | Signing page | `/sign/<token>` | the signer | the single-use signing token (hashed in the DB) |
 | Client portal | `/client`, `/client/login`, `/client/bookings/<id>` | clients | Supabase magic link; RLS shows only rows linked to the signed-in person |
-| Studio | `/studio`, `/leads`, `/bookings`, `/people`, `/clubs`, `/packages`, `/documents`, `/payments`, `/galleries`, `/orders`, `/notifications`, `/settings` + the watcher routes (`/dashboard`, `/watcher`, `/events`, `/clients`, `/coverage`, `/issues`, `/history`, `/import`) | owner, staff | e-mail + password; role from `photo_profiles` |
+| Studio | `/studio` (+ `?q=` search, `/studio/metrics`), `/leads`, `/bookings` (+ `/bookings/<id>/brief`), `/production`, `/people`, `/clubs`, `/pricing` (owner only), `/packages`, `/media` (owner only), `/website/{testimonials,faqs}`, `/documents`, `/payments`, `/galleries`, `/orders`, `/notifications`, `/settings` + the watcher routes (`/dashboard`, `/watcher`, `/events`, `/clients`, `/coverage`, `/issues`, `/history`, `/import`) | owner, staff | e-mail + password; role from `photo_profiles` |
 
 `src/proxy.ts` lists the public paths; everything else needs a session.
 `src/app/(app)/layout.tsx` additionally refuses the `client` role (sent to
@@ -58,7 +58,10 @@ photo_orders (Pic-Time sales; optional client_id / gallery_id)
 photo_notification_deliveries (outbox: channel telegram | email)
 photo_client_notification_prefs (owner switches per client e-mail kind)
 photo_audit_log (who did what: payments, signatures, status changes)
-photo_studio (single tenant: business details + public_booking switch)
+photo_studio (single tenant: business details + public_booking switch;
+  settings.{testimonials, faqOverrides, openQuestions, featuredWork, pictimeGalleryUrl})
+photo_media_assets / photo_media_placements (owner media library; Supabase Storage)
+photo_pricing_assessments (owner-only private price suggestions, versioned)
 ```
 
 One person may book for themselves, for a child, manage several athletes
@@ -116,12 +119,19 @@ or expired documents are re-issued as new documents.
 ## Flows
 
 **Public booking** (`/book` → `submitPublicBooking`): per-IP rate limit,
-honeypot, length caps → studio owner from `photo_studio` → person
-find-or-create (e-mail, then phone) → lead → booking (`payment_mode` from
-the service: quote or payment link later; never instant on the public
-form) → audit (`actor_kind = 'public'`) → owner Telegram `[Bookings] New
-booking request` → client e-mail *Booking received* → `/book/done?ref=BB-…`.
-Clubs and custom requests become an inquiry + quote.
+honeypot, length caps → studio owner from `photo_studio` → ONE transaction in
+the SECURITY DEFINER RPC `photo_submit_public_booking` (service role only):
+person find-or-create by e-mail (never rewriting an existing person's
+contact details) → organisation by name → lead → booking with a generated
+`public_ref` → `lead.booking_id` → audit rows (`actor_kind = 'public'`). A
+replayed `idempotency_key` returns the existing booking and sends nothing
+again. `payment_mode`/`amount_qr` come from `bookableAmount()`: a package in
+`price_mode = 'quote'`, a catalog service that is always quoted (team days,
+organiser/custom work) or no package ⇒ amount 0, `quote`, `inquiry`. Only
+after the RPC returns: owner Telegram `[Bookings] New booking request`,
+client e-mail *Booking received*, and a private pricing assessment is
+enqueued (`src/lib/pricing/assess-hook.ts`; never blocks, never visible to
+the client) → `/book/done?ref=BB-…`.
 
 **Owner follow-up** (`/bookings/<id>`): quote, send agreement
 (`/documents`), create a MyFatoorah link (`requestBookingInvoice`, gated by

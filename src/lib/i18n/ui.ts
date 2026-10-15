@@ -1,0 +1,271 @@
+import type { Bilingual, Locale } from "./locale";
+import { localized } from "./locale";
+
+/**
+ * Interface strings shared by the public site's chrome: navigation, buttons,
+ * section labels, form labels and small notices. Offer copy (services,
+ * audiences, FAQs) lives in src/lib/catalog/copy.ts and faq.ts. Pure, so
+ * client components can import it; `t(locale)` returns a picker.
+ */
+export const UI = {
+  nav: {
+    work: { en: "Work", ar: "أعمالنا" },
+    services: { en: "Services", ar: "الخدمات" },
+    howItWorks: { en: "How it works", ar: "كيف نعمل" },
+    contact: { en: "Contact", ar: "تواصل معنا" },
+    requestCoverage: { en: "Request coverage", ar: "اطلب تغطية" },
+    findMyPhotos: { en: "Find my photos", ar: "ابحث عن صوري" },
+    clientPortal: { en: "Client portal", ar: "بوابة العملاء" },
+    myBookings: { en: "My bookings", ar: "حجوزاتي" },
+    studio: { en: "Studio", ar: "الاستوديو" },
+    openMenu: { en: "Open menu", ar: "فتح القائمة" },
+    closeMenu: { en: "Close menu", ar: "إغلاق القائمة" },
+    siteNav: { en: "Site", ar: "الموقع" },
+    appearance: { en: "Appearance", ar: "المظهر" },
+    language: { en: "Language", ar: "اللغة" },
+    opensGallery: { en: "(opens the gallery in a new tab)", ar: "(يفتح المعرض في تبويب جديد)" },
+    opensNewTab: { en: "(opens in a new tab)", ar: "(يفتح في تبويب جديد)" },
+    home: { en: "Home", ar: "الرئيسية" },
+    privacy: { en: "Privacy", ar: "الخصوصية" },
+    terms: { en: "Terms", ar: "الشروط" },
+    explore: { en: "Explore", ar: "استكشف" },
+    talkToUs: { en: "Talk to us", ar: "تواصل معنا" },
+    backToHome: { en: "Back to home", ar: "العودة إلى الرئيسية" },
+  },
+  common: {
+    quoteOnRequest: { en: "Quote on request", ar: "السعر حسب الطلب" },
+    from: { en: "from", ar: "ابتداءً من" },
+    photo: { en: "Photo", ar: "تصوير فوتوغرافي" },
+    video: { en: "Video", ar: "فيديو" },
+    photoVideo: { en: "Photo + video", ar: "صور وفيديو" },
+    minutes: { en: "min", ar: "دقيقة" },
+    learnMore: { en: "Details", ar: "التفاصيل" },
+    allServices: { en: "All services", ar: "كل الخدمات" },
+    seeAllWork: { en: "See all work", ar: "شاهد كل الأعمال" },
+    allQuestions: { en: "All questions", ar: "كل الأسئلة" },
+    readMore: { en: "Read more", ar: "اقرأ المزيد" },
+    viewGallery: { en: "Open gallery", ar: "افتح المعرض" },
+    privateGallery: { en: "Private gallery", ar: "معرض خاص" },
+    onlinePayment: { en: "Online payment", ar: "دفع إلكتروني" },
+    writtenQuote: { en: "Written quote before you pay", ar: "عرض سعر مكتوب قبل الدفع" },
+    step: { en: "Step", ar: "الخطوة" },
+    category: { en: "Category", ar: "الفئة" },
+    all: { en: "All", ar: "الكل" },
+    close: { en: "Close", ar: "إغلاق" },
+    previous: { en: "Previous", ar: "السابق" },
+    next: { en: "Next", ar: "التالي" },
+    search: { en: "Search", ar: "بحث" },
+    noResults: { en: "Nothing matches that search.", ar: "لا توجد نتائج مطابقة." },
+    clearSearch: { en: "Clear search", ar: "مسح البحث" },
+    forWhom: { en: "Who it is for", ar: "لمن هذه الخدمة" },
+    includes: { en: "What you get", ar: "ماذا تحصل عليه" },
+    priceLine: { en: "Price", ar: "السعر" },
+    packages: { en: "Packages", ar: "الباقات" },
+    confirmedInQuote: { en: "Confirmed in your written quote.", ar: "يُحدَّد في عرض السعر المكتوب." },
+    requestThis: { en: "Request this", ar: "اطلب هذه الخدمة" },
+    askAboutThis: { en: "Ask about this", ar: "اسأل عن هذه الخدمة" },
+    requestQuote: { en: "Request a quote", ar: "اطلب عرض سعر" },
+    sendMessage: { en: "Send message", ar: "إرسال الرسالة" },
+    sending: { en: "Sending...", ar: "جارٍ الإرسال..." },
+    optional: { en: "Optional", ar: "اختياري" },
+    results: { en: "results", ar: "نتيجة" },
+  },
+  home: {
+    eyebrow: { en: "Jiu-jitsu and martial arts photography and video", ar: "تصوير فوتوغرافي وفيديو للجوجيتسو والفنون القتالية" },
+    title: { en: "Your matches, your academy, your athletes. Photographed and filmed in Doha.", ar: "نزالاتك وأكاديميتك ورياضيوك، بالصورة والفيديو في الدوحة." },
+    lead: { en: "Blue Belt Media covers tournaments, academy training and athlete sessions for jiu-jitsu and martial arts in Qatar. Tell us who to follow and what you need; the scope and the price are confirmed in writing, and the finished work arrives in a private gallery.", ar: "تغطي بلو بلت ميديا البطولات وتدريبات الأكاديميات وجلسات الرياضيين للجوجيتسو والفنون القتالية في قطر. أخبرنا من نتابع وماذا تحتاج؛ يُحدَّد النطاق والسعر كتابيًا، ويصلك العمل النهائي في معرض خاص." },
+    trust: [
+      { en: "Photos and video delivered in a private gallery", ar: "الصور والفيديو تصلك في معرض خاص" },
+      { en: "Scope and price confirmed in writing before you pay", ar: "النطاق والسعر يُثبَّتان كتابيًا قبل الدفع" },
+      { en: "50% deposit by online payment secures the date", ar: "عربون 50% بالدفع الإلكتروني يثبّت الموعد" },
+    ],
+    audiencesEyebrow: { en: "Who we shoot for", ar: "لمن نصوّر" },
+    audiencesTitle: { en: "Start from who you are", ar: "ابدأ من موقعك" },
+    servicesEyebrow: { en: "What we shoot", ar: "ماذا نصوّر" },
+    servicesTitle: { en: "Five ways to book us", ar: "خمس طرق لحجزنا" },
+    servicesLead: { en: "Every service can be photography, video, or both. Prices are confirmed in your written quote; packages with a published price show it below.", ar: "كل خدمة متاحة تصويرًا فوتوغرافيًا أو فيديو أو كليهما. يُحدَّد السعر في عرض السعر المكتوب، والباقات ذات السعر المعلن يظهر سعرها أدناه." },
+    workEyebrow: { en: "Selected work", ar: "أعمال مختارة" },
+    workTitle: { en: "From the mat", ar: "من على البساط" },
+    processEyebrow: { en: "How it works", ar: "كيف نعمل" },
+    processTitle: { en: "From request to gallery", ar: "من الطلب إلى المعرض" },
+    faqEyebrow: { en: "Good to know", ar: "معلومات مفيدة" },
+    faqTitle: { en: "Questions people ask before booking", ar: "أسئلة شائعة قبل الحجز" },
+    ctaEyebrow: { en: "Competing soon?", ar: "لديك بطولة قريبًا؟" },
+    ctaTitle: { en: "Send the request before the bracket is out.", ar: "أرسل طلبك قبل صدور جدول النزالات." },
+    ctaBody: { en: "A request is not a confirmed booking yet. We check the date, confirm the scope and the price in writing, and the booking is secured once the 50% deposit is paid online.", ar: "الطلب ليس حجزًا مؤكدًا بعد. نتحقق من الموعد، ونثبّت النطاق والسعر كتابيًا، ويُؤكَّد الحجز بعد دفع عربون 50% إلكترونيًا." },
+    previewNotice: { en: "Preview for the studio: these photographs are not published yet.", ar: "معاينة للاستوديو: هذه الصور غير منشورة بعد." },
+  },
+  services: {
+    title: { en: "Services", ar: "الخدمات" },
+    heading: { en: "Photography and video for jiu-jitsu and martial arts", ar: "تصوير فوتوغرافي وفيديو للجوجيتسو والفنون القتالية" },
+    lead: { en: "Pick the service that matches your day. Each one can be photography, video or both, and every booking is confirmed in a written quote before you pay.", ar: "اختر الخدمة التي تناسب يومك. كل خدمة متاحة تصويرًا فوتوغرافيًا أو فيديو أو كليهما، ويُثبَّت كل حجز بعرض سعر مكتوب قبل الدفع." },
+    byAudience: { en: "By who is booking", ar: "حسب الجهة الطالبة" },
+    byService: { en: "All services", ar: "كل الخدمات" },
+    mediaOptions: { en: "Available as", ar: "متاحة كـ" },
+    videoOptions: { en: "Video deliverables", ar: "مخرجات الفيديو" },
+    paymentHeading: { en: "Booking and payment in short", ar: "الحجز والدفع باختصار" },
+    paymentMore: { en: "The full process and the questions people ask are on the how-it-works page.", ar: "العملية كاملة والأسئلة الشائعة في صفحة كيف نعمل." },
+    galleryNote: { en: "Buying photos from an event gallery is separate: those photos are paid in the gallery, not through a booking.", ar: "شراء الصور من معرض فعالية أمر منفصل: تُدفع تلك الصور داخل المعرض وليس عبر الحجز." },
+    relatedFaq: { en: "Questions about this service", ar: "أسئلة عن هذه الخدمة" },
+    sections: {
+      intendedClient: { en: "Who it is for", ar: "لمن هذه الخدمة" },
+      whatWeShoot: { en: "What we shoot", ar: "ماذا نصوّر" },
+      deliverables: { en: "What you receive", ar: "ماذا تستلم" },
+      photoDeliverables: { en: "Photography", ar: "التصوير الفوتوغرافي" },
+      videoDeliverables: { en: "Video", ar: "الفيديو" },
+      needFromYou: { en: "What we need from you", ar: "ماذا نحتاج منك" },
+      bookingSteps: { en: "How booking works", ar: "كيف يتم الحجز" },
+      paymentSteps: { en: "How payment works", ar: "كيف يتم الدفع" },
+      permittedUse: { en: "How you can use the work", ar: "كيف يمكنك استخدام العمل" },
+      limitations: { en: "Good to know", ar: "من المهم معرفته" },
+      requestAs: { en: "Request as", ar: "اطلب كـ" },
+      otherServices: { en: "Other services", ar: "خدمات أخرى" },
+    },
+  },
+  work: {
+    title: { en: "Work", ar: "أعمالنا" },
+    heading: { en: "Selected photographs and video stills", ar: "صور مختارة ولقطات فيديو" },
+    lead: { en: "Tournament action, academy training, athlete portraits and team days, as published by the studio.", ar: "لقطات البطولات، وتدريبات الأكاديميات، وبورتريهات الرياضيين، وأيام الفرق، كما ينشرها الاستوديو." },
+    emptyTitle: { en: "The showcase is being prepared", ar: "المعرض قيد التجهيز" },
+    emptyBody: { en: "Published work will appear here. Until then, event galleries are available through Find my photos, and you can request coverage for your own day.", ar: "ستظهر الأعمال المنشورة هنا. حتى ذلك الحين، معارض الفعاليات متاحة عبر «ابحث عن صوري»، ويمكنك طلب تغطية ليومك." },
+    filterLabel: { en: "Filter by category", ar: "تصفية حسب الفئة" },
+    openImage: { en: "Open image", ar: "فتح الصورة" },
+    imageOf: { en: "Image {n} of {total}", ar: "الصورة {n} من {total}" },
+    ctaTitle: { en: "Want this for your event or academy?", ar: "تريد هذا لفعاليتك أو أكاديميتك؟" },
+    ctaBody: { en: "Tell us the date and what you need. The scope and the price are confirmed in writing.", ar: "أخبرنا بالموعد وما تحتاجه. يُثبَّت النطاق والسعر كتابيًا." },
+    findYourPhotos: { en: "Looking for photos from an event you attended?", ar: "تبحث عن صور من فعالية حضرتها؟" },
+  },
+  how: {
+    title: { en: "How it works", ar: "كيف نعمل" },
+    heading: { en: "From request to gallery, step by step", ar: "من الطلب إلى المعرض، خطوة بخطوة" },
+    lead: { en: "What happens after you send a request, how payment works, and the answers to the questions people ask most.", ar: "ماذا يحدث بعد إرسال الطلب، وكيف يتم الدفع، وإجابات الأسئلة الأكثر شيوعًا." },
+    faqHeading: { en: "Questions and answers", ar: "أسئلة وأجوبة" },
+    faqLead: { en: "Search or pick a category. Anything not answered here is confirmed in your written quote.", ar: "ابحث أو اختر فئة. أي أمر غير مذكور هنا يُحدَّد في عرض السعر المكتوب." },
+    searchPlaceholder: { en: "Search the questions", ar: "ابحث في الأسئلة" },
+    stillQuestions: { en: "Still have a question?", ar: "لا يزال لديك سؤال؟" },
+    stillQuestionsBody: { en: "Write to us and we come back to you by e-mail.", ar: "راسلنا ونرد عليك عبر البريد الإلكتروني." },
+  },
+  contact: {
+    title: { en: "Contact", ar: "تواصل معنا" },
+    heading: { en: "Write to Blue Belt Media", ar: "راسل بلو بلت ميديا" },
+    lead: { en: "Questions, team days, organiser coverage or something unusual. Tell us about the day and we reply by e-mail.", ar: "أسئلة، أيام فرق، تغطية للمنظمين أو طلب غير معتاد. أخبرنا عن يومك ونرد عليك عبر البريد الإلكتروني." },
+    direct: { en: "Direct", ar: "مباشرة" },
+    business: { en: "Business", ar: "بيانات المنشأة" },
+    readyTitle: { en: "Ready to request coverage?", ar: "جاهز لطلب التغطية؟" },
+    readyBody: { en: "The request form takes about two minutes and gives you a reference straight away. Nothing is paid until the scope and the price are confirmed in writing.", ar: "يستغرق نموذج الطلب نحو دقيقتين وتحصل على رقم مرجعي فورًا. لا يُدفع شيء حتى يُثبَّت النطاق والسعر كتابيًا." },
+    goToRequest: { en: "Go to the request form", ar: "انتقل إلى نموذج الطلب" },
+    sentTitle: { en: "Message received", ar: "وصلتنا رسالتك" },
+    sentBody: { en: "Thank you. We reply by e-mail with the next step.", ar: "شكرًا لك. نرد عليك عبر البريد الإلكتروني بالخطوة التالية." },
+    form: {
+      name: { en: "Your name", ar: "اسمك" },
+      email: { en: "E-mail", ar: "البريد الإلكتروني" },
+      phone: { en: "Phone / WhatsApp", ar: "الهاتف / واتساب" },
+      message: { en: "How can we help?", ar: "كيف يمكننا مساعدتك؟" },
+      messagePlaceholder: { en: "The event or session, the dates, and what you would like covered.", ar: "الفعالية أو الجلسة، والتواريخ، وما تود تغطيته." },
+      consent: { en: "I agree to be contacted about this message. See the", ar: "أوافق على التواصل معي بخصوص هذه الرسالة. راجع" },
+      privacyPolicy: { en: "privacy policy", ar: "سياسة الخصوصية" },
+      honeypot: { en: "Leave this field empty", ar: "اترك هذا الحقل فارغًا" },
+      sendingLive: { en: "Sending your message", ar: "جارٍ إرسال رسالتك" },
+    },
+  },
+  footer: {
+    tagline: { en: "Jiu-jitsu and martial arts photography and video.", ar: "تصوير فوتوغرافي وفيديو للجوجيتسو والفنون القتالية." },
+    basedIn: { en: "Based in", ar: "مقرنا في" },
+    delivered: { en: "Photos and video are delivered through private online galleries.", ar: "تُسلَّم الصور والفيديو عبر معارض إلكترونية خاصة." },
+  },
+  process: [
+    {
+      title: { en: "Send the request", ar: "أرسل الطلب" },
+      body: { en: "Choose the service, say who to follow and tell us about the day. You get a reference straight away. A request is not a confirmed booking yet.", ar: "اختر الخدمة، وحدد من نتابع، وأخبرنا عن اليوم. تحصل على رقم مرجعي فورًا. الطلب ليس حجزًا مؤكدًا بعد." },
+    },
+    {
+      title: { en: "We confirm in writing", ar: "نؤكد كتابيًا" },
+      body: { en: "We check the date and send a written quote or agreement with the scope, the timing, the deliverables and the rights. Nothing is paid before that.", ar: "نتحقق من الموعد ونرسل عرض سعر أو اتفاقية مكتوبة تشمل النطاق والتوقيت والمخرجات والحقوق. لا يُدفع شيء قبل ذلك." },
+    },
+    {
+      title: { en: "Deposit secures the booking", ar: "العربون يثبّت الحجز" },
+      body: { en: "You pay a 50% deposit by online payment. That is the moment the booking is confirmed.", ar: "تدفع عربونًا بنسبة 50% عبر الدفع الإلكتروني. عندها يُعتبر الحجز مؤكدًا." },
+    },
+    {
+      title: { en: "Shoot day", ar: "يوم التصوير" },
+      body: { en: "At a tournament we follow the agreed athletes mat by mat as the schedule and venue access allow. At a session we work to the plan agreed with you.", ar: "في البطولة نتابع الرياضيين المتفق عليهم من بساط إلى آخر حسب الجدول وإمكانية الوصول داخل الصالة. وفي الجلسات نعمل وفق الخطة المتفق عليها معك." },
+    },
+    {
+      title: { en: "Private gallery", ar: "المعرض الخاص" },
+      body: { en: "The edited photos and video arrive in a private online gallery, delivered as agreed in your quote. The remaining 50% is due after delivery.", ar: "تصلك الصور والفيديو بعد التحرير في معرض إلكتروني خاص، حسب ما اتُّفق عليه في عرض السعر. ويُستحق الـ50% المتبقية بعد التسليم." },
+    },
+  ],
+  payment: [
+    { title: { en: "Request received", ar: "استلام الطلب" }, body: { en: "You send the form and get a reference. Nothing is paid yet.", ar: "ترسل النموذج وتحصل على رقم مرجعي. لا يُدفع شيء بعد." } },
+    { title: { en: "Quote confirmed", ar: "تأكيد عرض السعر" }, body: { en: "Scope, timing, deliverables and rights are set out in writing.", ar: "يُحدَّد النطاق والتوقيت والمخرجات والحقوق كتابيًا." } },
+    { title: { en: "50% deposit online", ar: "عربون 50% إلكترونيًا" }, body: { en: "Paid after confirmation. It secures the booking.", ar: "يُدفع بعد التأكيد ويثبّت الحجز." } },
+    { title: { en: "Balance after delivery", ar: "الباقي بعد التسليم" }, body: { en: "The remaining 50% is due after your gallery is delivered.", ar: "يُستحق الـ50% المتبقية بعد تسليم المعرض." } },
+  ],
+  notFound: {
+    title: { en: "That page is not here", ar: "هذه الصفحة غير موجودة" },
+    body: { en: "The link may be old or mistyped. The pages below are the ones most people are looking for.", ar: "قد يكون الرابط قديمًا أو مكتوبًا خطأ. الصفحات أدناه هي الأكثر طلبًا." },
+  },
+} as const;
+
+/**
+ * Strings for the request wizard's chrome (/book, /book/done), ready for the
+ * catalog workstream to wire into its components. Same policy limits as the
+ * rest of the site: no reply-time promise, e-mail as the channel, a request
+ * is not a confirmed reservation until the agreement is signed and the
+ * deposit is paid.
+ */
+export const BOOK_UI = {
+  steps: {
+    what: { en: "What", ar: "ماذا" },
+    details: { en: "The day", ar: "اليوم" },
+    contact: { en: "About you", ar: "عنك" },
+    review: { en: "Review", ar: "المراجعة" },
+  },
+  stepOf: { en: "Step {n} of {total}", ar: "الخطوة {n} من {total}" },
+  continue: { en: "Continue", ar: "متابعة" },
+  back: { en: "Back", ar: "رجوع" },
+  send: { en: "Send request", ar: "إرسال الطلب" },
+  sending: { en: "Sending...", ar: "جارٍ الإرسال..." },
+  sendingLive: { en: "Sending your request", ar: "جارٍ إرسال طلبك" },
+  checkOne: { en: "Please check this field", ar: "يرجى مراجعة هذا الحقل" },
+  checkMany: { en: "Please check these {n} fields", ar: "يرجى مراجعة هذه الحقول ({n})" },
+  reviewIntro: { en: "Read and tick each box. Nothing is pre-selected.", ar: "اقرأ كل بند وضع علامة عليه. لا شيء محدد مسبقًا." },
+  quotedIndividually: { en: "This coverage is quoted individually. We send a price after reviewing your request.", ar: "تُسعَّر هذه التغطية بشكل فردي. نرسل السعر بعد مراجعة طلبك." },
+  done: {
+    eyebrow: { en: "Request received", ar: "تم استلام الطلب" },
+    title: { en: "Thank you. We are on it.", ar: "شكرًا لك. بدأنا العمل على طلبك." },
+    body: { en: "Your request is saved and a copy is on its way to your inbox. It is not a confirmed reservation yet: the date is held for you only once the agreement is signed and the deposit is paid.", ar: "تم حفظ طلبك ونسخة منه في طريقها إلى بريدك الإلكتروني. هو ليس حجزًا مؤكدًا بعد: يُحجز الموعد لك فقط بعد توقيع الاتفاقية ودفع العربون." },
+    reference: { en: "Your reference", ar: "رقمك المرجعي" },
+    referenceHint: { en: "Quote it if you message us. It is also in the e-mail we just sent.", ar: "اذكره عند مراسلتنا. وهو موجود أيضًا في البريد الإلكتروني الذي أرسلناه للتو." },
+    nextHeading: { en: "What happens next", ar: "ماذا يحدث بعد ذلك" },
+    next: [
+      {
+        title: { en: "We read your request", ar: "نقرأ طلبك" },
+        text: { en: "We check the date and reply by e-mail. If the date is free we confirm we can cover it; team days, events and anything quoted individually come back with a written quote first, and nothing is due until you approve it.", ar: "نتحقق من الموعد ونرد عبر البريد الإلكتروني. إذا كان الموعد متاحًا نؤكد إمكانية التغطية؛ أما أيام الفرق والفعاليات وكل ما يُسعَّر فرديًا فيصلك عرض سعر مكتوب أولًا، ولا يُستحق أي مبلغ حتى توافق عليه." },
+      },
+      {
+        title: { en: "You sign and pay the deposit", ar: "توقّع وتدفع العربون" },
+        text: { en: "Once the scope and the price are agreed in writing you sign the agreement online and pay the 50% deposit by online payment. That is the moment the date is reserved for you; until then it stays open.", ar: "بعد الاتفاق على النطاق والسعر كتابيًا توقّع الاتفاقية إلكترونيًا وتدفع عربون 50% عبر الدفع الإلكتروني. عندها يُحجز الموعد لك؛ وحتى ذلك الحين يبقى مفتوحًا." },
+      },
+      {
+        title: { en: "Shoot and delivery", ar: "التصوير والتسليم" },
+        text: { en: "After the shoot your edited photos and video arrive in a private online gallery sent to the e-mail you used. The remaining 50% is due after the gallery is delivered.", ar: "بعد التصوير تصلك الصور والفيديو بعد التحرير في معرض إلكتروني خاص يُرسل إلى البريد الإلكتروني الذي استخدمته. وتُستحق الـ50% المتبقية بعد تسليم المعرض." },
+      },
+    ],
+    noReply: { en: "No reply yet? Message us with your reference and we will look it up. Personal use of the photos is included; club, team, brand or commercial use is licensed in the quote.", ar: "لم يصلك رد بعد؟ راسلنا مع رقمك المرجعي وسنتحقق من طلبك. الاستخدام الشخصي للصور مشمول؛ أما استخدام النادي أو الفريق أو العلامة التجارية أو الاستخدام التجاري فيُرخَّص في عرض السعر." },
+    portalHint: { en: "The portal signs you in with the e-mail you used for this request.", ar: "تسجّل البوابة دخولك بالبريد الإلكتروني الذي استخدمته في هذا الطلب." },
+    missingEyebrow: { en: "Request", ar: "الطلب" },
+    missingTitle: { en: "No request reference", ar: "لا يوجد رقم مرجعي للطلب" },
+    missingBody: { en: "This page shows a request after it has been sent. If you just sent one and did not get a reference, it was not saved. Please send it again.", ar: "تعرض هذه الصفحة الطلب بعد إرساله. إذا أرسلت طلبًا للتو ولم تحصل على رقم مرجعي، فلم يتم حفظه. يرجى إرساله مرة أخرى." },
+  },
+} as const;
+
+/** Picker bound to a locale: `const t = tr(locale); t(UI.nav.work)`. */
+export function tr(locale: Locale): <T>(value: Bilingual<T>) => T {
+  return (value) => localized(value, locale);
+}
+
+/** Replaces `{name}` placeholders in a localised string. */
+export function fill(template: string, values: Record<string, string | number>): string {
+  return template.replace(/\{(\w+)\}/g, (m, k: string) => (k in values ? String(values[k]) : m));
+}

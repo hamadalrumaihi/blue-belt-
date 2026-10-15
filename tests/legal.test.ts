@@ -19,9 +19,9 @@ function sectionText(doc: LegalDocument, id: string): string {
 
 describe("legal versions", () => {
   it("are dated and match the labels", () => {
-    expect(TERMS_VERSION).toBe("2026-10-08.2");
+    expect(TERMS_VERSION).toBe("2026-10-15.1");
     expect(PRIVACY_VERSION).toBe("2026-10-08.2");
-    expect(TERMS_UPDATED_LABEL).toBe("8 October 2026");
+    expect(TERMS_UPDATED_LABEL).toBe("15 October 2026");
     expect(PRIVACY_UPDATED_LABEL).toBe("8 October 2026");
     expect(buildTerms().version).toBe(TERMS_VERSION);
     expect(buildPrivacy().version).toBe(PRIVACY_VERSION);
@@ -33,7 +33,7 @@ describe("terms", () => {
   const text = allText(doc);
 
   it("say when they were last updated and carry the business identity, never an address", () => {
-    expect(doc.intro[0]).toBe("Last updated 8 October 2026.");
+    expect(doc.intro[0]).toBe("Last updated 15 October 2026.");
     expect(text).toContain("Blue belt media photography, CR 235175, Doha, Qatar");
     expect(text).toContain("bluebeltmediaqatar@gmail.com");
     expect(text).not.toMatch(/\d{8}/);

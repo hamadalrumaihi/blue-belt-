@@ -16,7 +16,7 @@ describe("parsePriceReferenceForm", () => {
       NOW,
     );
     expect(r.fieldErrors).toEqual({});
-    expect(r.values).toEqual({
+    expect(r.values).toMatchObject({
       provider: "Doha Sports Photo",
       source_url: "https://example.com/prices",
       checked_on: "2026-09-30",

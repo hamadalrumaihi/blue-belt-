@@ -5,8 +5,27 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { convertLeadToBooking, setLeadStatus } from "@/lib/actions/leads";
 import { LEAD_STATUSES, LEAD_STATUS_LABEL } from "@/lib/leads/labels";
-import type { LeadStatus } from "@/lib/supabase/database.types";
+import type { LeadStatus, PricingAssessmentStatus } from "@/lib/supabase/database.types";
 import { cn } from "@/lib/utils";
+
+const ASSESSMENT_LABEL: Record<PricingAssessmentStatus, string> = { queued: "Pricing queued", researching: "Pricing: researching", ready: "Pricing ready", needs_detail: "Pricing: needs detail", failed: "Pricing failed" };
+const ASSESSMENT_TONE: Record<PricingAssessmentStatus, string> = {
+  queued: "bg-lightblue text-primary border-primary/20",
+  researching: "bg-lightblue text-primary border-primary/20",
+  ready: "bg-success-soft text-success border-success/30",
+  needs_detail: "bg-warning-soft text-warning border-warning/30",
+  failed: "bg-danger-soft text-danger border-danger/30",
+};
+
+/** Owner-only badge linking to the latest private pricing assessment of a lead (passed in by the page; absent for staff). */
+export function LeadAssessmentBadge({ assessment }: { assessment: { id: string; status: PricingAssessmentStatus; version: number } | null | undefined }) {
+  if (!assessment) return null;
+  return (
+    <Link href={`/pricing/assessments/${assessment.id}`} className={cn("inline-flex min-h-8 items-center rounded-full border px-2 text-[10px] font-bold uppercase tracking-wide", ASSESSMENT_TONE[assessment.status])}>
+      {ASSESSMENT_LABEL[assessment.status]} · v{assessment.version}
+    </Link>
+  );
+}
 
 const TONE: Record<LeadStatus, string> = {
   new: "bg-lightblue text-primary border-primary/20",
@@ -17,12 +36,13 @@ const TONE: Record<LeadStatus, string> = {
 };
 
 /** Status select + convert button for one lead; the row itself is rendered by the server page. */
-export function LeadControls({ id, status, bookingId }: { id: string; status: LeadStatus; bookingId: string | null }) {
+export function LeadControls({ id, status, bookingId, assessment }: { id: string; status: LeadStatus; bookingId: string | null; assessment?: { id: string; status: PricingAssessmentStatus; version: number } | null }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   return (
     <div className="flex flex-wrap items-center gap-2">
+      <LeadAssessmentBadge assessment={assessment} />
       <label className="sr-only" htmlFor={`status-${id}`}>Lead status</label>
       <select
         id={`status-${id}`}

@@ -58,3 +58,7 @@ resolve-ai/**/.pytest_cache/
 # Pic-Time browser session credentials (never commit).
 pictime-state.json
 *.storage-state.json
+
+# python bytecode (skills scripts)
+__pycache__/
+*.pyc

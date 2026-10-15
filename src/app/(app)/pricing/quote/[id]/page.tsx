@@ -5,6 +5,7 @@ import { BrandHeader } from "@/components/BrandHeader";
 import { PageBody } from "@/components/AppShell";
 import { AlertIcon } from "@/components/icons";
 import { BOOKING_STATUS_LABEL, BOOKING_TYPE_LABEL, formatQr } from "@/lib/bookings/state";
+import { acceptedQuoteFromJson } from "@/lib/pricing/accept";
 import { quoteInputsFromJson } from "@/lib/pricing/form";
 import { getQuote } from "@/lib/pricing/queries";
 import { CONFIDENCE_LABEL, suggestedMidpoint, suggestionFromJson } from "@/lib/pricing/suggest";
@@ -26,9 +27,11 @@ export default async function QuoteDetailPage({ params }: PageProps<"/pricing/qu
   if (!isUuid(id)) notFound();
   const quote = await getQuote(id);
   if (!quote) notFound();
-  const suggestion = suggestionFromJson(quote.calculation);
+  const accepted = acceptedQuoteFromJson(quote.calculation);
+  const suggestion = accepted ? null : suggestionFromJson(quote.calculation);
   const inputs = quoteInputsFromJson(quote.inputs);
   const canApply = quote.status === "draft" && quote.booking !== null && quote.booking.booking_status !== "cancelled" && quote.booking.booking_status !== "completed";
+  const canIssue = quote.status !== "discarded" && quote.booking !== null;
 
   return (
     <>
@@ -37,14 +40,26 @@ export default async function QuoteDetailPage({ params }: PageProps<"/pricing/qu
         <div className="mb-4 flex flex-wrap items-center gap-2">
           <QuoteStatusPill status={quote.status} />
           <span className="text-xs text-muted">{formatStamp(quote.created_at)}</span>
+          {quote.issued_at && <span className="rounded-full border border-success/30 bg-success-soft px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-success">Issued {formatStamp(quote.issued_at)}</span>}
+          {accepted && <Link href={`/pricing/assessments/${accepted.assessment_id}`} className="text-xs font-semibold text-primary hover:underline">From assessment v{accepted.version}</Link>}
           {quote.booking && <Link href={`/bookings/${quote.booking.id}`} className="text-xs font-semibold text-primary hover:underline">Open booking ({BOOKING_STATUS_LABEL[quote.booking.booking_status]})</Link>}
         </div>
 
-        {!suggestion || !inputs ? (
+        {!(suggestion || accepted) || !inputs ? (
           <p className="card p-4 text-sm text-danger" role="alert">The stored breakdown of this quote could not be read. Create a new one.</p>
         ) : (
           <div className="grid gap-4 lg:grid-cols-3">
             <div className="space-y-4 lg:col-span-2">
+              {accepted && (
+                <section className="card p-4" aria-labelledby="sum-h">
+                  <h2 id="sum-h" className="eyebrow">Recommended band</h2>
+                  <p className="mt-1 text-3xl font-black text-ink">{formatQr(accepted.recommended.target)} <span className="text-lg font-bold text-muted">({formatQr(accepted.recommended.low)} to {formatQr(accepted.recommended.high)})</span></p>
+                  {quote.status === "applied" && quote.chosen_amount_qr !== null && <p className="mt-1 text-sm font-semibold text-success">Applied to the booking at {formatQr(quote.chosen_amount_qr)}.</p>}
+                  <p className="mt-2 text-sm text-muted">Cost floor {formatQr(accepted.cost_total)} · target margin {accepted.margin_percent}% · fee {accepted.fee_percent}% · confidence {accepted.confidence}{accepted.market_range ? ` · market ${formatQr(accepted.market_range.low)} to ${formatQr(accepted.market_range.high)} (${accepted.market_range.count} obs)` : " · no market evidence"}.</p>
+                  <p className="mt-2 text-xs text-muted">The full market comparison, cost breakdown and assumptions are on the <Link href={`/pricing/assessments/${accepted.assessment_id}`} className="font-semibold text-primary hover:underline">assessment</Link>; this draft is a snapshot of version {accepted.version}.</p>
+                </section>
+              )}
+              {suggestion && (<>
               <section className="card p-4" aria-labelledby="sum-h">
                 <h2 id="sum-h" className="eyebrow">Suggested range</h2>
                 <p className="mt-1 text-3xl font-black text-ink">
@@ -109,6 +124,7 @@ export default async function QuoteDetailPage({ params }: PageProps<"/pricing/qu
                   </div>
                 )}
               </section>
+              </>)}
             </div>
 
             <div className="space-y-4">
@@ -117,7 +133,7 @@ export default async function QuoteDetailPage({ params }: PageProps<"/pricing/qu
                 {canApply ? (
                   <>
                     <p className="mt-1 text-sm text-muted">Sets the booking amount and marks an inquiry as quoted. Nothing is sent to the client; you share the price yourself.</p>
-                    <div className="mt-3"><ApplyQuoteForm quoteId={quote.id} defaultAmount={suggestedMidpoint(suggestion)} /></div>
+                    <div className="mt-3"><ApplyQuoteForm quoteId={quote.id} defaultAmount={accepted ? accepted.recommended.target : suggestedMidpoint(suggestion!)} /></div>
                   </>
                 ) : quote.status === "applied" ? (
                   <p className="mt-1 text-sm text-muted">Already applied{quote.chosen_amount_qr !== null ? ` at ${formatQr(quote.chosen_amount_qr)}` : ""}.</p>
@@ -128,7 +144,7 @@ export default async function QuoteDetailPage({ params }: PageProps<"/pricing/qu
                 ) : (
                   <p className="mt-1 text-sm text-muted">The booking is {BOOKING_STATUS_LABEL[quote.booking.booking_status].toLowerCase()}; its amount cannot change.</p>
                 )}
-                {quote.status === "draft" && <div className="mt-3 border-t border-line pt-3"><QuoteActions quoteId={quote.id} /></div>}
+                {(quote.status === "draft" || canIssue) && <div className="mt-3 border-t border-line pt-3"><QuoteActions quoteId={quote.id} canDiscard={quote.status === "draft"} canIssue={canIssue} issuedAt={quote.issued_at} /></div>}
               </section>
 
               <section className="card p-4" aria-labelledby="in-h">

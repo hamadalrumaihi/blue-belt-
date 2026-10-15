@@ -4,15 +4,21 @@ import { notFound } from "next/navigation";
 import { BrandHeader } from "@/components/BrandHeader";
 import { PageBody } from "@/components/AppShell";
 import { AlertIcon, EditIcon, ImageIcon, MailIcon, PhoneIcon, TrashIcon, WhatsAppIcon } from "@/components/icons";
-import { getBooking, listAssignableTeam } from "@/lib/bookings/queries";
+import { briefChecklist, type BriefAthlete } from "@/lib/bookings/brief";
+import { getBooking, listAssignableTeam, listBookings } from "@/lib/bookings/queries";
 import { BALANCE_STATE_LABEL, BOOKING_TYPE_LABEL, bookingDetails, DEPOSIT_STATE_LABEL, formatQr, nextActionFor } from "@/lib/bookings/state";
 import { GALLERY_STATUS_LABEL } from "@/lib/galleries/state";
 import { isPaymentsEnabled } from "@/lib/payments/config";
 import { whatsappDigits } from "@/lib/people/form";
 import { listAthletes } from "@/lib/queries";
+import { CAPACITY_NOTE, describeConflicts, overlaps } from "@/lib/studio/capacity";
 import { describeAudit } from "@/lib/studio/dashboard";
+import { nextActionFor as workspaceNextAction } from "@/lib/studio/next-action";
+import { createClient } from "@/lib/supabase/server";
 import { formatDateTime, formatEventDate, formatStamp, zoneLabel } from "@/lib/time";
+import { cn } from "@/lib/utils";
 import { isUuid } from "@/lib/validation";
+import { NextActionRow } from "../../studio/NextActionRow";
 import { AthleteLink } from "../AthleteLink";
 import { BookingActions } from "../BookingActions";
 import { BookingStatusBadge } from "../BookingStatusBadge";
@@ -20,6 +26,7 @@ import { CoverageAssign } from "../CoverageAssign";
 import { PaymentBadge } from "../PaymentBadge";
 import { ShootCompleteButton } from "../ShootCompleteButton";
 import { BookingTimeline } from "./BookingTimeline";
+import { BriefPanel } from "./BriefPanel";
 import { ContractPanel } from "./ContractPanel";
 import { DeliverGalleryButton } from "./DeliverGalleryButton";
 import { PaymentCard } from "./PaymentCard";
@@ -51,8 +58,20 @@ export default async function BookingDetailPage({ params }: PageProps<"/bookings
   const detail = await getBooking(id);
   if (!detail) notFound();
   const { booking, client, organization, service, event, payment, audit, linkedAthlete, gallery, documents, paymentRequests } = detail;
-  const [team, athletes] = await Promise.all([listAssignableTeam(booking.event_id), booking.event_id ? listAthletes(booking.event_id) : Promise.resolve([])]);
+  const supabase = await createClient();
+  const now = new Date();
+  const [team, athletes, liveBookings, activeEvents, trackedAthlete] = await Promise.all([
+    listAssignableTeam(booking.event_id),
+    booking.event_id ? listAthletes(booking.event_id) : Promise.resolve([]),
+    booking.session_at ? listBookings({ filter: "confirmed", limit: 300 }) : Promise.resolve([]),
+    booking.session_at ? supabase.from("photo_events").select("id,name,event_date,venue").eq("active", true).limit(200) : Promise.resolve({ data: [] }),
+    booking.watcher_athlete_id ? supabase.from("photo_athletes").select("id,name,division,academy,belt,weight,age_category,source_url").eq("id", booking.watcher_athlete_id).maybeSingle() : Promise.resolve({ data: null }),
+  ]);
   const d = bookingDetails(booking);
+  const workspaceAction = workspaceNextAction(booking, { documents, paymentRequests, gallery, now });
+  const conflicts = overlaps(liveBookings, { id: booking.id, sessionAt: booking.session_at, eventId: booking.event_id }, activeEvents.data ?? []);
+  const roster: BriefAthlete[] = booking.booking_type === "club" || booking.booking_type === "custom" ? athletes.map((a) => ({ id: a.id, name: a.name, division: a.division, academy: a.academy, belt: a.belt, weight: a.weight, age_category: a.age_category, source_url: a.source_url })) : [];
+  const checklist = booking.booking_status === "cancelled" || booking.booking_status === "completed" ? [] : briefChecklist({ booking, client, organization, event, athlete: (trackedAthlete?.data as BriefAthlete | null) ?? null, roster, documents, now });
   const phone = client?.phone ?? booking.customer_phone;
   const email = client?.email ?? booking.customer_email;
   const wa = whatsappDigits(client?.whatsapp ?? phone);
@@ -76,6 +95,21 @@ export default async function BookingDetailPage({ params }: PageProps<"/bookings
 
         <div className="grid gap-4 lg:grid-cols-3">
           <div className="space-y-4 lg:col-span-2">
+            {workspaceAction && (
+              <section className={cn("card p-4", workspaceAction.tone === "danger" && "border-danger/40", workspaceAction.tone === "warning" && "border-warning/40")} aria-labelledby="next-h">
+                <h2 id="next-h" className="eyebrow">Next action</h2>
+                <div className="mt-2"><NextActionRow action={workspaceAction} now={now.toISOString()} prominent /></div>
+                {conflicts.length > 0 && (
+                  <div className="mt-3 rounded-lg border border-warning/30 bg-warning-soft px-3 py-2 text-sm text-ink" role="status">
+                    <p className="flex items-start gap-2 font-semibold"><AlertIcon size={16} className="mt-0.5 shrink-0 text-warning" /> {describeConflicts(conflicts)}</p>
+                    <ul className="mt-1 space-y-0.5 pl-6 text-xs">
+                      {conflicts.map((c) => <li key={`${c.kind}:${c.id}`}><Link href={c.href} className="font-semibold text-primary hover:underline">{c.title}</Link>{c.kind === "booking" && c.at ? ` · ${formatDateTime(c.at)}` : ""}{c.where ? ` · ${c.where}` : ""}</li>)}
+                    </ul>
+                    {preConfirmation && <p className="mt-1 pl-6 text-xs text-muted">{CAPACITY_NOTE}</p>}
+                  </div>
+                )}
+              </section>
+            )}
             <section className="card p-4" aria-labelledby="actions-h">
               <h2 id="actions-h" className="eyebrow">Status and next action</h2>
               <p className="mt-2 text-lg font-extrabold text-ink">{next.text}</p>
@@ -146,19 +180,22 @@ export default async function BookingDetailPage({ params }: PageProps<"/bookings
               </div>
             </section>
 
-            <ContractPanel booking={booking} documents={documents} />
+            <div id="contract"><ContractPanel booking={booking} documents={documents} /></div>
 
-            <section className="card p-4" aria-labelledby="pay-h">
+            <section className="card p-4" aria-labelledby="pay-h" id="payment">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h2 id="pay-h" className="eyebrow">Payment</h2>
                 <PaymentBadge payment={payment} amountQr={booking.amount_qr} detailed />
               </div>
               <p className="mb-3 mt-1 text-xs text-muted">50% deposit once the agreement is signed, before the booking is confirmed. The remaining 50% becomes due when you deliver the gallery. Links are created and sent only by you.</p>
               <PaymentCard detail={detail} paymentsEnabled={paymentsEnabled} />
+              {/* Pricing / assessment slot (workstream D owns QuoteFromPricing; an assessment card goes here). */}
               <QuoteFromPricing bookingId={booking.id} />
             </section>
 
-            <section className="card p-4" aria-labelledby="delivery-h">
+            {checklist.length > 0 && <BriefPanel bookingId={id} checklist={checklist} sessionKnown={Boolean(booking.session_at)} />}
+
+            <section className="card p-4" aria-labelledby="delivery-h" id="delivery">
               <h2 id="delivery-h" className="eyebrow">Shoot, editing and delivery</h2>
               <dl className="mt-2 divide-y divide-line">
                 <Row label="Shoot" value={booking.coverage_done_at ? `Done ${formatStamp(booking.coverage_done_at)}` : confirmed ? "Not marked complete yet" : "After confirmation"} />

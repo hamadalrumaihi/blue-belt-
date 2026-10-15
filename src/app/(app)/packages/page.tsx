@@ -6,6 +6,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { CameraIcon, EditIcon, PlusIcon, ReceiptIcon, VideoIcon } from "@/components/icons";
 import { BOOKING_TYPES, BOOKING_TYPE_LABEL, formatQr } from "@/lib/bookings/state";
 import { publicPrice } from "@/lib/services/pricing";
+import { isPlaceholderDescription } from "@/lib/services/public";
 import { listServices } from "@/lib/studio/queries";
 import { cn } from "@/lib/utils";
 import { SeedServicesButton, ServiceRowActions } from "./ServiceActions";
@@ -57,6 +58,11 @@ export default async function PackagesPage() {
                         {s.active && !s.public && <span className="rounded-md bg-page px-2 py-0.5 font-bold uppercase tracking-wider text-muted">Hidden from website</span>}
                       </div>
                       {s.description && <p className="mt-2 line-clamp-2 text-sm text-muted">{s.description}</p>}
+                      {isPlaceholderDescription(s.description) && (
+                        <p className="mt-2 rounded-lg bg-warning-soft px-2.5 py-1.5 text-xs font-semibold text-warning" role="status">
+                          Setup wording detected (for example &ldquo;Set your price&rdquo;). It is hidden on the website; edit the description so visitors read the real offer.
+                        </p>
+                      )}
                       <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
                         <Link href={`/packages/${s.id}/edit`} className="btn-secondary min-h-10"><EditIcon size={16} /> Edit</Link>
                         <ServiceRowActions id={s.id} name={s.name} active={s.active} />

@@ -11,14 +11,21 @@ describe("readTestimonials", () => {
     expect(readTestimonials({ testimonials: [null, 1, "s", { quote: "only quote" }, { name: "only name" }, { quote: "  ", name: "Blank" }] })).toEqual([]);
   });
 
+  it("shows only rows that are published with written permission, never legacy rows without the flags", () => {
+    expect(readTestimonials({ testimonials: [{ quote: "Legacy", name: "Old" }] })).toEqual([]);
+    expect(readTestimonials({ testimonials: [{ id: "a", quote: "Unpublished", name: "A", permission_granted: true, published: false }] })).toEqual([]);
+    expect(readTestimonials({ testimonials: [{ id: "b", quote: "No permission", name: "B", permission_granted: false, published: true }] })).toEqual([]);
+    expect(readTestimonials({ testimonials: [{ id: "c", quote: "Great", name: "C", role: "Coach", permission_granted: true, published: true }] })).toEqual([{ quote: "Great", name: "C", role: "Coach" }]);
+  });
+
   it("trims, caps lengths, makes role optional and keeps at most six", () => {
     const long = "q".repeat(700);
-    const items = Array.from({ length: 8 }, (_, i) => ({ quote: ` ${long} `, name: ` Name ${i} `, role: i % 2 ? " Coach " : "" }));
+    const items = Array.from({ length: 8 }, (_, i) => ({ id: `t${i}`, quote: ` ${long} `, name: ` Name ${i} `, role: i % 2 ? " Coach " : "", permission_granted: true, published: true }));
     const out = readTestimonials({ testimonials: items });
     expect(out).toHaveLength(6);
     expect(out[0]).toEqual({ quote: "q".repeat(600), name: "Name 0", role: null });
     expect(out[1].role).toBe("Coach");
-    expect(readTestimonials({ testimonials: [{ quote: "Great", name: "n".repeat(100), role: 5 }] })[0]).toEqual({ quote: "Great", name: "n".repeat(80), role: null });
+    expect(readTestimonials({ testimonials: [{ id: "x", quote: "Great", name: "n".repeat(100), role: 5, permission_granted: true, published: true }] })[0]).toEqual({ quote: "Great", name: "n".repeat(80), role: null });
   });
 });
 

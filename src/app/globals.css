@@ -25,6 +25,28 @@
   --color-danger-soft: #fde8e8;
 
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* Arabic: the system stack (no font files shipped). Latin glyphs inside Arabic text fall through to the sans stack. */
+  --font-arabic: "Segoe UI", "Noto Naskh Arabic", "Noto Sans Arabic", "Geeza Pro", "Al Bayan", Tahoma, "Helvetica Neue", Arial, var(--font-inter), sans-serif;
+
+  /* Type scale (public site). Display sizes shrink on phones through the utilities below. */
+  --text-display: clamp(2.125rem, 1.4rem + 3vw, 3.5rem);
+  --text-display--line-height: 1.05;
+  --text-display--letter-spacing: -0.02em;
+  --text-h1: clamp(1.875rem, 1.3rem + 2.2vw, 2.75rem);
+  --text-h1--line-height: 1.1;
+  --text-h1--letter-spacing: -0.02em;
+  --text-h2: clamp(1.5rem, 1.2rem + 1.4vw, 2.125rem);
+  --text-h2--line-height: 1.15;
+  --text-h2--letter-spacing: -0.015em;
+  --text-h3: 1.125rem;
+  --text-h3--line-height: 1.35;
+  --text-lead: clamp(1rem, 0.95rem + 0.3vw, 1.125rem);
+  --text-lead--line-height: 1.6;
+
+  /* Spacing rhythm for sections and the page gutter. */
+  --spacing-gutter: 1rem;
+  --spacing-section: clamp(3rem, 2rem + 4vw, 6rem);
+  --spacing-section-sm: clamp(2rem, 1.5rem + 2vw, 3.5rem);
 
   --radius-card: 1.25rem;
   --shadow-card: 0 1px 2px rgba(11, 31, 58, 0.04), 0 8px 24px -12px rgba(11, 31, 58, 0.18);
@@ -80,6 +102,51 @@ body {
   font-family: var(--font-sans);
   font-feature-settings: "cv11", "ss01";
   min-height: 100dvh;
+  overflow-x: clip;
+}
+
+/*
+ * Arabic / right-to-left. The public layout sets lang and dir on its wrapper
+ * (and mirrors them onto <html>); the studio stays English and LTR. Uppercase
+ * tracking and tight letter-spacing are Latin devices, so they are reset.
+ */
+:lang(ar) {
+  font-family: var(--font-arabic);
+  font-feature-settings: normal;
+  letter-spacing: 0;
+}
+:lang(ar) .eyebrow,
+:lang(ar) .tracking-tight,
+:lang(ar) [class*="tracking-"] {
+  letter-spacing: 0 !important;
+}
+:lang(ar) .eyebrow {
+  text-transform: none;
+  font-size: 0.8125rem;
+}
+:lang(ar) h1,
+:lang(ar) h2,
+:lang(ar) h3,
+:lang(ar) .display,
+:lang(ar) .heading-1,
+:lang(ar) .heading-2 {
+  line-height: 1.3;
+}
+/* Directional icons (chevrons, arrows) point the other way in RTL. */
+[dir="rtl"] .rtl-flip {
+  transform: scaleX(-1);
+}
+/* Native form controls and numbers keep their shape in RTL. */
+[dir="rtl"] input[type="email"],
+[dir="rtl"] input[type="tel"],
+[dir="rtl"] input[type="url"] {
+  direction: ltr;
+  text-align: start;
+}
+
+/* A page with an open modal gallery does not scroll behind it. */
+body:has(dialog[open].dialog-lock) {
+  overflow: hidden;
 }
 
 @layer components {
@@ -120,6 +187,134 @@ body {
   }
   .eyebrow {
     @apply text-[11px] font-bold uppercase tracking-[0.14em] text-muted;
+  }
+
+  /* ---- Public site design system ------------------------------------- */
+
+  /* Containers and sections. One gutter at every width; sections share a rhythm. */
+  .container-x {
+    @apply mx-auto w-full max-w-6xl px-gutter lg:px-8;
+  }
+  .section {
+    @apply py-section;
+  }
+  .section-sm {
+    @apply py-section-sm;
+  }
+
+  /* Type scale. */
+  .display {
+    @apply font-extrabold text-display;
+  }
+  .heading-1 {
+    @apply font-extrabold text-h1;
+  }
+  .heading-2 {
+    @apply font-extrabold text-h2;
+  }
+  .heading-3 {
+    @apply font-bold text-h3;
+  }
+  .lead {
+    @apply text-lead text-muted;
+  }
+  .prose-list {
+    @apply space-y-2 text-sm leading-relaxed text-ink;
+  }
+
+  /* Buttons on navy surfaces, and sizes. */
+  .btn-light {
+    @apply border border-white/30 bg-white/5 text-white backdrop-blur hover:bg-white/15;
+  }
+  .btn-lg {
+    @apply min-h-12 px-6 text-base;
+  }
+  .btn-sm {
+    @apply min-h-9 px-3 text-xs;
+  }
+
+  /* Inputs. */
+  .textarea {
+    @apply block min-h-36 w-full rounded-xl border border-line bg-surface px-3.5 py-3 text-base text-ink placeholder:text-muted/70 focus:border-primary focus:outline-none focus:ring-4 focus:ring-primary/15;
+  }
+  .select {
+    @apply block min-h-11 w-full appearance-none rounded-xl border border-line bg-surface px-3.5 pe-10 text-base text-ink focus:border-primary focus:outline-none focus:ring-4 focus:ring-primary/15;
+  }
+
+  /* Badges and chips. Chips are links or buttons (44px target), badges are read-only. */
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full border border-line bg-surface-2 px-2.5 py-0.5 text-xs font-semibold text-ink;
+  }
+  .badge-primary {
+    @apply border-primary/20 bg-lightblue text-primary;
+  }
+  .badge-light {
+    @apply border-white/25 bg-white/10 text-white;
+  }
+  .chip {
+    @apply inline-flex min-h-11 items-center gap-1.5 rounded-full border border-line bg-surface px-4 text-sm font-semibold text-ink transition-colors hover:bg-lightblue hover:text-primary;
+  }
+  .chip[aria-pressed="true"],
+  .chip[aria-current="true"],
+  .chip-active {
+    @apply border-primary bg-primary text-white hover:bg-primary-600 hover:text-white;
+  }
+  .chip-light {
+    @apply border-white/25 bg-transparent text-white/90 hover:bg-white/10 hover:text-white;
+  }
+
+  /* Cards. */
+  .card-hover {
+    @apply transition-colors hover:border-primary/40;
+  }
+  .card-soft {
+    @apply rounded-card border border-line bg-page;
+  }
+  .tile {
+    @apply rounded-xl border border-line bg-surface p-5;
+  }
+
+  /* Tables. */
+  .table {
+    @apply w-full border-collapse text-start text-sm;
+  }
+  .table th {
+    @apply border-b border-line pb-2 pe-4 text-start text-xs font-bold uppercase tracking-[0.1em] text-muted;
+  }
+  .table td {
+    @apply border-b border-line py-3 pe-4 align-top text-ink;
+  }
+
+  /* Dialogs (native <dialog>, opened with showModal so focus stays inside and Escape closes). */
+  .dialog {
+    @apply m-auto max-h-[100dvh] max-w-[100vw] rounded-none border-0 bg-transparent p-0 text-white;
+  }
+  .dialog::backdrop {
+    background: rgba(5, 12, 24, 0.92);
+  }
+
+  /* Media figures: fixed aspect so nothing shifts while the image loads. */
+  .figure {
+    @apply relative overflow-hidden rounded-xl bg-navy-800;
+  }
+  .figure img {
+    @apply h-full w-full object-cover;
+  }
+  .figure-caption {
+    @apply mt-2 text-xs text-muted;
+  }
+
+  /* Navy section with the same quiet geometry everywhere (no photographs needed). */
+  .navy-pattern {
+    background-image: radial-gradient(circle at 85% 20%, rgba(47, 128, 237, 0.28), transparent 42%), radial-gradient(circle at 10% 90%, rgba(23, 105, 224, 0.2), transparent 38%);
+  }
+
+  /* Disclosure rows (FAQ). */
+  .disclosure summary {
+    @apply flex min-h-11 cursor-pointer list-none items-center justify-between gap-4 text-base font-bold text-ink;
+  }
+  .disclosure summary::-webkit-details-marker {
+    display: none;
   }
 }
 
