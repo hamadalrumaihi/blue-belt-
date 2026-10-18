@@ -31,6 +31,7 @@ from ..analyze import read_audio_rms
 from ..media import probe
 from ..plan import estimate_beat_interval
 from ..util import LOG, ffmpeg_path, read_json, write_json
+from .captions import drawtext_font
 from .jobs import StudioError, run_tool, stage
 from .project import Project, file_hash, fingerprint
 
@@ -179,14 +180,14 @@ def sheets(proj: Project, path: Path, spans: list[tuple[float, float]], duration
         rows = math.ceil(len(mids) / cols)
         dst = proj.p("reference", "sheet_shots.jpg")
         run_tool([ffmpeg_path(), "-v", "error", "-nostdin", "-y", "-i", str(path), "-vf",
-                  f"select='{sel}',scale=200:-2,drawtext=text='%{{pts\\:hms}}':x=3:y=3:fontsize=12:fontcolor=white:"
+                  f"select='{sel}',scale=200:-2,drawtext={drawtext_font()}text='%{{pts\\:hms}}':x=3:y=3:fontsize=12:fontcolor=white:"
                   f"box=1:boxcolor=black@0.6,tile={cols}x{rows}", "-frames:v", "1", "-fps_mode", "passthrough",
                   str(dst)], project_root=proj.root, label="ref_sheet_shots", timeout=600)
         out.append(str(dst.relative_to(proj.root)))
     step = max(1.0, duration / 64)
     dst = proj.p("reference", "sheet_1fps.jpg")
     run_tool([ffmpeg_path(), "-v", "error", "-nostdin", "-y", "-i", str(path), "-vf",
-              f"fps=1/{step:.3f},scale=200:-2,drawtext=text='%{{pts\\:hms}}':x=3:y=3:fontsize=12:fontcolor=white:"
+              f"fps=1/{step:.3f},scale=200:-2,drawtext={drawtext_font()}text='%{{pts\\:hms}}':x=3:y=3:fontsize=12:fontcolor=white:"
               f"box=1:boxcolor=black@0.6,tile=8x8", "-frames:v", "1", str(dst)],
              project_root=proj.root, label="ref_sheet_1fps", timeout=600)
     out.append(str(dst.relative_to(proj.root)))

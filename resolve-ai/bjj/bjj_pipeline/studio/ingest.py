@@ -23,6 +23,7 @@ import numpy as np
 
 from ..media import probe
 from ..util import LOG, VIDEO_EXTS, ffmpeg_path
+from .captions import drawtext_font
 from .jobs import StudioError, log_event, run_tool, stage
 from .project import Project, file_hash, fingerprint
 
@@ -100,7 +101,7 @@ def contact_sheet(proj: Project, asset: dict, cols: int = 6, rows: int = 4) -> s
     else:
         n = cols * rows
         step = max(asset["duration"] / n, 0.04)
-        vf = (f"fps=1/{step:.4f},scale=240:-2,drawtext=text='%{{pts\\:hms}}':x=4:y=4:fontsize=14:fontcolor=white:"
+        vf = (f"fps=1/{step:.4f},scale=240:-2,drawtext={drawtext_font()}text='%{{pts\\:hms}}':x=4:y=4:fontsize=14:fontcolor=white:"
               f"box=1:boxcolor=black@0.6,tile={cols}x{rows}")
         cmd = [ffmpeg_path(), "-v", "error", "-nostdin", "-y", "-i", str(src), "-vf", vf, "-frames:v", "1", str(out)]
     run_tool(cmd, project_root=proj.root, label=f"thumb_{asset['id']}", timeout=600, cancel_check=proj.cancelled)

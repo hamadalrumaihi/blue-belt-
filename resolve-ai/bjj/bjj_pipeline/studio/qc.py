@@ -21,6 +21,7 @@ import numpy as np
 from ..analyze import read_audio_rms
 from ..media import probe
 from ..util import LOG, ffmpeg_path, ffprobe_path, parse_fps, read_json, write_json
+from .captions import drawtext_font
 from .jobs import run_tool, stage
 from .project import Project, fingerprint
 from .timeline import clip_duration, load, record_layout, validate
@@ -143,7 +144,7 @@ def evidence_sheet(proj: Project, path: Path, tl: dict, out: Path) -> Path:
     cols = 9
     rows = max(1, -(-len(ts) // cols))
     run_tool([ffmpeg_path(), "-v", "error", "-nostdin", "-y", "-i", str(path), "-vf",
-              f"select='{sel}',scale=160:-2,drawtext=text='%{{pts\\:hms}}':x=2:y=2:fontsize=11:fontcolor=yellow:"
+              f"select='{sel}',scale=160:-2,drawtext={drawtext_font()}text='%{{pts\\:hms}}':x=2:y=2:fontsize=11:fontcolor=yellow:"
               f"box=1:boxcolor=black@0.7,tile={cols}x{rows}", "-frames:v", "1", "-fps_mode", "passthrough", str(out)],
              project_root=proj.root, label="qc_sheet", timeout=600)
     return out

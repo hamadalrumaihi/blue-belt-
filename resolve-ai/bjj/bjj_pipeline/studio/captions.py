@@ -24,6 +24,13 @@ FONT_ARABIC = "Noto Sans Arabic"
 FONT_FILES = ["NotoSans-Variable.ttf", "NotoSansArabic-Variable.ttf"]
 
 
+def drawtext_font() -> str:
+    """`fontfile=...:` prefix for FFmpeg drawtext.  Always explicit: Windows FFmpeg builds without fontconfig
+    crash (access violation) when drawtext has to look a font up by itself."""
+    p = str(FONT_DIR / "NotoSans-Variable.ttf").replace("\\", "/").replace(":", "\\:")
+    return f"fontfile='{p}':"
+
+
 def _ts(t: float) -> str:
     t = max(0.0, t)
     h = int(t // 3600)
