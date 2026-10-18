@@ -62,3 +62,11 @@ pictime-state.json
 # python bytecode (skills scripts)
 __pycache__/
 *.pyc
+# BBM Studio: footage, proxies, renders and production folders never belong in git
+BBM-Studio/
+resolve-ai/**/*.mp4
+resolve-ai/**/*.mov
+resolve-ai/**/*.mxf
+resolve-ai/**/*.mts
+resolve-ai/**/*.braw
+resolve-ai/**/_analysis/

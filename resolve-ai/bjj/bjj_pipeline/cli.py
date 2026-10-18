@@ -12,6 +12,8 @@
   bjj color --analysis D             /bjj-color: grouping + exposure offsets + steps
   bjj resolve status|build|markers|ai  Stage E via the scripting API
   bjj adapters hypecut-markers|vae-plan|vae-srt
+  bjj studio health|new|run|resume|status|feedback|revise|render|qc|export|cancel|ui
+                                     integrated production workflow (see bjj_pipeline/studio, docs/STUDIO.md)
 """
 from __future__ import annotations
 
@@ -370,6 +372,9 @@ def build_parser() -> argparse.ArgumentParser:
     s = sp.add_parser("adapters"); s.add_argument("action", choices=["hypecut-markers", "vae-plan", "vae-srt"])
     s.add_argument("input"); s.add_argument("--out", required=True); s.add_argument("--source", default=None)
     s.set_defaults(fn=cmd_adapters)
+
+    from .studio.cli import add_parser as add_studio
+    add_studio(sp)
     return p
 
 

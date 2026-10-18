@@ -7,8 +7,10 @@ Stages (see docs/WORKFLOW.md):
   D plan      -> bjj_pipeline.plan
   E build     -> bjj_pipeline.resolve_bridge (DaVinci Resolve scripting API)
   F render    -> bjj_pipeline.presets
+  Studio      -> bjj_pipeline.studio  (integrated ingest -> plan -> FFmpeg render -> QC -> revise -> export;
+                 `bjj studio ...`, see resolve-ai/docs/STUDIO.md)
 
 Everything runs locally. No footage ever leaves the machine.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

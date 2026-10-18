@@ -1,5 +1,10 @@
 # bjj-pipeline
 
+> **New: BBM Studio** (`bjj studio ...`) renders finished edits end to end — ingest, footage
+> understanding, optional reference breakdown, timeline plan, FFmpeg draft, measured QC, timestamped
+> revisions, final export with OTIO/FCPXML/EDL. See [../docs/STUDIO.md](../docs/STUDIO.md) and
+> [../docs/STUDIO-STATUS.md](../docs/STUDIO-STATUS.md). Windows: `..\launcher\bbm-studio.cmd`.
+
 Local, offline footage pipeline for Blue Belt Media's Brazilian jiu-jitsu tournament work.
 It organises camera cards, measures every clip, proposes candidate moments for a human to
 confirm, ranks them, builds four kinds of edit plans, exports CMX3600 EDLs / CSV cut lists /

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bjj-pipeline"
-version = "0.1.0"
+version = "0.2.0"
 description = "Blue Belt Media - AI-assisted Brazilian jiu-jitsu tournament footage pipeline for DaVinci Resolve (organize, analyze, rank, plan, export EDL, build timelines, render presets)."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -23,6 +23,12 @@ detect = [
 dev = [
   "pytest>=8",
 ]
+# BBM Studio optional extras: OpenCV for optical-flow camera moves in reference breakdowns,
+# OpenTimelineIO only to validate .otio exports in tests. The studio itself needs numpy + FFmpeg.
+studio = [
+  "opencv-python-headless>=4.9",
+  "opentimelineio>=0.17",
+]
 
 [project.scripts]
 bjj = "bjj_pipeline.cli:main"
@@ -30,6 +36,9 @@ bjj = "bjj_pipeline.cli:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["bjj_pipeline*"]
+
+[tool.setuptools.package-data]
+"bjj_pipeline.studio" = ["assets/fonts/*.ttf", "assets/fonts/*.txt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

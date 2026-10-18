@@ -81,7 +81,7 @@ if (-not $SkipUpstream) {
 }
 
 if (-not $SkipBjj) {
-    foreach ($n in 'bjj-analyze','bjj-highlights','bjj-reel','bjj-club','bjj-cleanup','bjj-color','bjj-export','resolve-health') {
+    foreach ($n in 'bjj-analyze','bjj-highlights','bjj-reel','bjj-club','bjj-cleanup','bjj-color','bjj-export','resolve-health','bbm-studio','bbm-studio-dev') {
         Install-Skill (Join-Path $repoRoot ".claude\skills\$n") $n 'blue-belt repo'
     }
 }
