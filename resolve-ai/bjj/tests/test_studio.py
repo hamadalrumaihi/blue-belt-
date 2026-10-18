@@ -456,6 +456,22 @@ def test_ui_serves_api_and_blocks_traversal(project, monkeypatch):
         srv.shutdown()
 
 
+def test_photo_hold_moves_in_both_reframe_modes(project, tmp_path):
+    img = tmp_path / "textured.jpg"
+    _ff("-f", "lavfi", "-i", "testsrc2=s=800x600:d=1", "-frames:v", "1", str(img))   # a flat photo cannot show motion
+    photo = dict(next(a for a in project.assets if a["kind"] == "photo"), source=str(img), hash="test-textured", proxy=None)
+    for mode in ("fit_blur", "crop"):
+        c = {"id": f"ph_{mode}", "kind": "photo", "hold": 2.0, "src_in": 0, "src_out": 0, "speed": 1.0,
+             "reframe": {"mode": mode, "x": 0.5, "w": 0.5, "kenburns": True}, "audio": {"gain_db": -90}}
+        seg = render.render_segment(project, c, photo, 270, 480, "30/1", "draft")
+        frames = []
+        for t in (0.05, 1.9):
+            raw = subprocess.run([FFMPEG, "-v", "error", "-ss", str(t), "-i", str(seg), "-frames:v", "1", "-f", "rawvideo",
+                                  "-pix_fmt", "gray", "-"], capture_output=True, check=True).stdout
+            frames.append(np.frombuffer(raw, np.uint8).astype(int))
+        assert np.abs(frames[0] - frames[1]).mean() > 0.2, f"{mode}: photo hold is completely static"
+
+
 def test_health_reports_measured_facts():
     from bjj_pipeline.studio.health import check
     rep = check(resolve=True)

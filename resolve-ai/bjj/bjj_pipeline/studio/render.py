@@ -26,7 +26,7 @@ from .jobs import StudioError, run_tool, stage
 from .project import Project, fingerprint
 from .timeline import clip_duration, load, record_layout, validate
 
-RENDER_VERSION = "render-v1"
+RENDER_VERSION = "render-v2"
 
 
 def _even(x: float) -> int:
@@ -92,11 +92,12 @@ def photo_filters(c: dict, W: int, H: int, fps: str) -> str:
         return (f"[0:v]split=2[bg][fg];[bg]scale={_even(W / 4)}:{_even(H / 4)}:force_original_aspect_ratio=increase,"
                 f"crop={_even(W / 4)}:{_even(H / 4)},boxblur=10:2,eq=brightness=-0.12,scale={W}:{H},setsar=1[bgs];"
                 f"[fg]scale={W}:{H}:force_original_aspect_ratio=decrease,setsar=1[fgs];[bgs][fgs]overlay=(W-w)/2:(H-h)/2,"
-                f"loop=loop={frames}:size=1,fps={fps},trim=duration={d:.3f},format=yuv420p[v]")
+                f"scale={big_w}:{big_h},zoompan=z='1+0.04*on/{frames}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+                f"d={frames}:s={W}x{H}:fps={fps},setsar=1,trim=duration={d:.3f},format=yuv420p[v]")   # Ken Burns here too
     # slow Ken Burns push-in (4%) on a cover-cropped still
     return (f"[0:v]scale={big_w}:{big_h}:force_original_aspect_ratio=increase,crop={big_w}:{big_h},setsar=1,"
             f"zoompan=z='1+0.04*on/{frames}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={frames}:s={W}x{H}:fps={fps},"
-            f"trim=duration={d:.3f},format=yuv420p[v]")
+            f"setsar=1,trim=duration={d:.3f},format=yuv420p[v]")
 
 
 def render_segment(proj: Project, c: dict, asset: dict, W: int, H: int, fps: str, quality: str) -> Path:

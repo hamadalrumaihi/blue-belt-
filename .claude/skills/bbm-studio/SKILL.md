@@ -9,7 +9,6 @@ description: >-
   promo, fight edit, "make a reel from this footage", "edit like this reference", "fix the draft at
   0:12", Arabic/English captions on a video, or to resume / check a production - even if he does not
   say "studio". For Resolve-only timeline prep without rendering, the bjj-* skills still apply.
-argument-hint: "<footage folder(s)> [reference file/link] [brief: type, length, format, captions]"
 allowed-tools: Bash(bjj *), Bash(bjj.cmd *), Bash(ffmpeg *), Bash(ffprobe *), Read, Write, Glob, Grep
 ---
 

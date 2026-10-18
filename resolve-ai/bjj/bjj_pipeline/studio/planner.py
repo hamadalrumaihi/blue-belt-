@@ -27,7 +27,7 @@ from .jobs import StudioError, stage
 from .project import FORMATS, Brief, Project, fingerprint
 from .timeline import new_timeline, save_version, validate
 
-PLAN_VERSION = "plan-v4"
+PLAN_VERSION = "plan-v5"
 
 KIND_DEFAULTS = {
     #                  shot_s  open_s  transition   slowmo  chrono
@@ -413,6 +413,11 @@ def build_timeline(proj: Project, brief: Brief, cands_doc: dict, index: dict, re
     if not clips:
         raise StudioError("no usable moments found in the footage", "check ingest results (all files damaged or duplicates?)")
     _balance_natural_sound(proj, clips, tl)
+    # never hard-cut natural sound into intended silence (photo hold, muted or slow-motion clip)
+    for a, b in zip(clips, clips[1:]):
+        silent_next = b["kind"] == "photo" or b["audio"]["gain_db"] <= -80 or b["speed"] < 1
+        if silent_next and not music and a["kind"] != "photo":
+            a["audio"]["fade_out"] = max(a["audio"].get("fade_out", 0.06), 0.4)
     tl["clips"] = clips
     dur = sum((c["hold"] if c["kind"] == "photo" else (c["src_out"] - c["src_in"]) / c["speed"]) for c in clips)
     dur -= sum(c["transition_in"]["duration"] for c in clips[1:])

@@ -75,7 +75,8 @@ def cmd(a: argparse.Namespace) -> int:
         from .qc import run_qc
         from .render import render
         from .timeline import load
-        before = run_qc(p)
+        drafts = [r for r in p.state.get("renders", []) if r["quality"] == "draft"]
+        before = run_qc(p, drafts[-1]["file"] if drafts else None)   # compare draft with draft
         ops = read_json(Path(a.ops)) if a.ops else []
         if a.proposed:
             ops += rv.proposed_ops_from_qc(before, load(p))

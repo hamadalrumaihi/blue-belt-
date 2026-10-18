@@ -5,12 +5,31 @@ Last updated: 2026-10-18, branch `claude/video-studio-2026-10` (base `main` @ f9
 ## Where it has been verified
 | environment | what ran | result |
 |---|---|---|
-| Cloud Linux session (Ubuntu, FFmpeg 6.1.1 with libass/harfbuzz/fribidi/vidstab/x264, Python 3.13, 2 CPU threads, no GPU) | `pytest` 53 tests (30 existing + 23 studio), full fixture production (ingest → analyze → reference → plan → draft → QC → 2 revision rounds → final export), UI endpoints | all pass |
+| Cloud Linux session (Ubuntu, FFmpeg 6.1.1 with libass/harfbuzz/fribidi/vidstab/x264, Python 3.13, 2 CPU threads, no GPU) | `pytest` 55 tests (30 existing + 25 studio), full fixture production (ingest → analyze → reference → plan → draft → QC → 2 revision rounds → final export), UI endpoints | all pass |
 | H's Windows 11 PC (i7-12700F, RTX 3070 8 GB, 32 GB, Resolve 20.3.1.6 per earlier report) | **not yet** — the PC was linked to the session but the bridge reported it offline, so drives, NVENC and Resolve could not be checked | pending |
 
 All verification media is **synthetic** (FFmpeg lavfi boxes on a mat, tones, noise, a fake
 reference). It proves mechanics — indexing, overlap detection, plan rules, rendering, QC detection,
 revision evidence, export formats — not that edits of real BJJ footage look good.
+
+## Defects found by review and fixed (this session)
+Found by LOOKING at renders and by two independent `bbm-reviewer` runs, not by the automated checks:
+- Cairo font dropped isolated Arabic letters (boxes) → Noto Sans Arabic; Encoding -1 for RTL punctuation.
+- **Event-clock sign error**: the same moment from two phones was shown back-to-back as two moments
+  (planner and QC shared the bug, so QC passed). Fixed; a test using the fixture's known offset (not the
+  function under test) fails on the old sign (mutation-checked).
+- `replace` could pick an already-shown moment → now honours the same no-repeat/no-static rules.
+- Fades made level steps worse → planner levels natural sound per clip; QC measures outside fade zones.
+- CTA ran past the end after a shortening revision → captions anchored to the edit.
+- Blind centre crops cut boxes off; static/near-black shots padded the edit; photo Ken Burns ignored
+  in fit-over-blur; hard cut into digital silence → all fixed.
+- Single-pass loudnorm overshot (-12.3 LUFS) → two-pass, measured -14.0.
+
+## Sample output (synthetic fixtures)
+`FIXTURE_Qatar_Open_highlight_vertical_v002.mp4`: 1080x1920, 30 fps, 9.4 s, -14.0 LUFS, -6.0 dBTP;
+QC 17 pass / 1 warn (9.4 s vs 15 s brief — only 9.4 s of distinct, moving, well-exposed material
+exists in the fixtures; nothing was padded). Revision log: replace static warm-up at 2.87 s, drop
+static mat 7.50-9.23 s and near-black clip at 9.1 s; before/after evidence in revisions.jsonl.
 
 ## Implemented
 - Project folders with schema v1, fingerprinted stage checkpoints, resume, cancel flag, timeouts,
