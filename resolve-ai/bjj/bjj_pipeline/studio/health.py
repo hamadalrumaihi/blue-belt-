@@ -121,20 +121,43 @@ def check(resolve: bool = True) -> dict:
     return out
 
 
-def resolve_report() -> dict:
-    from ..resolve_bridge import _paths, status
+def resolve_report(timeout: int = 45) -> dict:
+    """Resolve install + scripting connection, probed in a CHILD process.
+
+    Loading Blackmagic's fusionscript library can crash the Python process outright (seen on Windows 11,
+    Resolve 20.3.1.6, Python 3.12: access violation inside DaVinciResolveScript.load_dynamic), so the
+    probe must never run in-process."""
+    import json as _json
+    from ..resolve_bridge import _paths
     api, lib = _paths()
-    rep = {"installed": lib.exists(), "scripting_lib": str(lib), "api_dir_exists": api.exists()}
+    rep = {"installed": lib.exists(), "scripting_lib": str(lib), "api_dir_exists": api.exists(),
+           "python": sys.version.split()[0]}
     if not lib.exists():
-        rep["summary"] = "DaVinci Resolve not found on this machine (expected on the Windows editing PC)."
-        rep["edition"] = None
+        rep.update(edition=None, summary="DaVinci Resolve not found on this machine.")
         return rep
-    st = status()
-    rep.update(connected=st.connected, product=st.product, version=st.version, edition=st.edition or "unknown",
-               error=st.error, hints=st.hints)
-    if st.connected:
-        rep["summary"] = f"{st.product} {st.version} connected - scripting works from this process."
-    else:
-        rep["summary"] = ("Resolve is installed but external scripting did not connect. Resolve Free does not allow "
-                          "external scripting; import the exported .otio/.fcpxml/.edl with File > Import > Timeline.")
+    code = ("import json; from bjj_pipeline.resolve_bridge import status; from bjj_pipeline.util import to_jsonable; "
+            "print('@@' + json.dumps(to_jsonable(status())))")
+    try:
+        r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=timeout,
+                           errors="replace", creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except subprocess.TimeoutExpired:
+        rep.update(connected=False, edition="unknown",
+                   summary=f"Resolve scripting probe hung for {timeout}s; import .otio/.fcpxml/.edl manually.")
+        return rep
+    line = next((l for l in r.stdout.splitlines() if l.startswith("@@")), None)
+    if line is None:
+        rep.update(connected=False, edition="unknown", probe_exit_code=r.returncode,
+                   probe_stderr=r.stderr.strip()[-400:],
+                   summary=("Loading Resolve's scripting library crashed the probe process "
+                            f"(exit {r.returncode}). Typical causes: Resolve not running, Free edition (no external "
+                            "scripting), or a Python version the library does not support (try 3.10/3.11). "
+                            "Supported path: File > Import > Timeline with the exported .otio/.fcpxml/.edl."))
+        return rep
+    st = _json.loads(line[2:])
+    rep.update(connected=st["connected"], product=st.get("product"), version=st.get("version"),
+               edition=st.get("edition") or "unknown", error=st.get("error"), hints=st.get("hints"))
+    rep["summary"] = (f"{st['product']} {st['version']} connected - scripting works from this process."
+                      if st["connected"] else
+                      "Resolve is installed but external scripting did not connect. Resolve Free does not allow "
+                      "external scripting; import the exported .otio/.fcpxml/.edl with File > Import > Timeline.")
     return rep
