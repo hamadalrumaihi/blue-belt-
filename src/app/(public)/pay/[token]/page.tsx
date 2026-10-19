@@ -18,7 +18,7 @@ export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Pay online", robots: { index: false, follow: false } };
 
 /**
- * The page a client opens from a payment link: the 50% deposit once the
+ * The page a client opens from a payment link: the deposit once the
  * agreement is signed, or the remaining balance after delivery. No account
  * needed: the token is the credential. The amount and the payment state come
  * from the payment request row; the query string only decides whether to ask
@@ -126,7 +126,7 @@ export default async function PayPage({ params, searchParams }: PageProps<"/pay/
 }
 
 function stageTitle(view: PayBookingView): string {
-  return view.stage === "deposit" ? "Deposit (50%) to secure the booking" : "Remaining balance (50%) after delivery";
+  return view.stage === "deposit" ? "Deposit to secure the booking" : "Remaining balance";
 }
 
 function statusText(view: PayBookingView): string {

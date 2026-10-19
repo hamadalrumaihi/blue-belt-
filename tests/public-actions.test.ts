@@ -18,7 +18,7 @@ vi.mock("@/lib/time", async (orig) => ({ ...(await orig<typeof import("@/lib/tim
 const enqueuePricingAssessment = vi.fn();
 vi.mock("@/lib/pricing/assess-hook", () => ({ enqueuePricingAssessment: (...a: unknown[]) => enqueuePricingAssessment(...a) }));
 
-import { submitContact, submitPublicBooking } from "@/lib/actions/public";
+import { submitInquiry, submitPublicBooking } from "@/lib/actions/public";
 import { HONEYPOT_FIELD } from "@/lib/bookings/public-form";
 import { PRIVACY_VERSION, TERMS_VERSION } from "@/lib/legal/versions";
 import { RULES, rateLimit, resetRateLimits } from "@/lib/rate-limit";
@@ -108,6 +108,10 @@ class FakeService {
     }
     if (call.table === "photo_leads") {
       if (call.op === "insert") return one({ id: "lead-1" });
+      return { data: null, error: null };
+    }
+    if (call.table === "photo_inquiries") {
+      if (call.op === "insert") return one({ id: "inquiry-1", ...(call.payload as Row) });
       return { data: null, error: null };
     }
     if (call.table === "photo_notification_deliveries") return { data: [{ id: 1 }], error: null };
@@ -301,7 +305,8 @@ describe("submitPublicBooking", () => {
     expect(email).toMatchObject({ owner_id: OWNER, alert_key: `email:booking:${BOOKING_ID}:received`, kind: "BOOKING_RECEIVED" });
     expect((email!.payload as Row).to).toBe("hamad@example.com");
     const text = (email!.payload as Row).text as string;
-    expect(text).toContain("We confirm the date and the price with you by e-mail. Then you sign the agreement and pay the 50% deposit online to secure the date.");
+    expect(text).toContain("We confirm the date and the price with you by e-mail. Then you sign the agreement and make the payment stated in your quotation, a deposit or a full advance payment, online to secure the date.");
+    expect(text).not.toMatch(/50%/);
     expect(text).not.toMatch(/within 24 hours/i);
     expect(text).toContain("BB-7K3PQ2");
     expect(text.toLowerCase()).not.toMatch(/fatoorah|pic-?time|no payment is needed|after the shoot you pay|payment link follows|whatsapp/);
@@ -326,7 +331,7 @@ describe("submitPublicBooking", () => {
     const email = service.upserts("photo_notification_deliveries").find((n) => n.channel === "email");
     const quoteText = (email!.payload as Row).text as string;
     expect(quoteText).toContain("quoted individually");
-    expect(quoteText.indexOf("price first")).toBeLessThan(quoteText.indexOf("50% deposit"));
+    expect(quoteText.indexOf("price first")).toBeLessThan(quoteText.indexOf("payment stated in your quotation"));
     expect(quoteText).toContain("Once you approve the price");
     // Only what the customer and owner receive: the delivery rows' timestamps can legitimately end in ".350Z".
     const payloads = service.upserts("photo_notification_deliveries").map((n) => n.payload);
@@ -407,22 +412,49 @@ describe("submitPublicBooking", () => {
   });
 });
 
-describe("submitContact", () => {
-  it("creates a lead with the message and pings the owner", async () => {
-    const url = await expectRedirect(submitContact(null, fd({ full_name: "Ali", email: "ali@example.com", message: "Do you cover Dubai?", consent: "1" })));
-    expect(url).toBe("/contact?sent=1");
-    expect(service.inserts("photo_people")[0]).toMatchObject({ owner_id: OWNER, source: "website" });
-    expect(service.inserts("photo_leads")[0]).toMatchObject({ owner_id: OWNER, person_id: "person-1", status: "new", source: "website", message: "Do you cover Dubai?" });
-    expect(service.upserts("photo_notification_deliveries")[0]).toMatchObject({ alert_key: "lead:lead-1:new", kind: "LEAD_NEW" });
+describe("submitInquiry", () => {
+  const INQUIRY = { full_name: "Ali", email: "ALI@example.com", category: "photography", subject: "Portrait shoot", message: "Do you cover Dubai?", consent: "1", source_page: "/services", idempotency_key: KEY };
+
+  it("stores the inquiry with a reference, pings the owner, queues the acknowledgment e-mail and redirects with the reference", async () => {
+    const url = await expectRedirect(submitInquiry(null, fd(INQUIRY)));
+    const ref = service.inserts("photo_inquiries")[0].reference as string;
+    expect(ref).toMatch(/^IQ-[A-HJ-NP-Z2-9]{6}$/);
+    expect(url).toBe(`/contact?sent=${encodeURIComponent(ref)}`);
+    expect(service.inserts("photo_people")[0]).toMatchObject({ owner_id: OWNER, source: "website", email: "ali@example.com" });
+    expect(service.inserts("photo_inquiries")[0]).toMatchObject({ owner_id: OWNER, person_id: "person-1", full_name: "Ali", email: "ali@example.com", category: "photography", subject: "Portrait shoot", message: "Do you cover Dubai?", booking_reference: null, source_page: "/services", idempotency_key: KEY });
+    const deliveries = service.upserts("photo_notification_deliveries");
+    expect(deliveries[0]).toMatchObject({ alert_key: `inquiry:${ref}:new`, kind: "INQUIRY_NEW" });
+    expect(deliveries[1]).toMatchObject({ alert_key: `email:inquiry:${ref}:received`, kind: "INQUIRY_RECEIVED", channel: "email" });
+    const payload = deliveries[1].payload as { to: string; subject: string; text: string };
+    expect(payload.to).toBe("ali@example.com");
+    expect(payload.subject).toContain(ref);
+    expect(payload.text).toContain("does not require any payment");
+    expect(payload.text).not.toMatch(/50%/);
+    expect(service.inserts("photo_leads")).toEqual([]);
     expect(service.inserts("photo_bookings")).toEqual([]);
     expect(service.rpcCalls).toEqual([]);
   });
 
+  it("keeps the customer's booking reference and never shows success when the row was not stored", async () => {
+    await expectRedirect(submitInquiry(null, fd({ ...INQUIRY, category: "existing_order", booking_reference: " bb-7k3pq2 " })));
+    expect(service.inserts("photo_inquiries")[0]).toMatchObject({ category: "existing_order", booking_reference: "BB-7K3PQ2" });
+    service = new FakeService();
+    service.failTable = "photo_inquiries";
+    expect(await submitInquiry(null, fd(INQUIRY))).toMatchObject({ error: expect.stringMatching(/not saved/i) });
+    expect(service.upserts("photo_notification_deliveries")).toEqual([]);
+  });
+
   it("returns field errors, a clear honeypot error, and respects the studio gate", async () => {
-    expect(await submitContact(null, fd({ full_name: "", email: "x", message: "", consent: "" }))).toMatchObject({ fieldErrors: expect.any(Object) });
-    expect(await submitContact(null, fd({ full_name: "Ali", email: "ali@example.com", message: "hi", consent: "1", [HONEYPOT_FIELD]: "bot" }))).toMatchObject({ error: expect.stringMatching(/spam check/i) });
+    expect(await submitInquiry(null, fd({ full_name: "", email: "x", category: "nope", subject: "", message: "", consent: "" }))).toMatchObject({ fieldErrors: { full_name: expect.any(String), email: expect.any(String), category: expect.any(String), subject: expect.any(String), message: expect.any(String), consent: expect.any(String) } });
+    expect(await submitInquiry(null, fd({ ...INQUIRY, [HONEYPOT_FIELD]: "bot" }))).toMatchObject({ error: expect.stringMatching(/spam check/i) });
     expect(service.writes()).toEqual([]);
     loadPublicStudio.mockResolvedValue(null);
-    expect(await submitContact(null, fd({ full_name: "Ali", email: "ali@example.com", message: "hi", consent: "1" }))).toMatchObject({ error: expect.stringMatching(/not open/i) });
+    expect(await submitInquiry(null, fd(INQUIRY))).toMatchObject({ error: expect.stringMatching(/not open/i) });
+  });
+
+  it("is rate limited per connection like the booking form", async () => {
+    for (let i = 0; i < RULES.publicFormPerIp.max; i += 1) rateLimit(`public-form:${forwardedFor}`, RULES.publicFormPerIp);
+    expect(await submitInquiry(null, fd(INQUIRY))).toMatchObject({ error: expect.stringMatching(/too many/i) });
+    expect(service.writes()).toEqual([]);
   });
 });

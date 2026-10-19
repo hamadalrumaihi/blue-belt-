@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { allCatalogCopy, AUDIENCE_COPY, cleanPublicDescription, MEDIA_SCOPE_COPY, mediaCategoryLabel, SERVICE_COPY, VIDEO_DELIVERABLE_COPY } from "@/lib/catalog/copy";
-import { applyFaqOverrides, buildFaqJsonLd, FAQ_CATEGORIES, FAQ_ITEMS, faqById, faqsForService, featuredFaqs, filterFaqs, normalizeForSearch, OPEN_POLICY_QUESTIONS } from "@/lib/catalog/faq";
-import { AUDIENCES, MEDIA_SCOPES, SERVICE_DEFINITIONS, SERVICES, VIDEO_DELIVERABLES } from "@/lib/catalog/index";
+import { allCatalogCopy, AUDIENCE_COPY, cleanPublicDescription, MEDIA_SCOPE_COPY, mediaCategoryLabel, PAYMENT_POLICY, PROJECT_CATEGORY_COPY, SERVICE_COPY, VIDEO_DELIVERABLE_COPY } from "@/lib/catalog/copy";
+import { applyFaqOverrides, buildFaqJsonLd, competitionFaqs, FAQ_CATEGORIES, FAQ_ITEMS, faqById, faqsForService, featuredFaqs, filterFaqs, normalizeForSearch, OPEN_POLICY_QUESTIONS } from "@/lib/catalog/faq";
+import { AUDIENCES, MEDIA_SCOPES, PROJECT_CATEGORIES, PROJECT_CATEGORY_DEFINITIONS, SERVICE_DEFINITIONS, SERVICES, VIDEO_DELIVERABLES } from "@/lib/catalog/index";
 import { BOOK_UI, UI } from "@/lib/i18n/ui";
 
 const ARABIC = /[؀-ۿ]/;
@@ -54,14 +54,32 @@ describe("catalog copy", () => {
     }
   });
 
-  it("names the video deliverables explicitly and defaults to no music", () => {
+  it("names the video deliverables explicitly, defaults to no music, and never offers raw footage", () => {
     expect(VIDEO_DELIVERABLE_COPY.full_match.description.en).toMatch(/start to finish|first grip/i);
     expect(VIDEO_DELIVERABLE_COPY.edited_highlights.description.en).toMatch(/without music/i);
     expect(VIDEO_DELIVERABLE_COPY.reels.description.en).toMatch(/without music/i);
-    expect(VIDEO_DELIVERABLE_COPY.raw_footage.description.en).toMatch(/unedited|as shot/i);
+    expect(VIDEO_DELIVERABLES).not.toContain("raw_footage");
+    expect(Object.keys(VIDEO_DELIVERABLE_COPY)).not.toContain("raw_footage");
     for (const key of SERVICES) {
+      expect(SERVICE_DEFINITIONS[key].videoDeliverables).not.toContain("raw_footage");
       for (const d of SERVICE_DEFINITIONS[key].videoDeliverables) expect(VIDEO_DELIVERABLE_COPY[d]).toBeDefined();
+      // Every service tells the customer, in both languages, that raw footage is not provided.
+      expect(SERVICE_COPY[key].videoDeliverables.en.join(" ")).toMatch(/raw footage[^.]*not provided/i);
+      expect(SERVICE_COPY[key].videoDeliverables.ar?.join(" ")).toMatch(/الخام/);
     }
+  });
+
+  it("describes the six project categories in both languages and routes the quoted ones to the inquiry form", () => {
+    expect(PROJECT_CATEGORIES).toEqual(["tournament_event", "athlete", "clubs_teams", "photography", "videography", "custom"]);
+    for (const c of PROJECT_CATEGORIES) {
+      expect(PROJECT_CATEGORY_COPY[c].items.en.length).toBeGreaterThan(3);
+      expect(PROJECT_CATEGORY_COPY[c].items.ar?.length).toBe(PROJECT_CATEGORY_COPY[c].items.en.length);
+    }
+    expect(PROJECT_CATEGORY_DEFINITIONS.photography.services).toEqual([]);
+    expect(PROJECT_CATEGORY_DEFINITIONS.videography.services).toEqual([]);
+    expect(PROJECT_CATEGORY_DEFINITIONS.custom).toMatchObject({ services: [], inquiry: "commercial_creative" });
+    expect(PROJECT_CATEGORY_DEFINITIONS.tournament_event.services[0]).toBe("tournament_athlete");
+    expect(PROJECT_CATEGORY_DEFINITIONS.clubs_teams.inquiry).toBe("club_team");
   });
 
   it("states only approved policies and never a price, a phone number, a promise or a vendor name", () => {
@@ -74,9 +92,12 @@ describe("catalog copy", () => {
     expect(text).not.toMatch(/pic-?time|fatoorah|docusign|whatsapp business/i);
     expect(text).not.toMatch(/\+?974[\s-]?\d{4}[\s-]?\d{4}/);
     expect(text).not.toMatch(/within 24 hours|same day delivery/i);
-    // The approved policies are present, in both languages.
-    expect(SERVICE_COPY.tournament_athlete.paymentSteps.en.join(" ")).toMatch(/50% deposit/);
-    expect(SERVICE_COPY.tournament_athlete.paymentSteps.ar?.join(" ")).toMatch(/50%/);
+    // Payment stays flexible: no fixed deposit share anywhere in the offer copy, and the approved sentence is what every service says.
+    expect(text).not.toMatch(/50\s?%/);
+    expect(text).not.toMatch(/raw footage can be booked|the unedited recordings, for your own editor/i);
+    expect(PAYMENT_POLICY.en).toBe("Submitting an inquiry or booking request does not require payment. Once the scope and pricing are confirmed, a deposit or full advance payment may be required to secure your booking, as specified in your quotation or agreement.");
+    expect(SERVICE_COPY.tournament_athlete.paymentSteps.en.join(" ")).toMatch(/deposit or full advance payment may be required/);
+    expect(SERVICE_COPY.tournament_athlete.paymentSteps.ar?.join(" ")).toMatch(/عربون أو دفعة مقدمة كاملة/);
     expect(SERVICE_COPY.tournament_athlete.limitations.en.join(" ")).toMatch(/cannot promise every match/i);
     expect(SERVICE_COPY.tournament_athlete.bookingSteps.en.join(" ")).toMatch(/not a confirmed booking/i);
   });
@@ -108,24 +129,44 @@ describe("FAQ", () => {
       expect(f.question.en).not.toMatch(ARABIC);
       expect(f.answer.en).not.toMatch(ARABIC);
     }
-    expect(FAQ_ITEMS.length).toBeGreaterThanOrEqual(25);
+    // A short list on purpose: the competition essentials plus payment and public galleries. Everything else goes through Contact & Inquiries.
+    expect(FAQ_ITEMS.length).toBeLessThanOrEqual(14);
   });
 
-  it("covers the brief's question list", () => {
-    for (const id of ["photo-vs-video", "full-match-vs-highlights", "gi-nogi-divisions", "wins-losses-elimination", "one-match-no-match", "athlete-identification", "simultaneous-mats", "booking-child", "team-roster", "coach-academy-content", "organizer-access", "venue-restrictions", "private-sessions", "training-location", "sponsor-club-usage", "delivery-timing", "revisions", "raw-files", "watermarks-downloads", "find-buy-photos", "missing-photos", "payment-status", "payment-check", "client-login", "cancellation", "no-show", "privacy-publication"]) {
-      expect(faqById(id), id).not.toBeNull();
-    }
+  it("keeps the ten competition conditions, in the brief's order, plus payment and public galleries, and drops the removed topics", () => {
+    expect(competitionFaqs().map((f) => f.id)).toEqual(["wins-losses", "one-match-no-match", "athlete-identification", "every-match", "club-team-coverage", "separate-bookings", "raw-footage", "venue-access", "no-show", "postponed-cancelled"]);
+    for (const id of ["payment", "public-gallery"]) expect(faqById(id), id).not.toBeNull();
+    for (const removed of ["training-location", "revisions", "watermarks-downloads", "missing-photos", "client-login", "contact-method", "private-sessions", "sponsor-club-usage", "organizer-access"]) expect(faqById(removed), removed).toBeNull();
     expect(featuredFaqs(4)).toHaveLength(4);
   });
 
-  it("answers unsettled policies conservatively and lists them for the owner", () => {
-    expect(faqById("revisions")?.answer.en).toMatch(/written quote/i);
-    expect(faqById("cancellation")?.answer.en).toMatch(/written quote/i);
-    expect(faqById("private-sessions")?.answer.en).toMatch(/staffing is confirmed/i);
-    expect(faqById("delivery-timing")?.answer.en).toMatch(/as agreed/i);
+  it("preserves the customer protections and the meaning of each condition", () => {
+    const en = (id: string) => faqById(id)!.answer.en;
+    expect(en("wins-losses")).toMatch(/regardless of the result/i);
+    expect(en("wins-losses")).toMatch(/does not promise a particular number of matches/i);
+    expect(en("one-match-no-match")).toMatch(/single match still counts as a booking/i);
+    expect(en("one-match-no-match")).toMatch(/cannot promise that warm-up or podium footage will always exist/i);
+    expect(en("athlete-identification")).toMatch(/registered name, academy and division/i);
+    expect(en("every-match")).toMatch(/cannot promise every match/i);
+    expect(en("every-match")).toMatch(/does not automatically mean/i);
+    expect(en("club-team-coverage")).toMatch(/roster/i);
+    expect(en("club-team-coverage")).toMatch(/crew size and image counts per athlete are not promised/i);
+    expect(en("separate-bookings")).toMatch(/One individual athlete is one booking/);
+    expect(en("separate-bookings")).toMatch(/not automatically applied to a team/i);
+    expect(en("raw-footage")).toMatch(/^No\./);
+    expect(en("raw-footage")).toMatch(/RAW photo files and unedited source material are not included or provided/);
+    expect(en("venue-access")).toMatch(/cannot be promised without the necessary permission/i);
+    expect(en("no-show")).toMatch(/written quotation and booking agreement/i);
+    expect(en("postponed-cancelled")).toMatch(/cannot promise automatic rescheduling/i);
+    expect(en("payment")).toContain(PAYMENT_POLICY.en);
+    expect(en("public-gallery")).toMatch(/depends on whether a gallery was created and published/i);
+    expect(faqById("raw-footage")!.answer.ar).toMatch(/RAW/);
+  });
+
+  it("lists the unsettled policies for the owner", () => {
     const ids = OPEN_POLICY_QUESTIONS.map((q) => q.id);
     expect(new Set(ids).size).toBe(ids.length);
-    for (const id of ["turnaround", "revisions", "cancellation", "no-show", "response-time", "female-staffing", "usage-licence"]) expect(ids).toContain(id);
+    for (const id of ["deposit-structure", "turnaround", "cancellation", "no-show", "usage-licence", "custom-projects"]) expect(ids).toContain(id);
     for (const q of OPEN_POLICY_QUESTIONS) {
       expect(q.question.trim()).not.toBe("");
       expect(q.where.trim()).not.toBe("");
@@ -135,24 +176,25 @@ describe("FAQ", () => {
   it("searches both languages and filters by category", () => {
     expect(normalizeForSearch("  Édited  HIGHLIGHTS ")).toBe("edited highlights");
     expect(normalizeForSearch("أبرزُ اللقطاتِ")).toBe("ابرز اللقطات");
-    expect(filterFaqs(FAQ_ITEMS, "highlights").map((f) => f.id)).toContain("full-match-vs-highlights");
-    expect(filterFaqs(FAQ_ITEMS, "اللقطات").map((f) => f.id)).toContain("full-match-vs-highlights");
+    expect(filterFaqs(FAQ_ITEMS, "unedited").map((f) => f.id)).toContain("raw-footage");
+    expect(filterFaqs(FAQ_ITEMS, "الخام").map((f) => f.id)).toContain("raw-footage");
     expect(filterFaqs(FAQ_ITEMS, "", "payment").every((f) => f.category === "payment")).toBe(true);
-    expect(filterFaqs(FAQ_ITEMS, "", "payment").length).toBeGreaterThan(2);
+    expect(filterFaqs(FAQ_ITEMS, "", "payment").length).toBe(1);
     expect(filterFaqs(FAQ_ITEMS, "zzzz-nothing")).toEqual([]);
     expect(filterFaqs(FAQ_ITEMS, "")).toHaveLength(FAQ_ITEMS.length);
   });
 
   it("merges the owner's published overrides: same id replaces in place, new ids are appended, Arabic falls back to English", () => {
     const merged = applyFaqOverrides(FAQ_ITEMS, [
-      { id: "revisions", question_en: "Revisions?", answer_en: "Two rounds are included.", question_ar: null, answer_ar: null, category: "delivery", published: true, updated_at: null },
+      { id: "no-show", question_en: "No-show?", answer_en: "Half the fee is retained.", question_ar: null, answer_ar: null, category: "delivery", published: true, updated_at: null },
       { id: "parking", question_en: "Where do we park?", answer_en: "At the venue.", question_ar: "أين نوقف السيارة؟", answer_ar: "في الصالة.", category: "tournaments", published: true, updated_at: null },
     ]);
     expect(merged).toHaveLength(FAQ_ITEMS.length + 1);
-    const index = FAQ_ITEMS.findIndex((f) => f.id === "revisions");
-    expect(merged[index]).toMatchObject({ id: "revisions", category: "delivery", question: { en: "Revisions?" }, answer: { en: "Two rounds are included." } });
+    const index = FAQ_ITEMS.findIndex((f) => f.id === "no-show");
+    expect(merged[index]).toMatchObject({ id: "no-show", category: "booking", competition: true, question: { en: "No-show?" }, answer: { en: "Half the fee is retained." } });
     expect(merged[index].answer.ar).toBeUndefined();
-    expect(merged.at(-1)).toMatchObject({ id: "parking", category: "coverage", question: { ar: "أين نوقف السيارة؟" } });
+    expect(merged.at(-1)).toMatchObject({ id: "parking", category: "coverage", competition: true, question: { ar: "أين نوقف السيارة؟" } });
+    expect(competitionFaqs(merged).map((f) => f.id)).toContain("parking");
     expect(applyFaqOverrides(FAQ_ITEMS, [])).toEqual([...FAQ_ITEMS]);
   });
 

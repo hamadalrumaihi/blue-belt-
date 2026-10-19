@@ -67,8 +67,8 @@ export default async function ClientBookingPage({ params }: PageProps<"/client/b
               <p className="mt-1 text-2xl font-black text-ink">{formatMoney(booking.amount_qr, booking.currency)}</p>
               <p className="text-sm font-semibold text-ink">{summary.headline}</p>
               <ul className="mt-3 divide-y divide-line text-sm">
-                <StageRow title="Deposit (50%)" line={summary.deposit} />
-                <StageRow title="Remaining balance (50%)" line={summary.balance} />
+                <StageRow title="Deposit" line={summary.deposit} />
+                <StageRow title="Remaining balance" line={summary.balance} />
               </ul>
               {summary.pay ? (
                 <a href={summary.pay.payUrl} className="btn-primary mt-4 min-h-12 w-full sm:w-auto">Pay online {summary.pay.amount}</a>
@@ -79,7 +79,7 @@ export default async function ClientBookingPage({ params }: PageProps<"/client/b
               ) : null}
             </>
           ) : (
-            <p className="mt-1 text-sm text-muted">{booking.booking_status === "cancelled" ? "Cancelled. Nothing to pay." : "We will confirm the price shortly. You secure the booking with a 50% deposit paid online once the agreement is signed; the remaining 50% is due after delivery."}</p>
+            <p className="mt-1 text-sm text-muted">{booking.booking_status === "cancelled" ? "Cancelled. Nothing to pay." : "We will confirm the price shortly. You secure the booking with the payment stated in your quotation, paid online once the agreement is signed; any remaining balance follows the accepted quote."}</p>
           )}
           {payments.length > 0 && (
             <ul className="mt-4 divide-y divide-line border-t border-line text-sm">

@@ -4,8 +4,9 @@
  * produce the same wording. Nothing here sends anything.
  *
  * Customer copy rules: no vendor names, no em dashes, short direct sentences.
- * The payment story is "secure online payment": a 50% deposit online once
- * the agreement is signed, the remaining 50% after delivery.
+ * The payment story is "secure online payment": the deposit or advance
+ * payment stated in the quotation, online, once the agreement is signed;
+ * any remaining balance follows the accepted quote.
  */
 import { BOOKING_STATUS_CLIENT_LABEL, BOOKING_TYPE_LABEL, effectivePayment, formatMoney, formatQr, stageWords } from "@/lib/bookings/state";
 import type { ClientNotificationKind } from "@/lib/notifications/email/kinds";
@@ -41,7 +42,7 @@ export type BookingEmailBooking = Pick<
 >;
 
 /** House wording for the payment story in every booking mail that mentions money. */
-export const SECURE_PAYMENT_STORY = "Once we confirm availability and price, you sign the agreement and secure the booking with a 50% deposit paid online. The remaining 50% is due after delivery.";
+export const SECURE_PAYMENT_STORY = "Once we confirm availability and price, you sign the agreement and secure the booking with the deposit or advance payment stated in your quotation, paid online. Any remaining balance follows the accepted quote.";
 
 export type BookingEmailOptions = {
   businessName: string;
@@ -103,7 +104,7 @@ export function bookingEmailContent(kind: BookingEmailKind, b: BookingEmailBooki
         subject: `Your booking is confirmed${ref}`,
         paragraphs: [
           "Your booking is confirmed. The details are below; reply to this e-mail if anything needs to change.",
-          !priced ? "There is nothing to pay for this booking." : balanceLeft ? `Your deposit is paid. The remaining balance of ${formatMoney(b.balance_qr, b.currency)} is due after delivery. We will send you a payment link then.` : payment.state === "paid" ? "Your booking is fully paid. Thank you." : "Your deposit has been received.",
+          !priced ? "There is nothing to pay for this booking." : balanceLeft ? `Your deposit is paid. The remaining balance of ${formatMoney(b.balance_qr, b.currency)} follows your quotation; we will send you a payment link when it is due.` : payment.state === "paid" ? "Your booking is fully paid. Thank you." : "Your deposit has been received.",
           "See you there.",
         ],
         cta: portal,
@@ -136,7 +137,7 @@ export function bookingEmailContent(kind: BookingEmailKind, b: BookingEmailBooki
       const p = o.payment;
       const what = p?.stage ? ` for the ${stageWords(b, p.stage)}` : "";
       const line = p ? `We received ${formatMoney(p.amountQr, b.currency)}${what}${p.methodLabel ? ` by ${p.methodLabel.toLowerCase()}` : ""}.` : "We received your payment.";
-      const balance = p && p.dueQr > 0 ? `Remaining balance: ${formatMoney(p.dueQr, b.currency)}, due after delivery.` : "Your booking is fully paid. Thank you.";
+      const balance = p && p.dueQr > 0 ? `Remaining balance: ${formatMoney(p.dueQr, b.currency)}, due as stated in your quotation.` : "Your booking is fully paid. Thank you.";
       return { ...base, subject: `Your payment was received${ref}`, paragraphs: [line, balance], cta: portal };
     }
     case "BOOKING_CHANGED": {

@@ -1,8 +1,9 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { CameraIcon, CheckIcon, ChevronRightIcon, ImageIcon, SendIcon, UsersIcon, VideoIcon } from "@/components/icons";
-import { cleanPublicDescription, MEDIA_SCOPE_COPY, SERVICE_COPY } from "@/lib/catalog/copy";
-import type { ServiceDefinition, ServiceKey } from "@/lib/catalog/index";
+import { cleanPublicDescription, MEDIA_SCOPE_COPY, PROJECT_CATEGORY_COPY, SERVICE_COPY } from "@/lib/catalog/copy";
+import { PROJECT_CATEGORY_DEFINITIONS, SERVICE_DEFINITIONS, type ProjectCategoryKey, type ServiceDefinition, type ServiceKey } from "@/lib/catalog/index";
+import { inquiryHref } from "@/lib/inquiries/labels";
 import { formatQr } from "@/lib/bookings/state";
 import { localized, type Locale } from "@/lib/i18n/locale";
 import { tr, UI } from "@/lib/i18n/ui";
@@ -67,8 +68,8 @@ export function CheckList({ items, icon = "check", className }: { items: readonl
   );
 }
 
-/** One call-to-action band at the end of a page: a title, a sentence and one button. */
-export function CtaBand({ eyebrow, title, body, href, label, event, eventData }: { eyebrow?: string; title: string; body?: string; href: string; label: string; event: string; eventData?: Record<string, string> }) {
+/** One call-to-action band at the end of a page: a title, a sentence, one primary button and an optional secondary one. */
+export function CtaBand({ eyebrow, title, body, href, label, event, eventData, secondary }: { eyebrow?: string; title: string; body?: string; href: string; label: string; event: string; eventData?: Record<string, string>; secondary?: { href: string; label: string; event: string } | null }) {
   const data: Record<string, string> = {};
   for (const [k, v] of Object.entries(eventData ?? {})) data[`data-umami-event-${k}`] = v;
   return (
@@ -79,12 +80,53 @@ export function CtaBand({ eyebrow, title, body, href, label, event, eventData }:
           <h2 className="heading-2 mt-2">{title}</h2>
           {body && <p className="mt-2 max-w-xl text-sm text-white/75 sm:text-base">{body}</p>}
         </div>
-        <Link href={href} data-umami-event={event} {...data} className="btn-primary btn-lg shrink-0 shadow-hero">
-          {label}
-          <ChevronRightIcon size={18} className="rtl-flip" />
-        </Link>
+        <div className="flex shrink-0 flex-col gap-3 sm:flex-row">
+          <Link href={href} data-umami-event={event} {...data} className="btn-primary btn-lg shadow-hero">
+            {label}
+            <ChevronRightIcon size={18} className="rtl-flip" />
+          </Link>
+          {secondary && (
+            <Link href={secondary.href} data-umami-event={secondary.event} className="btn btn-light btn-lg">
+              {secondary.label}
+            </Link>
+          )}
+        </div>
       </div>
     </section>
+  );
+}
+
+/* ---------- project categories ---------- */
+
+/**
+ * One of the six ways to work with the studio. A bookable category links to
+ * its primary service page (and the request wizard from there); a quoted
+ * category links straight to the inquiry form with its type preselected.
+ */
+export function ProjectCategoryCard({ category, locale, bookingOpen, from }: { category: ProjectCategoryKey; locale: Locale; bookingOpen: boolean; from: string }) {
+  const t = tr(locale);
+  const def = PROJECT_CATEGORY_DEFINITIONS[category];
+  const copy = PROJECT_CATEGORY_COPY[category];
+  const primary = def.services[0] ? SERVICE_DEFINITIONS[def.services[0]] : null;
+  const bookable = Boolean(primary) && bookingOpen;
+  const href = primary ? `/services/${primary.slug}` : inquiryHref(def.inquiry, from);
+  const items = localized(copy.items, locale);
+  return (
+    <Link href={href} data-umami-event={primary ? "category-service" : "contact-click"} data-umami-event-category={category} className="tile card-hover group flex h-full flex-col justify-between gap-4" aria-label={localized(copy.title, locale)}>
+      <div>
+        <h3 className="text-base font-extrabold text-ink">{localized(copy.title, locale)}</h3>
+        <p className="mt-1 text-sm leading-relaxed text-muted">{localized(copy.short, locale)}</p>
+        <ul className="mt-3 flex flex-wrap gap-1.5" aria-label={localized(copy.title, locale)}>
+          {items.map((item) => (
+            <li key={item} className="badge">{item}</li>
+          ))}
+        </ul>
+      </div>
+      <span className="inline-flex items-center gap-1 text-sm font-bold text-primary">
+        {primary ? (bookable ? localized(copy.cta, locale) : t(UI.common.learnMore)) : localized(copy.cta, locale)}
+        <ChevronRightIcon size={16} className="rtl-flip transition-transform group-hover:translate-x-0.5 rtl:group-hover:-translate-x-0.5" />
+      </span>
+    </Link>
   );
 }
 

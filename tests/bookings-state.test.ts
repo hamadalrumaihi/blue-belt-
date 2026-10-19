@@ -233,7 +233,7 @@ describe("booking e-mails", () => {
 
   it("received / confirmed mails tell the secure online payment story; nothing customer-facing names a vendor or carries an em dash", () => {
     expect(bookingEmailContent("BOOKING_RECEIVED", b, o).paragraphs).toContain(SECURE_PAYMENT_STORY);
-    expect(bookingEmailContent("BOOKING_CONFIRMED", { ...b, deposit_state: "paid" }, o).paragraphs.join(" ")).toMatch(/deposit is paid.*500 QAR is due after delivery/);
+    expect(bookingEmailContent("BOOKING_CONFIRMED", { ...b, deposit_state: "paid" }, o).paragraphs.join(" ")).toMatch(/deposit is paid.*500 QAR follows your quotation/);
     expect(bookingEmailContent("BOOKING_CONFIRMED", { ...b, deposit_state: "paid", balance_state: "paid", status: "paid" }, o).paragraphs.join(" ")).toMatch(/fully paid/i);
     expect(bookingEmailContent("DELIVERY_COMPLETE", { ...b, balance_state: "due" }, o).paragraphs.join(" ")).toMatch(/remaining balance of 500 QAR is now due/);
     for (const kind of BOOKING_EMAIL_KINDS) {
@@ -250,7 +250,7 @@ describe("booking e-mails", () => {
     expect(cancelled.paragraphs[0]).toContain("Athlete withdrew");
     const received = bookingEmailContent("PAYMENT_RECEIVED", b, { ...o, payment: { amountQr: 500, methodLabel: "Cash", dueQr: 500, stage: "deposit" } });
     expect(received.subject).toBe("Your payment was received (BB-7K3PQ2)");
-    expect(received.paragraphs.join(" ")).toMatch(/500 QAR for the deposit \(50%\) by cash.*Remaining balance: 500 QAR, due after delivery/);
+    expect(received.paragraphs.join(" ")).toMatch(/500 QAR for the deposit \(50%\) by cash.*Remaining balance: 500 QAR, due as stated in your quotation/);
   });
 
   it("dedupe keys are stable per kind and extend with a suffix", () => {

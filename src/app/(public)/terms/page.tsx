@@ -8,7 +8,7 @@ import { businessIdentity } from "@/lib/studio/business";
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = pageMetadata({
   title: "Photography terms",
-  description: "The terms for booking Blue Belt Media: requests and confirmation, prices, the 50% deposit and the balance after delivery, cancellations, delivery, galleries and the use of photos and video.",
+  description: "The terms for booking Blue Belt Media: requests and confirmation, prices, deposits and balances as quoted, cancellations, delivery, galleries and the use of photos and video.",
   path: "/terms",
 });
 

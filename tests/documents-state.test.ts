@@ -94,11 +94,12 @@ describe("starter templates", () => {
     }
   });
 
-  it("agreements state the 50/50 deposit policy, the cancellation tiers, consumer law and generic vendors", () => {
+  it("agreements state the deposit-as-booked policy, the cancellation tiers, consumer law and generic vendors", () => {
     for (const t of DEFAULT_TEMPLATES.filter((x) => x.kind.endsWith("_agreement"))) {
-      expect(t.body).toMatch(/50% of the fee \(\{\{deposit\}\}\) is due before the booking is confirmed/);
+      expect(t.body).toMatch(/Deposit or advance payment: \{\{deposit\}\}, as stated on the booking, is due before the booking is confirmed/);
       expect(t.body).toMatch(/confirmed only when this agreement is signed and the deposit has been received/);
-      expect(t.body).toMatch(/remaining 50% \(\{\{balance\}\}\) is due after delivery/);
+      expect(t.body).toMatch(/any remaining balance \(\{\{balance\}\}\) is due after delivery/);
+      expect(t.body).not.toMatch(/50%/);
       expect(t.body).toMatch(/nothing is charged automatically/);
       expect(t.body).toMatch(/payment provider/);
       expect(t.body).toMatch(/gallery hosting provider/);

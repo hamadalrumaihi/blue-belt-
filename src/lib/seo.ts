@@ -17,12 +17,12 @@ import type { PhotoServiceRow, PhotoStudioRow } from "@/lib/supabase/database.ty
  * would be wrong. Canonicals are always the English path.
  */
 export const SITE_NAME = "Blue Belt Media";
-export const DEFAULT_TITLE = "Blue Belt Media: BJJ and martial arts photography and video in Qatar";
+export const DEFAULT_TITLE = "Blue Belt Media: combat sports photography, video and creative production in Qatar";
 export const DEFAULT_DESCRIPTION =
-  "Tournament, training and athlete photography and video for jiu-jitsu and martial arts in Doha, Qatar. Request coverage online. Photos in a private gallery.";
+  "Combat sports photography and video in Doha, Qatar: tournaments, athletes, clubs and teams, plus creative projects. Book coverage or get a quote.";
 
-export const DEFAULT_TITLE_AR = "بلو بلت ميديا: تصوير فوتوغرافي وفيديو للجوجيتسو والفنون القتالية في قطر";
-export const DEFAULT_DESCRIPTION_AR = "تصوير فوتوغرافي وفيديو للبطولات والتدريب والرياضيين في الجوجيتسو والفنون القتالية في الدوحة، قطر. اطلب التغطية إلكترونيًا. تُسلَّم الصور في معرض خاص.";
+export const DEFAULT_TITLE_AR = "بلو بلت ميديا: تصوير الرياضات القتالية والفيديو والإنتاج الإبداعي في قطر";
+export const DEFAULT_DESCRIPTION_AR = "تصوير الرياضات القتالية والفيديو في الدوحة، قطر: البطولات والرياضيون والأندية والفرق، إلى جانب التصوير والفيديو والمشاريع المخصصة. احجز التغطية أو اطلب عرض سعر.";
 
 /** Public service detail paths, one per catalog service. */
 export const SERVICE_PATHS: readonly string[] = SERVICES.map((k) => `/services/${SERVICE_DEFINITIONS[k].slug}`);
@@ -53,6 +53,7 @@ export const ROBOTS_DISALLOW = [
   "/website",
   "/production",
   "/leads",
+  "/inquiries",
   "/issues",
   "/history",
   "/import",
@@ -208,7 +209,7 @@ function serviceNode(base: string, def: ServiceDefinition, rows: readonly PhotoS
     url: `${origin}/services/${def.slug}`,
     name: localized(copy.title, locale),
     description: localized(copy.short, locale),
-    serviceType: "Photography and video",
+    serviceType: "Sports photography and video production",
     provider: { "@id": `${origin}/#business` },
     areaServed: AREA_SERVED,
   };

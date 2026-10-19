@@ -2,23 +2,26 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ExternalIcon, ImageIcon } from "@/components/icons";
 import { CtaBand } from "@/components/public/blocks";
+import { Testimonials } from "@/components/public/Testimonials";
 import { loadGalleryPending, loadWorkMedia } from "@/components/public/media-loaders";
 import { WorkGallery } from "@/components/public/WorkGallery";
 import { getLocale } from "@/lib/i18n/server";
 import { tr, UI } from "@/lib/i18n/ui";
+import { inquiryHref } from "@/lib/inquiries/labels";
 import { pageMetadata } from "@/lib/seo";
 import { loadPublicStudio, pictimeGalleryUrl } from "@/lib/studio/queries";
+import { readTestimonials } from "@/lib/studio/site-content";
 
 export const dynamic = "force-dynamic";
 
 export async function generateMetadata(): Promise<Metadata> {
   const locale = await getLocale();
   return pageMetadata({
-    title: locale === "ar" ? "أعمالنا: تصوير الجوجيتسو والفنون القتالية في قطر" : "Work: jiu-jitsu and martial arts photography in Qatar",
+    title: locale === "ar" ? "أعمالنا: تصوير الرياضات القتالية والرياضيين والإنتاجات الإبداعية في قطر" : "Work: combat sports, athlete and creative photography in Qatar",
     description:
       locale === "ar"
-        ? "صور مختارة من البطولات وتدريبات الأكاديميات وبورتريهات الرياضيين وأيام الفرق في الدوحة، كما ينشرها الاستوديو."
-        : "Selected tournament action, academy training, athlete portraits and team days in Doha, as published by the studio.",
+        ? "صور مختارة من البطولات وبورتريهات الرياضيين وتدريبات الأكاديميات وأيام الفرق والإنتاجات الإبداعية في الدوحة، كما ينشرها الاستوديو."
+        : "Selected tournament action, athlete portraits, academy training, team days and creative productions in Doha, as published by the studio.",
     path: "/work",
     locale,
   });
@@ -29,6 +32,8 @@ export default async function WorkPage() {
   const t = tr(locale);
   const bookingOpen = Boolean(pub?.studio.public_booking);
   const galleryUrl = pictimeGalleryUrl(pub?.studio ?? null);
+  const testimonials = pub ? readTestimonials(pub.studio.settings).slice(0, 3) : [];
+  const discussHref = inquiryHref("commercial_creative", "/work");
 
   return (
     <main>
@@ -42,7 +47,8 @@ export default async function WorkPage() {
             <a href={galleryUrl} target="_blank" rel="noopener noreferrer" data-umami-event="gallery-click" className="inline-flex items-center gap-1 font-semibold text-white underline-offset-2 hover:underline">
               {t(UI.nav.findMyPhotos)} <ExternalIcon size={14} />
               <span className="sr-only">{t(UI.nav.opensGallery)}</span>
-            </a>
+            </a>{" "}
+            <span className="text-white/60">{t(UI.work.publicGalleryNote)}</span>
           </p>
         </div>
         {pending && <p className="border-t border-white/10 bg-navy-800 px-gutter py-2 text-center text-xs font-semibold text-white/80">{t(UI.home.previewNotice)}</p>}
@@ -67,7 +73,9 @@ export default async function WorkPage() {
         )}
       </section>
 
-      <CtaBand title={t(UI.work.ctaTitle)} body={t(UI.work.ctaBody)} href={bookingOpen ? "/book" : "/contact"} label={bookingOpen ? t(UI.nav.requestCoverage) : t(UI.nav.contact)} event={bookingOpen ? "book-start" : "contact-click"} />
+      <Testimonials reviews={testimonials} locale={locale} ctaHref={inquiryHref(null, "/work")} />
+
+      <CtaBand title={t(UI.work.ctaTitle)} body={t(UI.work.ctaBody)} href={bookingOpen ? "/book" : inquiryHref("tournament_event", "/work")} label={bookingOpen ? t(UI.nav.requestCoverage) : t(UI.nav.getQuote)} event={bookingOpen ? "book-start" : "contact-click"} secondary={{ href: discussHref, label: t(UI.nav.discussProject), event: "contact-click" }} />
     </main>
   );
 }

@@ -13,7 +13,6 @@ import {
   isPublicRef,
   legacyServiceKind,
   orderedServices,
-  parseContactForm,
   parsePublicBookingForm,
   publicBookingFieldNames,
   publicBookingFields,
@@ -73,7 +72,9 @@ describe("catalog-driven steps", () => {
     const media = what.fields.find((f) => f.name === "media_scope")!;
     expect(media.options!.map((o) => o.value)).toEqual([...SERVICE_DEFINITIONS.athlete_portrait.mediaScopes, MEDIA_NOT_SURE]);
     const video = what.fields.find((f) => f.name === "video_deliverables")!;
-    expect(video.options!.map((o) => o.value)).toEqual([videoFieldName("reels"), videoFieldName("raw_footage"), videoFieldName("not_sure")]);
+    expect(video.options!.map((o) => o.value)).toEqual([videoFieldName("reels"), videoFieldName("edited_highlights"), videoFieldName("not_sure")]);
+    // Raw footage was retired from the offer: no service ever asks for it any more.
+    for (const s of SERVICES) expect(publicBookingFields(s)[0].fields.find((f) => f.name === "video_deliverables")!.options!.map((o) => o.value)).not.toContain(videoFieldName("raw_footage"));
     expect(fieldVisible(video, { media_scope: "photo" })).toBe(false);
     expect(fieldVisible(video, { media_scope: "video" })).toBe(true);
     expect(fieldVisible(video, { media_scope: "photo_video" })).toBe(true);
@@ -400,19 +401,6 @@ describe("resolveWizardEntry", () => {
     expect(orderedServices("parents").slice(0, 2)).toEqual(["tournament_athlete", "athlete_portrait"]);
     expect(orderedServices(null)).toEqual([...SERVICES]);
     expect(new Set(orderedServices("clubs")).size).toBe(SERVICES.length);
-  });
-});
-
-describe("parseContactForm", () => {
-  it("accepts a plain message and lower-cases the e-mail", () => {
-    const r = parseContactForm(fd({ full_name: "Ali", email: "ALI@example.com", message: "Do you cover Dubai?", consent: "1" }));
-    expect(r.fieldErrors).toEqual({});
-    expect(r.values).toEqual({ full_name: "Ali", email: "ali@example.com", phone: null, message: "Do you cover Dubai?" });
-  });
-  it("rejects honeypot, missing consent, bad email, bad phone, long message", () => {
-    expect(parseContactForm(fd({ full_name: "Ali", email: "a@b.co", message: "x", consent: "1", [HONEYPOT_FIELD]: "spam" })).fieldErrors[HONEYPOT_FIELD]).toBe(HONEYPOT_ERROR);
-    const r = parseContactForm(fd({ full_name: "", email: "nope", phone: "1", message: "m".repeat(3001) }));
-    expect(r.fieldErrors).toMatchObject({ full_name: "Required.", email: expect.stringMatching(/e-mail/i), phone: expect.stringMatching(/digits/), message: expect.stringMatching(/under 3000/), consent: expect.any(String) });
   });
 });
 

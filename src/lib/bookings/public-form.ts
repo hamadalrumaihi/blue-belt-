@@ -175,11 +175,12 @@ export const MEDIA_SCOPE_LABEL: Record<MediaScope, string> = { photo: "Photos", 
 export const MEDIA_NOT_SURE = "not_sure";
 export type MediaChoice = MediaScope | typeof MEDIA_NOT_SURE;
 
+/** Labels for every deliverable a stored booking may carry; only the public ones are ever offered (raw footage was retired on 19 Oct 2026). */
 export const VIDEO_DELIVERABLE_LABEL: Record<VideoDeliverable, { label: string; hint: string }> = {
-  full_match: { label: "Full matches", hint: "Each match filmed start to finish." },
+  full_match: { label: "Full matches", hint: "Each match filmed start to finish, delivered as an edited file." },
   edited_highlights: { label: "Edited highlights", hint: "A cut of the best moments." },
   reels: { label: "Short clips for social media", hint: "Vertical clips ready to post." },
-  raw_footage: { label: "Raw footage", hint: "The unedited files." },
+  raw_footage: { label: "Raw footage (no longer offered)", hint: "Retired: edited deliverables only." },
 };
 /** Input name of a video deliverable checkbox. */
 export const videoFieldName = (d: VideoDeliverable | "not_sure"): string => `video_${d}`;
@@ -820,29 +821,6 @@ export function composeDivision(age: string | null, weight: string | null): stri
   return parts.length ? parts.join(" / ") : null;
 }
 
-export type ContactValues = { full_name: string; email: string; phone: string | null; message: string };
-export type ParsedContact = { fieldErrors: Record<string, string>; values: ContactValues | null };
-
-/** The short contact form: name, e-mail, optional phone, message, honeypot, consent. */
-export function parseContactForm(fd: FormData): ParsedContact {
-  if (str(fd, HONEYPOT_FIELD)) return { fieldErrors: { [HONEYPOT_FIELD]: HONEYPOT_ERROR }, values: null };
-  const fieldErrors: Record<string, string> = {};
-  const full_name = str(fd, "full_name");
-  const email = str(fd, "email");
-  const phone = str(fd, "phone");
-  const message = str(fd, "message");
-  if (!full_name) fieldErrors.full_name = MESSAGES.required;
-  else if (tooLong(full_name, MAX.name)) fieldErrors.full_name = `Keep this under ${MAX.name} characters.`;
-  if (!email) fieldErrors.email = MESSAGES.required;
-  else if (tooLong(email, MAX.email) || !isValidEmail(email)) fieldErrors.email = MESSAGES.email;
-  if (phone && !isPlausiblePhone(phone)) fieldErrors.phone = MESSAGES.phone;
-  if (!message) fieldErrors.message = "Tell us a little about what you need.";
-  else if (tooLong(message, MAX.request)) fieldErrors.message = `Keep this under ${MAX.request} characters.`;
-  if (fd.get("consent") !== "1") fieldErrors.consent = "Please agree to be contacted.";
-  if (Object.keys(fieldErrors).length) return { fieldErrors, values: null };
-  return { fieldErrors, values: { full_name: full_name!, email: email!.toLowerCase(), phone, message: message! } };
-}
-
 export const PUBLIC_REF_RE = /^BB-[A-HJ-NP-Z2-9]{6}$/;
 
 export function isPublicRef(v: unknown): v is string {
@@ -856,7 +834,7 @@ export function mediaChoiceLabel(m: MediaChoice): string {
 
 /** "Edited highlights + Raw footage", or "Not sure, advise me". */
 export function videoDeliverablesLabel(d: PublicBookingDetails): string | null {
-  const parts = (d.video_deliverables ?? []).map((v) => VIDEO_DELIVERABLE_LABEL[v].label);
+  const parts = (d.video_deliverables ?? []).map((v) => VIDEO_DELIVERABLE_LABEL[v]?.label ?? v);
   if (d.video_deliverables_unknown) parts.push("Not sure, advise me");
   return parts.length ? parts.join(" + ") : null;
 }

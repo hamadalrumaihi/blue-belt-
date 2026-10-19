@@ -12,7 +12,7 @@ describe("native website testimonials", () => {
 
   it("renders Arabic headings when asked", () => {
     const html = renderToStaticMarkup(createElement(Testimonials, { reviews: [{ name: "Coach", quote: "Great", role: null }], locale: "ar" }));
-    expect(html).toContain("من على البساط");
+    expect(html).toContain("بكلماتهم");
     expect(html).not.toContain("Share your experience");
   });
 

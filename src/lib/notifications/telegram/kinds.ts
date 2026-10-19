@@ -29,6 +29,7 @@ export const OWNER_KINDS = [
   "BOOKING_PAID",
   "BOOKING_CANCELLED",
   "LEAD_NEW",
+  "INQUIRY_NEW",
   "CONTRACT_SIGNED",
   "CONTRACT_DECLINED",
   "ORDER_PLACED",
@@ -53,7 +54,7 @@ export const CATEGORY_LABEL: Record<MessageCategory, string> = { match: "Match",
 
 export function categoryForKind(kind: string): MessageCategory {
   if (kind.startsWith("INCIDENT_") || kind.startsWith("RECOVERY_") || kind.startsWith("SYSTEM_") || kind === "EMAIL_FAILED" || kind === "INTEGRATION_FAILED") return "system";
-  if (kind.startsWith("BOOKING_") || kind.startsWith("CONTRACT_") || kind === "LEAD_NEW") return "bookings";
+  if (kind.startsWith("BOOKING_") || kind.startsWith("CONTRACT_") || kind === "LEAD_NEW" || kind === "INQUIRY_NEW") return "bookings";
   if (kind.startsWith("GALLERY_") || kind.startsWith("DELIVERY_")) return "delivery";
   if (kind.startsWith("ORDER_") || kind.startsWith("PAYMENT_") || kind.startsWith("INVOICE_")) return "orders";
   return "match";

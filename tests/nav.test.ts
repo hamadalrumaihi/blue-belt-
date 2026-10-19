@@ -40,7 +40,7 @@ describe("sidebar groups", () => {
     expect(groups.map((g) => g.group)).toEqual(NAV_GROUP_ORDER);
     const hrefs = Object.fromEntries(groups.map((g) => [g.group, g.items.map((i) => i.href)]));
     expect(hrefs.overview).toEqual(["/studio"]);
-    expect(hrefs.sales).toEqual(["/leads", "/people", "/clubs", "/pricing"]);
+    expect(hrefs.sales).toEqual(["/leads", "/inquiries", "/people", "/clubs", "/pricing"]);
     expect(hrefs.production).toEqual(["/bookings", "/production", "/bookings?filter=confirmed"]);
     expect(hrefs.tournament).toEqual(["/dashboard", "/watcher", "/events", "/clients", "/coverage", "/issues"]);
     expect(hrefs.finance).toEqual(["/documents", "/orders", "/payments", "/galleries"]);

@@ -18,7 +18,7 @@ export default function OpenGraphImage() {
           <div style={{ fontSize: 34, fontWeight: 700, letterSpacing: -0.5 }}>{SITE_NAME}</div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-          <div style={{ fontSize: 68, fontWeight: 800, lineHeight: 1.05, letterSpacing: -2, maxWidth: 980 }}>Jiu-jitsu and martial arts photography in Qatar</div>
+          <div style={{ fontSize: 68, fontWeight: 800, lineHeight: 1.05, letterSpacing: -2, maxWidth: 980 }}>Combat sports photography, video and creative production in Qatar</div>
           <div style={{ fontSize: 28, color: "rgba(255,255,255,0.75)", maxWidth: 900, lineHeight: 1.35 }}>{DEFAULT_DESCRIPTION}</div>
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 24, color: "rgba(255,255,255,0.6)" }}>

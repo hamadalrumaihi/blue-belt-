@@ -36,6 +36,7 @@ export function readPictimeGalleryUrl(settings: Json | null | undefined): string
  * /website/* or by hand). Everything is validated on read, so a stray value
  * never breaks the public site and no URL is rendered unchecked.
  */
+/** `name` may be empty: the website then shows an anonymous label ("Client"). */
 export type Testimonial = { quote: string; name: string; role: string | null };
 export type PortfolioLink = { title: string; url: string; cover: string | null };
 
@@ -76,8 +77,8 @@ export function readTestimonialRecords(settings: Json | null | undefined): Testi
   settings.testimonials.forEach((t, index) => {
     if (!isPlainObject(t)) return;
     const quote = str(t.quote, TESTIMONIAL_LIMITS.quote);
-    const name = str(t.name, TESTIMONIAL_LIMITS.name);
-    if (!quote || !name) return;
+    const name = str(t.name, TESTIMONIAL_LIMITS.name) ?? "";
+    if (!quote) return;
     const legacy = typeof t.permission_granted !== "boolean" || typeof t.published !== "boolean";
     const id = typeof t.id === "string" && ID_RE.test(t.id) ? t.id : `legacy-${index}`;
     out.push({
@@ -102,6 +103,20 @@ export function readTestimonials(settings: Json | null | undefined): Testimonial
     .map(({ quote, name, role }) => ({ quote, name, role }))
     .slice(0, TESTIMONIAL_LIMITS.publicMax);
 }
+
+/**
+ * Reviews the owner supplied on 19 October 2026 for the website. They are
+ * NOT published from here: each one is offered in the testimonials editor
+ * as a one-click draft, and goes live only once the owner confirms the
+ * customer's written permission and ticks Published, like any other review.
+ * Wording is kept exactly as supplied (Arabic stays Arabic); attribution is
+ * anonymous until the owner adds an approved name.
+ */
+export const SUPPLIED_REVIEWS: ReadonlyArray<{ key: string; quote: string }> = [
+  { key: "supplied-2026-10-19-1", quote: "ماشاءالله تبارك الله الصور مافيها ولا ملاحظه خيال والكوالتي ممتاز" },
+  { key: "supplied-2026-10-19-2", quote: "والله العظيم شغل جبار" },
+  { key: "supplied-2026-10-19-3", quote: "ممتاز الفيديو خيال ماشاءالله" },
+];
 
 /** The stored shape of one testimonial (what the editor writes back). */
 export function testimonialToJson(t: Omit<TestimonialRecord, "legacy">): Json {

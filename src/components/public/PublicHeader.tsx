@@ -6,6 +6,7 @@ import { Suspense, useState, useSyncExternalStore } from "react";
 import type { Locale } from "@/lib/i18n/locale";
 import { langSwitchHref, LOCALE_LABEL, otherLocale } from "@/lib/i18n/locale";
 import { tr, UI } from "@/lib/i18n/ui";
+import { inquiryHref } from "@/lib/inquiries/labels";
 import { cn } from "@/lib/utils";
 import { CloseIcon, ExternalIcon, MoreIcon } from "../icons";
 import { Logo } from "../Logo";
@@ -63,7 +64,7 @@ export function PublicHeader({ locale, accountLink, bookingOpen, galleryUrl }: P
     { href: "/how-it-works", label: t(UI.nav.howItWorks) },
     { href: "/contact", label: t(UI.nav.contact) },
   ];
-  const cta = bookingOpen ? { href: "/book", label: t(UI.nav.requestCoverage), event: "book-start" } : { href: "/contact", label: t(UI.nav.contact), event: "contact-click" };
+  const cta = bookingOpen ? { href: "/book", label: t(UI.nav.requestCoverage), event: "book-start" } : { href: inquiryHref("tournament_event", pathname), label: t(UI.nav.getQuote), event: "contact-click" };
   const galleryLink = (className: string) => (
     <a href={galleryUrl} target="_blank" rel="noopener noreferrer" data-umami-event="gallery-click" className={className} onClick={close}>
       {t(UI.nav.findMyPhotos)}

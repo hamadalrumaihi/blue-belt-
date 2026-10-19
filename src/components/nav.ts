@@ -10,6 +10,7 @@ import {
   HomeIcon,
   ImageIcon,
   InboxIcon,
+  MailIcon,
   MoreIcon,
   BellIcon,
   BookmarkIcon,
@@ -62,6 +63,7 @@ export const NAV_GROUP_ORDER: readonly NavGroup[] = ["overview", "sales", "produ
 export const SIDEBAR_ITEMS: NavItem[] = [
   { href: "/studio", label: "Overview", icon: HomeIcon, group: "overview", ownerOnly: true },
   { href: "/leads", label: "Leads", icon: InboxIcon, group: "sales", ownerOnly: true },
+  { href: "/inquiries", label: "Inquiries", icon: MailIcon, group: "sales", ownerOnly: true },
   { href: "/people", label: "Clients", icon: UsersIcon, group: "sales", ownerOnly: true },
   { href: "/clubs", label: "Teams & clubs", icon: BuildingIcon, group: "sales", ownerOnly: true },
   { href: "/pricing", label: "Quotes & pricing", icon: TagIcon, group: "sales", ownerOnly: true },
@@ -105,6 +107,7 @@ export const BOTTOM_ITEMS: NavItem[] = [
 export const MORE_ITEMS: NavItem[] = [
   { href: "/studio", label: "Overview", icon: HomeIcon, group: "overview", ownerOnly: true },
   { href: "/studio/metrics", label: "Metrics", icon: HistoryIcon, group: "overview", ownerOnly: true },
+  { href: "/inquiries", label: "Inquiries", icon: MailIcon, group: "sales", ownerOnly: true },
   { href: "/people", label: "Clients", icon: UsersIcon, group: "sales", ownerOnly: true },
   { href: "/clubs", label: "Teams & clubs", icon: BuildingIcon, group: "sales", ownerOnly: true },
   { href: "/pricing", label: "Quotes & pricing", icon: TagIcon, group: "sales", ownerOnly: true },
@@ -159,6 +162,7 @@ export const MORE_ROUTES = [
   "/history",
   "/settings",
   "/orders",
+  "/inquiries",
   "/people",
   "/clubs",
   "/pricing",

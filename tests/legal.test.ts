@@ -19,9 +19,9 @@ function sectionText(doc: LegalDocument, id: string): string {
 
 describe("legal versions", () => {
   it("are dated and match the labels", () => {
-    expect(TERMS_VERSION).toBe("2026-10-15.1");
+    expect(TERMS_VERSION).toBe("2026-10-19.1");
     expect(PRIVACY_VERSION).toBe("2026-10-08.2");
-    expect(TERMS_UPDATED_LABEL).toBe("15 October 2026");
+    expect(TERMS_UPDATED_LABEL).toBe("19 October 2026");
     expect(PRIVACY_UPDATED_LABEL).toBe("8 October 2026");
     expect(buildTerms().version).toBe(TERMS_VERSION);
     expect(buildPrivacy().version).toBe(PRIVACY_VERSION);
@@ -33,7 +33,7 @@ describe("terms", () => {
   const text = allText(doc);
 
   it("say when they were last updated and carry the business identity, never an address", () => {
-    expect(doc.intro[0]).toBe("Last updated 15 October 2026.");
+    expect(doc.intro[0]).toBe("Last updated 19 October 2026.");
     expect(text).toContain("Blue belt media photography, CR 235175, Doha, Qatar");
     expect(text).toContain("bluebeltmediaqatar@gmail.com");
     expect(text).not.toMatch(/\d{8}/);
@@ -59,12 +59,23 @@ describe("terms", () => {
     expect(text).toContain("electronic signature provider");
   });
 
-  it("state the deposit flow: 50% before confirmation, 50% after delivery, confirmation needs signature and deposit", () => {
-    expect(sectionText(doc, "deposit")).toMatch(/50% of the agreed price is due before the booking is confirmed/);
-    expect(sectionText(doc, "balance")).toMatch(/remaining 50% becomes due after we deliver/);
+  it("state the flexible payment flow: a deposit or advance payment as quoted before confirmation, the balance per the quotation, confirmation needs signature and payment", () => {
+    expect(sectionText(doc, "deposit")).toMatch(/deposit or full advance payment may be required to secure your booking, as specified in your quotation or agreement/);
+    expect(sectionText(doc, "deposit")).toMatch(/does not require payment/);
+    expect(sectionText(doc, "balance")).toMatch(/determined by the accepted quotation or agreement/);
     expect(sectionText(doc, "balance")).toMatch(/nothing is charged automatically/i);
     expect(sectionText(doc, "booking-confirmation")).toMatch(/signed the agreement/);
-    expect(sectionText(doc, "booking-confirmation")).toMatch(/50% deposit has been paid/);
+    expect(sectionText(doc, "booking-confirmation")).toMatch(/deposit or advance payment stated in your quotation has been paid/);
+    expect(text).not.toMatch(/50%/);
+  });
+
+  it("state that raw footage is never delivered, that one athlete is one booking, and that the studio is not tournament-only", () => {
+    expect(sectionText(doc, "raw-files")).toMatch(/edited photography and video only/i);
+    expect(sectionText(doc, "raw-files")).toMatch(/raw camera footage and unedited source material are our working files and are not delivered, sold or included/i);
+    expect(sectionText(doc, "athlete-coverage")).toMatch(/One individual athlete is one booking/);
+    expect(sectionText(doc, "athlete-coverage")).toMatch(/does not promise a particular number of matches/);
+    expect(sectionText(doc, "team-club-bookings")).toMatch(/does not promise every match or every athlete/);
+    expect(sectionText(doc, "services")).toMatch(/photography, videography, commercial and creative projects/);
   });
 
   it("carry the exact cancellation tiers", () => {

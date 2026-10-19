@@ -647,7 +647,7 @@ function Review({ service, steps, values, events, services, onEdit }: { service:
       ))}
       <ul className="space-y-1 text-sm text-muted">
         <li className="flex items-start gap-2"><CheckIcon size={16} className="mt-0.5 shrink-0 text-success" /> You get a reference straight away; we reply by e-mail as soon as we can. Quoted work gets a price first.</li>
-        <li className="flex items-start gap-2"><CheckIcon size={16} className="mt-0.5 shrink-0 text-success" /> Your date is confirmed once you sign the agreement and pay the 50% deposit online. The remaining 50% is due after delivery.</li>
+        <li className="flex items-start gap-2"><CheckIcon size={16} className="mt-0.5 shrink-0 text-success" /> Your date is confirmed once you sign the agreement and make the payment stated in your quotation (a deposit or a full advance payment) by secure online payment. Any remaining balance follows the accepted quote.</li>
       </ul>
     </div>
   );
