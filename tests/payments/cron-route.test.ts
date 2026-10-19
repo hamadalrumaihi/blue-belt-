@@ -52,7 +52,8 @@ describe("POST /api/cron/payments (payment job)", () => {
   });
 
   it("replays unmatched verified events and does NOT call the provider unless reconciliation is switched on; records a heartbeat", async () => {
-    db.seed("photo_payment_events", [{ provider: "MYFATOORAH", provider_event_id: "WH-626519", event_type: "PAYMENT_STATUS_CHANGED", payload: paymentEvent(), signature_valid: true, processing_result: "booking_not_found", received_at: "2026-10-02T10:00:00.000Z" }]);
+    // Received inside the replay window (14 days), relative to the real clock the route reads; a fixed date aged out of it.
+    db.seed("photo_payment_events", [{ provider: "MYFATOORAH", provider_event_id: "WH-626519", event_type: "PAYMENT_STATUS_CHANGED", payload: paymentEvent(), signature_valid: true, processing_result: "booking_not_found", received_at: new Date(Date.now() - 2 * 60 * 60_000).toISOString() }]);
     // Inside the reconcile window (older than 10 minutes, younger than the max pending age), relative to the real clock the route reads.
     db.seed("photo_bookings", [booking({ created_at: new Date(Date.now() - 60 * 60_000).toISOString() })]);
     const res = await (await route()).POST(post());
