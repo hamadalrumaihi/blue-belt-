@@ -11,7 +11,8 @@ import type { DocumentKind } from "@/lib/supabase/database.types";
  * data: no I/O, safe to import from tests and the templates editor.
  *
  * Policy the wording must reflect (round 3, confirmed by the owner):
- *   - 50% deposit before the booking is confirmed; 50% balance after delivery.
+ *   - A deposit or advance payment, as stated on the booking, before the
+ *     booking is confirmed; any remaining balance after delivery.
  *   - Cancellation tiers: 7+ days: deposit may be moved once to a new date,
  *     subject to availability; 3 to 6 days: deposit retained; under 72 hours
  *     or no-show: full agreed amount due; event cancelled by the organiser:
@@ -48,8 +49,8 @@ const CONSUMER_LAW = "Nothing in this agreement limits any right the Client has 
 const DELIVERY_TEXT = "Edited images are delivered through a private online gallery hosted by the Studio's gallery hosting provider. The Client receives a link and may download the images included in the service. Unedited (RAW) files are not delivered. Delivery normally takes place within 14 days of the session unless the booking says otherwise; busy tournament periods may take longer and the Studio will keep the Client informed.";
 
 const FEES_TEXT = `The total fee is {{amount}}.
-a) Deposit: 50% of the fee ({{deposit}}) is due before the booking is confirmed. The booking is confirmed only when this agreement is signed and the deposit has been received. Until then the date is not reserved.
-b) Balance: the remaining 50% ({{balance}}) is due after delivery of the gallery. The Studio sends a payment request after delivery; nothing is charged automatically.
+a) Deposit or advance payment: {{deposit}}, as stated on the booking, is due before the booking is confirmed. The booking is confirmed only when this agreement is signed and the deposit has been received. Until then the date is not reserved.
+b) Balance: any remaining balance ({{balance}}) is due after delivery of the gallery, unless the booking states another milestone. The Studio sends a payment request when it is due; nothing is charged automatically.
 c) Payment is made by secure online payment through the Studio's payment provider, or by another method agreed in writing. The Studio confirms each payment once its payment provider reports it.`;
 
 const CANCELLATION_TEXT = `${PLACEHOLDER_NOTICE}

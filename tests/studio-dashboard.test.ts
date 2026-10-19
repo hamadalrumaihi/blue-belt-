@@ -143,11 +143,16 @@ describe("overview summarisers", () => {
         { id: "l3", status: "contacted", source: "instagram", created_at: "2026-10-02T00:00:00.000Z", booking_type: null, message: "hi", person: null },
       ],
       [row({ id: "b1", booking_status: "inquiry", created_at: "2026-10-03T00:00:00.000Z" }), row({ id: "b2", booking_status: "confirmed", created_at: "2026-10-01T00:00:00.000Z" }), row({ id: "b3", booking_status: "quoted", created_at: "2026-10-04T00:00:00.000Z", public_ref: "BB-1" })],
+      [
+        { id: "i1", status: "new", created_at: "2026-10-02T12:00:00.000Z", full_name: "Sara", subject: "Portraits", category: "photography", reference: "IQ-AAAAAA" },
+        { id: "i2", status: "quoted", created_at: "2026-10-01T00:00:00.000Z", full_name: "Done", subject: "x", category: "general", reference: "IQ-BBBBBB" },
+      ],
     );
-    expect(out.map((r) => `${r.kind}:${r.id}`)).toEqual(["lead:l3", "booking:b1", "booking:b3", "lead:l1"]);
+    expect(out.map((r) => `${r.kind}:${r.id}`)).toEqual(["lead:l3", "inquiry:i1", "booking:b1", "booking:b3", "lead:l1"]);
+    expect(out[1]).toMatchObject({ title: "Sara", subtitle: "Portraits · photography · IQ-AAAAAA", href: "/inquiries?status=new", status: "new" });
     expect(out[0]).toMatchObject({ title: "Unknown", subtitle: "Message · via instagram", href: "/leads?status=contacted" });
-    expect(out[3]).toMatchObject({ title: "Coach", subtitle: "Team / club · via website" });
-    expect(out[2].subtitle).toBe("Standard · BB-1");
+    expect(out[4]).toMatchObject({ title: "Coach", subtitle: "Team / club · via website" });
+    expect(out[3].subtitle).toBe("Standard · BB-1");
   });
 
   it("prioritise returns the next action per live booking, soonest due first, capped", () => {

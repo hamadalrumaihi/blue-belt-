@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { BrandHeader } from "@/components/BrandHeader";
 import { PageBody } from "@/components/AppShell";
 import { EmptyState } from "@/components/EmptyState";
-import { AlertIcon, BellIcon, BookmarkIcon, CalendarIcon, CreditCardIcon, FileTextIcon, ImageIcon, InboxIcon, PlusIcon, SearchIcon } from "@/components/icons";
+import { AlertIcon, BellIcon, BookmarkIcon, CalendarIcon, CreditCardIcon, FileTextIcon, ImageIcon, InboxIcon, MailIcon, PlusIcon, SearchIcon } from "@/components/icons";
 import { BOOKING_TYPE_LABEL, formatQr } from "@/lib/bookings/state";
 import { resolveViewerMode } from "@/lib/collaborator";
 import { loadStudioOverview } from "@/lib/studio/dashboard";
@@ -31,6 +31,7 @@ export default async function StudioPage({ searchParams }: PageProps<"/studio">)
   const cards: Card[] = [
     { href: "/bookings?filter=confirmed", label: "Shoots in 7 days", count: t.upcomingShoots, icon: CalendarIcon },
     { href: "/leads", label: "Requests to answer", count: d.requests.length, icon: InboxIcon, tone: d.requests.length ? "warning" : undefined },
+    { href: "/inquiries", label: "Open inquiries", count: d.inquiries.open, icon: MailIcon, tone: d.inquiries.new ? "warning" : undefined },
     { href: "/bookings", label: "Bookings need action", count: t.needsAction, icon: BookmarkIcon, tone: t.needsAction ? "warning" : undefined },
     { href: "/payments", label: "Balances outstanding", count: d.moneySplit.outstandingCount, icon: CreditCardIcon, tone: d.moneySplit.outstandingCount ? "warning" : undefined },
     { href: "/documents?status=sent", label: "Agreements to sign", count: t.contractsAwaiting, icon: FileTextIcon },
@@ -53,7 +54,7 @@ export default async function StudioPage({ searchParams }: PageProps<"/studio">)
 
         <section aria-labelledby="today-h">
           <h2 id="today-h" className="eyebrow mb-2">Today</h2>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
             {cards.map((c) => (
               <Link key={c.label} href={c.href} className={cn("card flex min-h-20 items-center gap-3 px-3 py-3 hover:bg-page", c.tone === "warning" && c.count > 0 && "border-warning/40", c.tone === "danger" && c.count > 0 && "border-danger/40")}>
                 <span className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-xl", c.tone === "danger" && c.count > 0 ? "bg-danger-soft text-danger" : c.tone === "warning" && c.count > 0 ? "bg-warning-soft text-warning" : "bg-lightblue text-primary")}><c.icon size={20} /></span>
@@ -89,20 +90,20 @@ export default async function StudioPage({ searchParams }: PageProps<"/studio">)
             <section className="card p-4" aria-labelledby="req-h">
               <div className="flex items-center justify-between gap-2">
                 <h2 id="req-h" className="eyebrow">Requests needing an answer</h2>
-                <Link href="/leads" className="text-xs font-semibold text-primary hover:underline">Open leads</Link>
+                <span className="flex gap-3"><Link href="/leads" className="text-xs font-semibold text-primary hover:underline">Open leads</Link><Link href="/inquiries" className="text-xs font-semibold text-primary hover:underline">Inquiries</Link></span>
               </div>
-              <p className="mt-1 text-xs text-muted">New and contacted leads, plus bookings still at inquiry or quote. A request never reserves a slot.</p>
+              <p className="mt-1 text-xs text-muted">New and contacted leads, new and in-progress inquiries, plus bookings still at inquiry or quote. A request never reserves a slot.</p>
               {d.requests.length === 0 ? <p className="mt-2 text-sm text-muted">Everything has been answered.</p> : (
                 <ul className="mt-2 divide-y divide-line">
                   {d.requests.slice(0, 10).map((r) => (
                     <li key={`${r.kind}:${r.id}`}>
                       <Link href={r.href} className="flex items-center gap-3 py-2.5 hover:bg-page">
-                        <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg", r.kind === "lead" ? "bg-lightblue text-primary" : "bg-warning-soft text-warning")}>{r.kind === "lead" ? <InboxIcon size={18} /> : <BookmarkIcon size={18} />}</span>
+                        <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg", r.kind === "lead" ? "bg-lightblue text-primary" : r.kind === "inquiry" ? "bg-lightblue text-primary" : "bg-warning-soft text-warning")}>{r.kind === "lead" ? <InboxIcon size={18} /> : r.kind === "inquiry" ? <MailIcon size={18} /> : <BookmarkIcon size={18} />}</span>
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-bold text-ink">{r.title}</p>
                           <p className="truncate text-xs text-muted">{r.subtitle} · {formatStamp(r.at, undefined, now)}</p>
                         </div>
-                        <span className="rounded-full bg-page px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted">{r.kind === "lead" ? `lead · ${r.status}` : r.status.replace("_", " ")}</span>
+                        <span className="rounded-full bg-page px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted">{r.kind === "lead" ? `lead · ${r.status}` : r.kind === "inquiry" ? `inquiry · ${r.status}` : r.status.replace("_", " ")}</span>
                       </Link>
                     </li>
                   ))}
@@ -246,7 +247,7 @@ async function SearchResults({ raw }: { raw: string }) {
             <button type="submit" className="btn-primary min-h-9 px-3 text-xs">Search</button>
           </div>
         </form>
-        <p className="text-xs text-muted">Searches clients, teams & clubs, bookings (reference, customer, athlete, e-mail), leads, events and tracked athletes you have access to. <Link href="/studio" className="font-semibold text-primary hover:underline">Back to overview</Link></p>
+        <p className="text-xs text-muted">Searches clients, teams & clubs, bookings (reference, customer, athlete, e-mail), leads, inquiries, events and tracked athletes you have access to. <Link href="/studio" className="font-semibold text-primary hover:underline">Back to overview</Link></p>
         {!term ? (
           <EmptyState icon={<SearchIcon />} title="Type at least two characters" description="Names, references like BB-7K3PQ2, e-mails, phone numbers, venues or academies." />
         ) : total === 0 ? (

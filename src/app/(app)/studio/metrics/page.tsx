@@ -5,6 +5,7 @@ import { requireOwner } from "@/lib/roles";
 import { BrandHeader } from "@/components/BrandHeader";
 import { PageBody } from "@/components/AppShell";
 import { formatQr } from "@/lib/bookings/state";
+import { INQUIRY_CATEGORY_LABEL, INQUIRY_STATUS_LABEL } from "@/lib/inquiries/labels";
 import { loadStudioMetrics } from "@/lib/studio/dashboard";
 import { cn } from "@/lib/utils";
 
@@ -35,6 +36,26 @@ export default async function MetricsPage() {
       <BrandHeader title="Metrics" subtitle="How fast you answer, where leads come from, how quotes convert, how long delivery takes" backHref="/studio" />
       <PageBody className="max-w-5xl space-y-4">
         <p className="text-xs text-muted">Every number says what it counts. Based on {m.leadCount} lead{m.leadCount === 1 ? "" : "s"} and {m.bookingCount} booking{m.bookingCount === 1 ? "" : "s"} you have access to. <Link href="/studio" className="font-semibold text-primary hover:underline">Back to overview</Link></p>
+
+        <section aria-labelledby="inq-h" id="inquiries" className="scroll-mt-20">
+          <h2 id="inq-h" className="eyebrow mb-2">Inquiries (Contact &amp; Inquiries page)</h2>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            <Stat label="Total inquiries" value={String(m.inquiries.total)} definition="Every message submitted through the website's Contact & Inquiries form, all time." />
+            <Stat label="New inquiries" value={String(m.inquiries.new)} definition={`Not touched yet. ${m.inquiries.open} open in total (new, in progress, waiting for customer, quoted).`} tone={m.inquiries.new ? "warning" : undefined} />
+            <Stat label="Quoted" value={String(m.inquiries.quoted)} definition="Inquiries you marked Quoted and that have not moved on yet." />
+            <Stat label="Converted to booking" value={String(m.inquiries.converted)} definition={`Inquiries turned into a booking from the inquiries board${m.inquiries.total ? ` (${Math.round((m.inquiries.converted / m.inquiries.total) * 1000) / 10}% of all inquiries)` : ""}.`} tone={m.inquiries.converted ? "success" : undefined} />
+          </div>
+          {m.inquiries.byCategory.length > 0 && (
+            <div className="card mt-2 p-4">
+              <p className="text-[11px] text-muted">Inquiries per service / type, all time. Status split: {m.inquiries.byStatus.map((s) => `${INQUIRY_STATUS_LABEL[s.status]} ${s.count}`).join(" · ")}.</p>
+              <ul className="mt-2 divide-y divide-line">
+                {m.inquiries.byCategory.map((c) => (
+                  <li key={c.category} className="flex items-center justify-between py-2 text-sm"><span className="text-ink">{INQUIRY_CATEGORY_LABEL[c.category].en}</span><span className="font-bold tabular-nums text-ink">{c.count}</span></li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </section>
 
         <section aria-labelledby="resp-h">
           <h2 id="resp-h" className="eyebrow mb-2">Responsiveness</h2>

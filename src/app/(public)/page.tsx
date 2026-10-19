@@ -1,17 +1,17 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { CheckIcon, ChevronRightIcon, ExternalIcon } from "@/components/icons";
-import { CtaBand, JsonLd, SectionHeading, ServiceCard, Steps } from "@/components/public/blocks";
+import { CtaBand, JsonLd, ProjectCategoryCard, SectionHeading, ServiceCard, Steps } from "@/components/public/blocks";
 import { loadFeaturedMedia, loadGalleryPending, loadHeroMedia, loadServiceMedia } from "@/components/public/media-loaders";
 import { isLandscape } from "@/components/public/media";
 import { MediaImage } from "@/components/public/MediaImage";
 import { Testimonials } from "@/components/public/Testimonials";
-import { AUDIENCE_COPY } from "@/lib/catalog/copy";
 import { applyFaqOverrides, FAQ_ITEMS, featuredFaqs } from "@/lib/catalog/faq";
-import { AUDIENCES, SERVICE_DEFINITIONS, SERVICES } from "@/lib/catalog/index";
+import { PROJECT_CATEGORIES, SERVICE_DEFINITIONS, SERVICES } from "@/lib/catalog/index";
 import { localized } from "@/lib/i18n/locale";
 import { getLocale } from "@/lib/i18n/server";
 import { tr, UI } from "@/lib/i18n/ui";
+import { inquiryHref } from "@/lib/inquiries/labels";
 import { buildHomeJsonLd, DEFAULT_DESCRIPTION, DEFAULT_DESCRIPTION_AR, DEFAULT_TITLE, DEFAULT_TITLE_AR, pageMetadata, serializeJsonLd } from "@/lib/seo";
 import { DEFAULT_STUDIO, loadPublicStudio, pictimeGalleryUrl, siteUrl } from "@/lib/studio/queries";
 import { readPublishedFaqOverrides, readTestimonials } from "@/lib/studio/site-content";
@@ -24,6 +24,13 @@ export async function generateMetadata(): Promise<Metadata> {
   return pageMetadata({ title: locale === "ar" ? DEFAULT_TITLE_AR : DEFAULT_TITLE, description: locale === "ar" ? DEFAULT_DESCRIPTION_AR : DEFAULT_DESCRIPTION, path: "/", locale });
 }
 
+/**
+ * Home: what Blue Belt Media does (six project categories), the bookable
+ * services, selected work, genuine reviews, the four-step process, the
+ * competition essentials and one closing call to action. Two intents run
+ * through the page: book coverage (the request wizard) and discuss a
+ * project (the inquiry form with the category preselected).
+ */
 export default async function HomePage() {
   const [pub, locale, hero, featured, pending] = await Promise.all([loadPublicStudio(), getLocale(), loadHeroMedia(), loadFeaturedMedia(8), loadGalleryPending()]);
   const serviceMedia = await Promise.all(SERVICES.map((k) => loadServiceMedia(k, 1)));
@@ -34,9 +41,10 @@ export default async function HomePage() {
   const city = studio?.city ?? DEFAULT_STUDIO.city;
   const testimonials = studio ? readTestimonials(studio.settings) : [];
   const galleryUrl = pictimeGalleryUrl(studio);
-  const primaryHref = bookingOpen ? "/book" : "/contact";
-  const primaryLabel = bookingOpen ? t(UI.nav.requestCoverage) : t(UI.nav.contact);
+  const primaryHref = bookingOpen ? "/book" : inquiryHref("tournament_event", "/");
+  const primaryLabel = bookingOpen ? t(UI.nav.requestCoverage) : t(UI.nav.getQuote);
   const primaryEvent = bookingOpen ? "book-start" : "contact-click";
+  const discussHref = inquiryHref("commercial_creative", "/");
   const lead = locale === "en" && studio?.about?.trim() ? studio.about.trim() : t(UI.home.lead);
   const faqs = featuredFaqs(4, applyFaqOverrides(FAQ_ITEMS, readPublishedFaqOverrides(studio?.settings)));
   const jsonLd = serializeJsonLd(buildHomeJsonLd({ base: siteUrl(), studio, services: rows, locale }));
@@ -63,46 +71,40 @@ export default async function HomePage() {
                 {primaryLabel}
                 <ChevronRightIcon size={18} className="rtl-flip" />
               </Link>
-              <a href={galleryUrl} target="_blank" rel="noopener noreferrer" data-umami-event="gallery-click" className="btn btn-light btn-lg">
-                {t(UI.nav.findMyPhotos)}
-                <ExternalIcon size={16} />
-                <span className="sr-only">{t(UI.nav.opensGallery)}</span>
-              </a>
+              <Link href={discussHref} data-umami-event="contact-click" data-umami-event-category="commercial_creative" className="btn btn-light btn-lg">
+                {t(UI.nav.discussProject)}
+              </Link>
             </div>
             <ul className="mt-6 flex flex-wrap gap-x-5 gap-y-2 text-sm text-white/75">
               {UI.home.trust.map((item) => (
                 <li key={item.en} className="inline-flex items-center gap-2"><CheckIcon size={16} className="shrink-0 text-bright" /> {t(item)}</li>
               ))}
             </ul>
+            <p className="mt-5 text-sm text-white/70">
+              {t(UI.work.findYourPhotos)}{" "}
+              <a href={galleryUrl} target="_blank" rel="noopener noreferrer" data-umami-event="gallery-click" className="inline-flex items-center gap-1 font-semibold text-white underline-offset-2 hover:underline">
+                {t(UI.nav.findMyPhotos)} <ExternalIcon size={14} />
+                <span className="sr-only">{t(UI.nav.opensGallery)}</span>
+              </a>
+            </p>
           </div>
         </div>
         {pending && <p className="relative border-t border-white/10 bg-navy-800 px-gutter py-2 text-center text-xs font-semibold text-white/80">{t(UI.home.previewNotice)}</p>}
       </section>
 
-      {/* Audience entry points: four compact tiles, one per way in. */}
-      <section className="container-x section-sm" aria-labelledby="audiences-heading">
-        <SectionHeading id="audiences-heading" eyebrow={t(UI.home.audiencesEyebrow)} title={t(UI.home.audiencesTitle)} />
-        <ul className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {AUDIENCES.map((a) => {
-            const copy = AUDIENCE_COPY[a];
-            return (
-              <li key={a}>
-                <Link href={`/services#for-${a}`} className="tile card-hover group flex h-full flex-col justify-between gap-4">
-                  <div>
-                    <h3 className="text-base font-extrabold text-ink">{localized(copy.title, locale)}</h3>
-                    <p className="mt-1 text-sm leading-relaxed text-muted">{localized(copy.short, locale)}</p>
-                  </div>
-                  <span className="inline-flex items-center gap-1 text-sm font-bold text-primary">
-                    {localized(copy.cta, locale)} <ChevronRightIcon size={16} className="rtl-flip transition-transform group-hover:translate-x-0.5 rtl:group-hover:-translate-x-0.5" />
-                  </span>
-                </Link>
-              </li>
-            );
-          })}
+      {/* What we do: six project categories, three bookable, three quoted from an inquiry. */}
+      <section className="container-x section-sm" aria-labelledby="categories-heading">
+        <SectionHeading id="categories-heading" eyebrow={t(UI.home.categoriesEyebrow)} title={t(UI.home.categoriesTitle)} lead={t(UI.home.categoriesLead)} />
+        <ul className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {PROJECT_CATEGORIES.map((key) => (
+            <li key={key}>
+              <ProjectCategoryCard category={key} locale={locale} bookingOpen={bookingOpen} from="/" />
+            </li>
+          ))}
         </ul>
       </section>
 
-      {/* Services from the catalog. Price lines come from publicPrice() only. */}
+      {/* Bookable services from the catalog. Price lines come from publicPrice() only. */}
       <section className="border-y border-line bg-page" aria-labelledby="services-heading">
         <div className="container-x section-sm">
           <SectionHeading
@@ -122,6 +124,18 @@ export default async function HomePage() {
                 <ServiceCard def={SERVICE_DEFINITIONS[k]} locale={locale} rows={rows.filter((r) => r.booking_type === SERVICE_DEFINITIONS[k].bookingType)} media={serviceMedia[i][0] ?? null} />
               </li>
             ))}
+            <li>
+              <Link href={discussHref} data-umami-event="contact-click" data-umami-event-category="commercial_creative" className="card card-hover group flex h-full flex-col justify-between p-5">
+                <div>
+                  <p className="eyebrow !text-primary">{t(UI.services.customEyebrow)}</p>
+                  <h3 className="mt-2 text-lg font-extrabold text-ink">{localized(UI.services.customTitle, locale)}</h3>
+                  <p className="mt-1.5 text-sm leading-relaxed text-muted">{t(UI.services.customBody)}</p>
+                </div>
+                <span className="mt-4 inline-flex items-center gap-1 text-sm font-bold text-primary">
+                  {t(UI.nav.discussProject)} <ChevronRightIcon size={16} className="rtl-flip transition-transform group-hover:translate-x-0.5 rtl:group-hover:-translate-x-0.5" />
+                </span>
+              </Link>
+            </li>
           </ul>
         </div>
       </section>
@@ -137,7 +151,7 @@ export default async function HomePage() {
               title={t(UI.home.workTitle)}
               action={
                 <Link href="/work" className="btn btn-light">
-                  {t(UI.common.seeAllWork)} <ChevronRightIcon size={16} className="rtl-flip" />
+                  {t(UI.nav.exploreWork)} <ChevronRightIcon size={16} className="rtl-flip" />
                 </Link>
               }
             />
@@ -157,9 +171,9 @@ export default async function HomePage() {
       )}
 
       {/* Real client words only; the section is absent while there are none. */}
-      <Testimonials reviews={testimonials} locale={locale} />
+      <Testimonials reviews={testimonials} locale={locale} ctaHref={inquiryHref(null, "/")} />
 
-      {/* Process */}
+      {/* Process: four steps shared with How it works. */}
       <section className="container-x section-sm" aria-labelledby="how-heading">
         <SectionHeading
           id="how-heading"
@@ -172,18 +186,19 @@ export default async function HomePage() {
           }
         />
         <div className="mt-8">
-          <Steps steps={UI.process.map((s) => ({ title: t(s.title), body: t(s.body) }))} cols={5} />
+          <Steps steps={UI.process.map((s) => ({ title: t(s.title), body: t(s.body) }))} cols={4} />
         </div>
       </section>
 
-      {/* FAQ teaser */}
+      {/* Competition essentials: a short teaser; the full set sits on the booking journey. */}
       <section className="border-t border-line bg-page" aria-labelledby="faq-heading">
         <div className="container-x section-sm grid gap-8 lg:grid-cols-[1fr_2fr]">
           <div>
             <p className="eyebrow">{t(UI.home.faqEyebrow)}</p>
             <h2 id="faq-heading" className="heading-2 mt-2 text-navy">{t(UI.home.faqTitle)}</h2>
+            <p className="mt-3 text-base text-muted">{t(UI.home.faqLead)}</p>
             <p className="mt-3 text-base text-muted">
-              <Link href="/how-it-works#faq" className="font-semibold text-primary">{t(UI.common.allQuestions)}</Link>
+              <Link href="/services/tournament-athlete-coverage#before-you-book" className="font-semibold text-primary">{t(UI.common.allQuestions)}</Link>
             </p>
           </div>
           <div className="divide-y divide-line rounded-card border border-line bg-surface">
@@ -200,7 +215,7 @@ export default async function HomePage() {
         </div>
       </section>
 
-      <CtaBand eyebrow={t(UI.home.ctaEyebrow)} title={t(UI.home.ctaTitle)} body={t(UI.home.ctaBody)} href={primaryHref} label={primaryLabel} event={primaryEvent} />
+      <CtaBand eyebrow={t(UI.home.ctaEyebrow)} title={t(UI.home.ctaTitle)} body={t(UI.home.ctaBody)} href={primaryHref} label={primaryLabel} event={primaryEvent} secondary={{ href: discussHref, label: t(UI.nav.discussProject), event: "contact-click" }} />
     </main>
   );
 }

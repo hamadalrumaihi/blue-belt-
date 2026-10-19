@@ -6,20 +6,24 @@
  *
  * Rules kept here on purpose:
  *   - No prices in prose. Price lines come from publicPrice() at render time.
- *   - No promises beyond the approved policies: a 50% deposit by online
- *     payment after written confirmation secures the booking, the remaining
- *     50% is due after the gallery is delivered, a request is not a confirmed
- *     reservation, scope / timing / rights / deliverables are confirmed in the
- *     written quote or agreement, no every-match promise, coverage depends on
- *     the schedule and venue access, delivery in a private online gallery,
- *     event gallery purchases are separate and paid in the gallery.
+ *   - No promises beyond the approved policies: submitting a request costs
+ *     nothing; once scope and price are confirmed, a deposit or full advance
+ *     payment may be required to secure the booking, as the quotation or
+ *     agreement says; any remaining balance and milestones follow the
+ *     accepted quote; a request is not a confirmed reservation; scope /
+ *     timing / rights / deliverables are confirmed in the written quote or
+ *     agreement; no every-match promise; coverage depends on the schedule
+ *     and venue access; delivery through the method agreed for the booking
+ *     (private online galleries where applicable); event gallery purchases
+ *     are separate and paid in the gallery.
  *   - Video deliverables are named explicitly (full-match recording, edited
- *     highlights, reels, raw footage); edits come without music by default.
+ *     highlights, reels) and are always edited files: raw footage, RAW photo
+ *     files and unedited source material are never offered.
  *   - Pure: no I/O, safe in client components and tests.
  */
 import type { Bilingual, Locale } from "@/lib/i18n/locale";
 import { localized } from "@/lib/i18n/locale";
-import { AUDIENCES, MEDIA_SCOPES, SERVICES, VIDEO_DELIVERABLES, type AudienceKey, type MediaScope, type ServiceKey, type VideoDeliverable } from "./index";
+import { AUDIENCES, MEDIA_SCOPES, PROJECT_CATEGORIES, SERVICES, VIDEO_DELIVERABLES, type AudienceKey, type MediaScope, type ProjectCategoryKey, type PublicVideoDeliverable, type ServiceKey } from "./index";
 
 export type AudienceCopy = {
   title: Bilingual;
@@ -55,17 +59,28 @@ export type ServiceCopy = {
 export type MediaScopeCopy = { title: Bilingual; short: Bilingual };
 export type VideoDeliverableCopy = { title: Bilingual; short: Bilingual; description: Bilingual };
 
+/** The approved payment wording, shared by every service page and the FAQ. Flexible by design: deposit or full advance payment, as the quotation says. */
+export const PAYMENT_POLICY: Bilingual = {
+  en: "Submitting an inquiry or booking request does not require payment. Once the scope and pricing are confirmed, a deposit or full advance payment may be required to secure your booking, as specified in your quotation or agreement.",
+  ar: "إرسال استفسار أو طلب حجز لا يتطلب أي دفع. بعد تثبيت النطاق والسعر، قد يُطلب عربون أو دفعة مقدمة كاملة لتأكيد حجزك، وفق ما يحدده عرض السعر أو الاتفاقية.",
+};
+
+export const PAYMENT_BALANCE_NOTE: Bilingual = {
+  en: "Any remaining balance and payment milestones are determined by the accepted quote or agreement.",
+  ar: "تُحدَّد أي مبالغ متبقية ومراحل الدفع وفق عرض السعر أو الاتفاقية المقبولة.",
+};
+
 const PAYMENT_STEPS: Bilingual<string[]> = {
   en: [
     "Nothing is paid when you send the request.",
-    "After the scope and the price are confirmed in writing, you pay a 50% deposit by online payment. That secures the booking.",
-    "The remaining 50% is due after your private gallery is delivered.",
+    "After the scope and the price are confirmed in writing, a deposit or full advance payment may be required to secure the booking, as stated in your quotation or agreement.",
+    "Any remaining balance and payment milestones follow the accepted quote. Payment is by secure online payment link unless your agreement says otherwise.",
     "Photos bought from a public event gallery are separate and are paid in the gallery.",
   ],
   ar: [
     "لا تدفع شيئًا عند إرسال الطلب.",
-    "بعد تثبيت النطاق والسعر كتابيًا، تدفع عربونًا بنسبة 50% عبر الدفع الإلكتروني، وبذلك يُؤكَّد الحجز.",
-    "تُستحق الـ50% المتبقية بعد تسليم معرضك الخاص.",
+    "بعد تثبيت النطاق والسعر كتابيًا، قد يُطلب عربون أو دفعة مقدمة كاملة لتأكيد الحجز، وفق ما ينص عليه عرض السعر أو الاتفاقية.",
+    "تُحدَّد أي مبالغ متبقية ومراحل الدفع وفق عرض السعر المقبول. يتم الدفع عبر رابط دفع إلكتروني آمن ما لم تنص اتفاقيتك على خلاف ذلك.",
     "شراء الصور من معرض فعالية عام أمر منفصل ويُدفع داخل المعرض.",
   ],
 };
@@ -74,13 +89,13 @@ const BOOKING_STEPS_EVENT: Bilingual<string[]> = {
   en: [
     "Send the request with the event, the date and who we should follow. You receive a reference straight away; the request is not a confirmed booking yet.",
     "We check the date and reply with a written quote: scope, timing, deliverables and how the work may be used.",
-    "You confirm, sign the agreement online and pay the 50% deposit. The booking is now confirmed.",
+    "You confirm, sign the agreement online and make the payment stated in your quotation. The booking is now confirmed.",
     "Before the day we re-check the athlete's details and the schedule with you.",
   ],
   ar: [
     "أرسل الطلب مع اسم الفعالية والتاريخ ومن علينا متابعته. تحصل على رقم مرجعي فورًا؛ والطلب ليس حجزًا مؤكدًا بعد.",
     "نتحقق من الموعد ونرد بعرض سعر مكتوب: النطاق والتوقيت والمخرجات وكيفية استخدام العمل.",
-    "تؤكد الطلب وتوقّع الاتفاقية إلكترونيًا وتدفع عربون 50%. عندها يصبح الحجز مؤكدًا.",
+    "تؤكد الطلب وتوقّع الاتفاقية إلكترونيًا وتسدد الدفعة المحددة في عرض السعر. عندها يصبح الحجز مؤكدًا.",
     "قبل اليوم نراجع معك بيانات الرياضي والجدول مرة أخرى.",
   ],
 };
@@ -89,15 +104,64 @@ const BOOKING_STEPS_SESSION: Bilingual<string[]> = {
   en: [
     "Send the request with the kind of session, the preferred dates and the location you have in mind. The request is not a confirmed booking yet.",
     "We reply with a written quote: length, location, what is shot, deliverables and how the work may be used.",
-    "You confirm, sign the agreement online and pay the 50% deposit. The date is now reserved.",
+    "You confirm, sign the agreement online and make the payment stated in your quotation. The date is now reserved.",
     "We agree the shot list and the timing with you before the session.",
   ],
   ar: [
     "أرسل الطلب مع نوع الجلسة والتواريخ المفضلة والموقع الذي تفكر فيه. الطلب ليس حجزًا مؤكدًا بعد.",
     "نرد بعرض سعر مكتوب: المدة والموقع وما نصوّره والمخرجات وكيفية استخدام العمل.",
-    "تؤكد الطلب وتوقّع الاتفاقية إلكترونيًا وتدفع عربون 50%. عندها يُحجز الموعد.",
+    "تؤكد الطلب وتوقّع الاتفاقية إلكترونيًا وتسدد الدفعة المحددة في عرض السعر. عندها يُحجز الموعد.",
     "نتفق معك على قائمة اللقطات والتوقيت قبل الجلسة.",
   ],
+};
+
+export type ProjectCategoryCopy = {
+  title: Bilingual;
+  short: Bilingual;
+  /** What this category covers, as short items. */
+  items: Bilingual<string[]>;
+  /** Label of the category's call to action. */
+  cta: Bilingual;
+};
+
+/** The six project categories on the home and services pages (structure: PROJECT_CATEGORY_DEFINITIONS). */
+export const PROJECT_CATEGORY_COPY: Record<ProjectCategoryKey, ProjectCategoryCopy> = {
+  tournament_event: {
+    title: { en: "Tournament and event coverage", ar: "تغطية البطولات والفعاليات" },
+    short: { en: "Competition days captured as they happen, from the first match to the podium.", ar: "أيام المنافسة كما تحدث، من أول نزال إلى منصة التتويج." },
+    items: { en: ["BJJ", "Judo", "MMA", "Boxing", "Martial arts competitions", "Other sporting events"], ar: ["الجوجيتسو", "الجودو", "فنون القتال المختلطة", "الملاكمة", "بطولات الفنون القتالية", "فعاليات رياضية أخرى"] },
+    cta: { en: "Book coverage", ar: "احجز التغطية" },
+  },
+  athlete: {
+    title: { en: "Athlete media", ar: "محتوى الرياضيين" },
+    short: { en: "Your competition, your training, your story, built for your profile and your sponsors.", ar: "بطولتك وتدريبك وقصتك، لملفك الشخصي ورعاتك." },
+    items: { en: ["Competition coverage", "Training sessions", "Fight camps", "Athlete portraits", "Promotional videos", "Athlete branding"], ar: ["تغطية المنافسات", "جلسات التدريب", "معسكرات القتال", "بورتريهات الرياضيين", "فيديوهات ترويجية", "بناء العلامة الشخصية للرياضي"] },
+    cta: { en: "Book athlete coverage", ar: "احجز تغطية رياضي" },
+  },
+  clubs_teams: {
+    title: { en: "Clubs and teams", ar: "الأندية والفرق" },
+    short: { en: "Your academy on the mats and at competitions, with content your channels can use all season.", ar: "أكاديميتك على البساط وفي البطولات، بمحتوى تستخدمه قنواتك طوال الموسم." },
+    items: { en: ["Team photography", "Training sessions", "Academy promotional media", "Social media content", "Team competition coverage"], ar: ["تصوير الفريق", "جلسات التدريب", "محتوى ترويجي للأكاديمية", "محتوى لوسائل التواصل", "تغطية الفريق في البطولات"] },
+    cta: { en: "Request a team quote", ar: "اطلب عرض سعر للفريق" },
+  },
+  photography: {
+    title: { en: "Photography", ar: "التصوير الفوتوغرافي" },
+    short: { en: "Portraits, sport, lifestyle and commercial photography, planned around what you need the images for.", ar: "بورتريهات وتصوير رياضي ولايف ستايل وتجاري، مخطط حول الغرض من الصور." },
+    items: { en: ["Portraits", "Sports photography", "Lifestyle photography", "Commercial photography", "Custom photoshoots"], ar: ["بورتريهات", "تصوير رياضي", "تصوير لايف ستايل", "تصوير تجاري", "جلسات تصوير مخصصة"] },
+    cta: { en: "Get a quote", ar: "اطلب عرض سعر" },
+  },
+  videography: {
+    title: { en: "Videography", ar: "تصوير الفيديو" },
+    short: { en: "Promotional films, reels and cinematic pieces, cut for the platform they will live on.", ar: "أفلام ترويجية وريلز وأعمال سينمائية، مُعدَّة للمنصة التي ستُعرض عليها." },
+    items: { en: ["Promotional videos", "Reels and short-form content", "Cinematic projects", "Commercial content", "Event highlights"], ar: ["فيديوهات ترويجية", "ريلز ومحتوى قصير", "مشاريع سينمائية", "محتوى تجاري", "أبرز لقطات الفعاليات"] },
+    cta: { en: "Get a quote", ar: "اطلب عرض سعر" },
+  },
+  custom: {
+    title: { en: "Custom projects", ar: "مشاريع مخصصة" },
+    short: { en: "Brand collaborations, campaigns and bespoke productions that do not fit a package. Tell us the idea; we quote it.", ar: "تعاونات مع العلامات التجارية وحملات وإنتاجات مخصصة لا تناسبها الباقات. أخبرنا بالفكرة ونسعّرها." },
+    items: { en: ["Brand collaborations", "Creative productions", "Campaigns", "Bespoke media requests"], ar: ["تعاونات مع العلامات التجارية", "إنتاجات إبداعية", "حملات", "طلبات إعلامية مخصصة"] },
+    cta: { en: "Discuss a project", ar: "ناقش مشروعك" },
+  },
 };
 
 export const AUDIENCE_COPY: Record<AudienceKey, AudienceCopy> = {
@@ -133,7 +197,7 @@ export const MEDIA_SCOPE_COPY: Record<MediaScope, MediaScopeCopy> = {
   photo_video: { title: { en: "Photo and video", ar: "صور وفيديو" }, short: { en: "Both, from the same day.", ar: "الاثنان معًا من اليوم نفسه." } },
 };
 
-export const VIDEO_DELIVERABLE_COPY: Record<VideoDeliverable, VideoDeliverableCopy> = {
+export const VIDEO_DELIVERABLE_COPY: Record<PublicVideoDeliverable, VideoDeliverableCopy> = {
   full_match: {
     title: { en: "Full-match recording", ar: "تسجيل النزال كاملًا" },
     short: { en: "Each agreed match, start to finish, one file per match.", ar: "كل نزال متفق عليه من البداية إلى النهاية، ملف لكل نزال." },
@@ -149,11 +213,6 @@ export const VIDEO_DELIVERABLE_COPY: Record<VideoDeliverable, VideoDeliverableCo
     short: { en: "Vertical short clips for social media.", ar: "مقاطع قصيرة عمودية لوسائل التواصل." },
     description: { en: "Short vertical clips cut for social media, without music unless the agreement says otherwise. The number of clips is set in the quote.", ar: "مقاطع عمودية قصيرة مُعدَّة لوسائل التواصل، من دون موسيقى ما لم تنص الاتفاقية على خلاف ذلك. يُحدَّد عدد المقاطع في عرض السعر." },
   },
-  raw_footage: {
-    title: { en: "Raw footage", ar: "اللقطات الخام" },
-    short: { en: "The unedited recordings, for your own editor.", ar: "التسجيلات غير المحررة لمحرر الفيديو الخاص بك." },
-    description: { en: "The recordings as shot, without editing or colour work, for you or your own editor. Format and delivery are set in the quote.", ar: "التسجيلات كما صُوِّرت، من دون تحرير أو معالجة ألوان، لك أو لمحرر الفيديو الخاص بك. تُحدَّد الصيغة وطريقة التسليم في عرض السعر." },
-  },
 };
 
 export const SERVICE_COPY: Record<ServiceKey, ServiceCopy> = {
@@ -164,7 +223,7 @@ export const SERVICE_COPY: Record<ServiceKey, ServiceCopy> = {
     intendedClient: { en: ["Competitors booking their own matches", "Parents booking for a child or several children", "Coaches booking for one athlete"], ar: ["المتسابقون الذين يحجزون نزالاتهم", "أولياء الأمور لطفل أو عدة أطفال", "المدربون لرياضي واحد"] },
     whatWeShoot: { en: ["The agreed athlete's matches, from the walk-on to the result", "Warm-up, corner and podium moments where access allows", "Gi and no-gi, one or several divisions on the same day, as agreed"], ar: ["نزالات الرياضي المتفق عليه من الدخول حتى إعلان النتيجة", "لحظات الإحماء والزاوية ومنصة التتويج حيث يسمح الوصول", "بالبدلة أو من دونها، فئة واحدة أو أكثر في اليوم نفسه، حسب الاتفاق"] },
     photoDeliverables: { en: ["Edited photos from the agreed matches, selected and colour-corrected", "Delivered in a private online gallery, ready to download and share", "The number of photos depends on how the day goes and is never promised in advance"], ar: ["صور محررة من النزالات المتفق عليها، منتقاة ومصححة الألوان", "تُسلَّم في معرض إلكتروني خاص جاهزة للتحميل والمشاركة", "عدد الصور يعتمد على مجريات اليوم ولا يُوعد به مسبقًا"] },
-    videoDeliverables: { en: ["Video is booked by naming what you want: full-match recordings, edited highlights or raw footage", "Full-match recording covers the agreed matches only", "Edits are delivered without music unless the agreement says otherwise"], ar: ["يُحجز الفيديو بتحديد ما تريده: تسجيلات النزالات كاملة أو مونتاج أبرز اللقطات أو اللقطات الخام", "تسجيل النزال كاملًا يشمل النزالات المتفق عليها فقط", "تُسلَّم المونتاجات من دون موسيقى ما لم تنص الاتفاقية على خلاف ذلك"] },
+    videoDeliverables: { en: ["Video is booked by naming what you want: full-match recordings, edited highlights or reels", "Full-match recording covers the agreed matches only", "Every deliverable is an edited file; raw footage and unedited source material are not provided", "Edits are delivered without music unless the agreement says otherwise"], ar: ["يُحجز الفيديو بتحديد ما تريده: تسجيلات النزالات كاملة أو مونتاج أبرز اللقطات أو ريلز", "تسجيل النزال كاملًا يشمل النزالات المتفق عليها فقط", "كل المخرجات ملفات محررة؛ لا نقدّم اللقطات الخام ولا المواد غير المحررة", "تُسلَّم المونتاجات من دون موسيقى ما لم تنص الاتفاقية على خلاف ذلك"] },
     needFromYou: { en: ["The event, the date and the venue", "The athlete's full name as registered, academy, belt, weight and age division", "A link to the bracket or the athlete's profile when it is published", "Whether the athlete is under 18, so the guardian consent is in the request"], ar: ["اسم الفعالية والتاريخ والمكان", "اسم الرياضي الكامل كما هو مسجل، والأكاديمية، والحزام، والوزن، والفئة العمرية", "رابط جدول النزالات أو ملف الرياضي عند نشره", "ما إذا كان الرياضي دون 18 عامًا، لتُضمَّن موافقة ولي الأمر في الطلب"] },
     bookingSteps: BOOKING_STEPS_EVENT,
     paymentSteps: PAYMENT_STEPS,
@@ -173,7 +232,7 @@ export const SERVICE_COPY: Record<ServiceKey, ServiceCopy> = {
     cta: { en: "Request tournament coverage", ar: "اطلب تغطية بطولة" },
     metaTitle: { en: "Tournament athlete photography and video in Qatar", ar: "تصوير رياضي في بطولة جوجيتسو في قطر" },
     metaDescription: { en: "One athlete's jiu-jitsu competition day photographed or filmed in Doha: matched from the bracket, followed mat by mat, delivered in a private gallery.", ar: "تغطية يوم بطولة جوجيتسو لرياضي واحد في الدوحة بالصورة أو الفيديو: تحديد من جدول النزالات، متابعة من بساط إلى آخر، وتسليم في معرض خاص." },
-    faqIds: ["photo-vs-video", "full-match-vs-highlights", "gi-nogi-divisions", "wins-losses-elimination", "one-match-no-match", "athlete-identification", "simultaneous-mats", "booking-child", "venue-restrictions", "delivery-timing", "privacy-publication"],
+    faqIds: ["wins-losses", "one-match-no-match", "athlete-identification", "every-match", "separate-bookings", "raw-footage", "venue-access", "no-show", "postponed-cancelled", "payment"],
   },
   team_tournament: {
     title: { en: "Team tournament coverage", ar: "تغطية فريق في بطولة" },
@@ -182,7 +241,7 @@ export const SERVICE_COPY: Record<ServiceKey, ServiceCopy> = {
     intendedClient: { en: ["Academies and clubs with several athletes competing", "Head coaches and team managers", "National or regional teams at a tournament"], ar: ["الأكاديميات والأندية التي يتنافس منها عدة رياضيين", "المدربون الرئيسيون ومديرو الفرق", "المنتخبات الوطنية أو الإقليمية في البطولات"] },
     whatWeShoot: { en: ["The roster's matches across mats, as the schedule allows", "Team, coach and podium moments where access allows", "The club's presence on the day: warm-ups, corners, celebrations"], ar: ["نزالات الرياضيين في القائمة عبر البُسُط حسب ما يسمح الجدول", "لحظات الفريق والمدرب ومنصة التتويج حيث يسمح الوصول", "حضور النادي في اليوم: الإحماء والزوايا والاحتفالات"] },
     photoDeliverables: { en: ["Edited photos organised by athlete where the roster allows", "One private gallery for the club, shareable with every athlete", "How many athletes can be covered is confirmed in the quote, based on the roster and the schedule"], ar: ["صور محررة مرتبة حسب الرياضي حيث تسمح القائمة", "معرض خاص واحد للنادي يمكن مشاركته مع كل رياضي", "عدد الرياضيين الذين يمكن تغطيتهم يُحدَّد في عرض السعر بناءً على القائمة والجدول"] },
-    videoDeliverables: { en: ["Full-match recordings, edited highlights, reels or raw footage, named in the quote", "For large teams a second camera may be proposed in the quote", "Edits are delivered without music unless the agreement says otherwise"], ar: ["تسجيلات النزالات كاملة أو مونتاج أبرز اللقطات أو ريلز أو لقطات خام، تُسمَّى في عرض السعر", "للفرق الكبيرة قد نقترح كاميرا ثانية في عرض السعر", "تُسلَّم المونتاجات من دون موسيقى ما لم تنص الاتفاقية على خلاف ذلك"] },
+    videoDeliverables: { en: ["Full-match recordings, edited highlights or reels, named in the quote", "For large teams a second camera may be proposed in the quote", "Every deliverable is an edited file; raw footage is not provided", "Edits are delivered without music unless the agreement says otherwise"], ar: ["تسجيلات النزالات كاملة أو مونتاج أبرز اللقطات أو ريلز، تُسمَّى في عرض السعر", "للفرق الكبيرة قد نقترح كاميرا ثانية في عرض السعر", "كل المخرجات ملفات محررة؛ لا نقدّم اللقطات الخام", "تُسلَّم المونتاجات من دون موسيقى ما لم تنص الاتفاقية على خلاف ذلك"] },
     needFromYou: { en: ["The event, the date and the venue", "The roster: names as registered, divisions and, when known, mat assignments", "Which athletes are under 18, so guardian consent can be collected", "One contact at the club for the day"], ar: ["اسم الفعالية والتاريخ والمكان", "القائمة: الأسماء كما هي مسجلة، والفئات، وتوزيع البُسُط عند معرفته", "أي الرياضيين دون 18 عامًا ليتم جمع موافقة أولياء الأمور", "شخص اتصال واحد من النادي لليوم"] },
     bookingSteps: BOOKING_STEPS_EVENT,
     paymentSteps: PAYMENT_STEPS,
@@ -191,7 +250,7 @@ export const SERVICE_COPY: Record<ServiceKey, ServiceCopy> = {
     cta: { en: "Request a team quote", ar: "اطلب عرض سعر للفريق" },
     metaTitle: { en: "Team and club tournament coverage in Qatar", ar: "تغطية الفرق والأندية في البطولات في قطر" },
     metaDescription: { en: "Photography and video for a whole academy or team at a jiu-jitsu competition in Doha. Roster-based coverage, one private gallery for the club, quoted per day.", ar: "تصوير فوتوغرافي وفيديو لأكاديمية أو فريق كامل في بطولة جوجيتسو في الدوحة. تغطية حسب قائمة الفريق، معرض خاص للنادي، يُسعَّر لكل يوم." },
-    faqIds: ["team-roster", "simultaneous-mats", "photo-vs-video", "full-match-vs-highlights", "coach-academy-content", "sponsor-club-usage", "venue-restrictions", "delivery-timing", "payment-status"],
+    faqIds: ["club-team-coverage", "every-match", "separate-bookings", "athlete-identification", "raw-footage", "venue-access", "no-show", "postponed-cancelled", "payment"],
   },
   training_content: {
     title: { en: "Training and gym content", ar: "محتوى التدريب والصالة" },
@@ -200,7 +259,7 @@ export const SERVICE_COPY: Record<ServiceKey, ServiceCopy> = {
     intendedClient: { en: ["Academies and clubs that need content for their channels", "Coaches documenting a programme, a seminar or a belt promotion", "Athletes who want training content of themselves"], ar: ["الأكاديميات والأندية التي تحتاج محتوى لقنواتها", "المدربون الذين يوثقون برنامجًا أو ندوة أو ترقية حزام", "الرياضيون الذين يريدون محتوى تدريب لأنفسهم"] },
     whatWeShoot: { en: ["A regular class, open mat or sparring round, as agreed", "Technique details, drilling and the coach at work", "The space, the team and the atmosphere of the academy"], ar: ["حصة اعتيادية أو بساط مفتوح أو جولة سبارينغ، حسب الاتفاق", "تفاصيل التقنيات والتدريب والمدرب أثناء العمل", "المكان والفريق وأجواء الأكاديمية"] },
     photoDeliverables: { en: ["Edited photos from the session, selected and colour-corrected", "Delivered in a private online gallery", "Formats for web and social use as agreed in the quote"], ar: ["صور محررة من الجلسة، منتقاة ومصححة الألوان", "تُسلَّم في معرض إلكتروني خاص", "صيغ مناسبة للويب ووسائل التواصل حسب ما اتُّفق عليه في عرض السعر"] },
-    videoDeliverables: { en: ["Edited highlights, reels or raw footage, named in the quote", "Edits are delivered without music unless the agreement says otherwise", "Sound from the session is kept where it helps and agreed in advance"], ar: ["مونتاج أبرز اللقطات أو ريلز أو لقطات خام، تُسمَّى في عرض السعر", "تُسلَّم المونتاجات من دون موسيقى ما لم تنص الاتفاقية على خلاف ذلك", "يُحتفظ بصوت الجلسة حيث يفيد ويُتفق عليه مسبقًا"] },
+    videoDeliverables: { en: ["Edited highlights or reels, named in the quote", "Edits are delivered without music unless the agreement says otherwise", "Sound from the session is kept where it helps and agreed in advance", "Every deliverable is an edited file; raw footage is not provided"], ar: ["مونتاج أبرز اللقطات أو ريلز، تُسمَّى في عرض السعر", "تُسلَّم المونتاجات من دون موسيقى ما لم تنص الاتفاقية على خلاف ذلك", "يُحتفظ بصوت الجلسة حيث يفيد ويُتفق عليه مسبقًا", "كل المخرجات ملفات محررة؛ لا نقدّم اللقطات الخام"] },
     needFromYou: { en: ["The academy's address and the class or session you have in mind", "Preferred dates and times", "Who should be in the content and who should not, including any minors", "How the content will be used: the academy's channels, an athlete's own accounts, a sponsor"], ar: ["عنوان الأكاديمية والحصة أو الجلسة التي تفكر فيها", "التواريخ والأوقات المفضلة", "من يجب أن يظهر في المحتوى ومن لا يجب، بما في ذلك القاصرون", "كيف سيُستخدم المحتوى: قنوات الأكاديمية، حسابات رياضي، راعٍ"] },
     bookingSteps: BOOKING_STEPS_SESSION,
     paymentSteps: PAYMENT_STEPS,
@@ -209,7 +268,7 @@ export const SERVICE_COPY: Record<ServiceKey, ServiceCopy> = {
     cta: { en: "Request a training session", ar: "اطلب جلسة تدريب" },
     metaTitle: { en: "Training and gym photography and video in Doha", ar: "تصوير التدريب والصالة في الدوحة" },
     metaDescription: { en: "Photos and video at your jiu-jitsu or martial arts academy during a class, open mat or sparring: technique, atmosphere and the people who train there.", ar: "صور وفيديو في أكاديمية الجوجيتسو أو الفنون القتالية أثناء حصة أو بساط مفتوح أو سبارينغ: التقنيات والأجواء والمتدربون." },
-    faqIds: ["coach-academy-content", "training-location", "sponsor-club-usage", "photo-vs-video", "private-sessions", "privacy-publication", "revisions", "raw-files"],
+    faqIds: ["raw-footage", "payment", "club-team-coverage", "postponed-cancelled"],
   },
   athlete_portrait: {
     title: { en: "Athlete portraits and private sessions", ar: "بورتريهات الرياضيين والجلسات الخاصة" },
@@ -218,7 +277,7 @@ export const SERVICE_COPY: Record<ServiceKey, ServiceCopy> = {
     intendedClient: { en: ["Competitors building a profile or sponsor kit", "Parents who want portraits of a young athlete", "Coaches and academy owners who need professional images of themselves"], ar: ["المتسابقون الذين يبنون ملفًا شخصيًا أو ملف رعاية", "أولياء الأمور الراغبون في بورتريهات لرياضي صغير", "المدربون وأصحاب الأكاديميات الذين يحتاجون صورًا احترافية لأنفسهم"] },
     whatWeShoot: { en: ["Portraits in the gi, in competition kit or in plain clothes", "Controlled action: drilling, positions, movement planned for the camera", "A location you choose, or the academy, as agreed"], ar: ["بورتريهات بالبدلة أو بزي المنافسة أو بملابس عادية", "حركة مدروسة: تمارين ووضعيات وحركة مخططة للكاميرا", "موقع تختاره أنت، أو الأكاديمية، حسب الاتفاق"] },
     photoDeliverables: { en: ["Edited photos, selected and retouched to a natural standard", "Delivered in a private online gallery", "The number of edited photos is set in the quote"], ar: ["صور محررة، منتقاة ومعالجة بمستوى طبيعي", "تُسلَّم في معرض إلكتروني خاص", "عدد الصور المحررة يُحدَّد في عرض السعر"] },
-    videoDeliverables: { en: ["Reels or raw footage, named in the quote", "Edits are delivered without music unless the agreement says otherwise"], ar: ["ريلز أو لقطات خام، تُسمَّى في عرض السعر", "تُسلَّم المونتاجات من دون موسيقى ما لم تنص الاتفاقية على خلاف ذلك"] },
+    videoDeliverables: { en: ["Reels or a short edited piece, named in the quote", "Edits are delivered without music unless the agreement says otherwise", "Every deliverable is an edited file; raw footage is not provided"], ar: ["ريلز أو مقطع محرر قصير، تُسمَّى في عرض السعر", "تُسلَّم المونتاجات من دون موسيقى ما لم تنص الاتفاقية على خلاف ذلك", "كل المخرجات ملفات محررة؛ لا نقدّم اللقطات الخام"] },
     needFromYou: { en: ["What the images are for: profile, sponsors, social media, print", "Preferred dates, a location idea and the kit you will bring", "Whether the athlete is under 18, so the guardian consent is in the request", "Any sponsor logos or brand rules we should respect"], ar: ["الغرض من الصور: ملف شخصي، رعاة، وسائل التواصل، طباعة", "التواريخ المفضلة وفكرة عن الموقع والزي الذي ستحضره", "ما إذا كان الرياضي دون 18 عامًا، لتُضمَّن موافقة ولي الأمر في الطلب", "أي شعارات رعاة أو قواعد للعلامة التجارية يجب مراعاتها"] },
     bookingSteps: BOOKING_STEPS_SESSION,
     paymentSteps: PAYMENT_STEPS,
@@ -227,7 +286,7 @@ export const SERVICE_COPY: Record<ServiceKey, ServiceCopy> = {
     cta: { en: "Request a portrait session", ar: "اطلب جلسة بورتريه" },
     metaTitle: { en: "Athlete portrait sessions in Doha", ar: "جلسات بورتريه للرياضيين في الدوحة" },
     metaDescription: { en: "A dedicated photo or video session for one jiu-jitsu or martial arts athlete in Qatar: portraits, controlled action, profile and sponsor images.", ar: "جلسة تصوير أو فيديو مخصصة لرياضي جوجيتسو أو فنون قتالية في قطر: بورتريهات، وحركة مدروسة، وصور للملف الشخصي والرعاة." },
-    faqIds: ["private-sessions", "training-location", "sponsor-club-usage", "booking-child", "revisions", "raw-files", "watermarks-downloads", "privacy-publication"],
+    faqIds: ["raw-footage", "payment", "postponed-cancelled", "no-show"],
   },
   organizer_custom: {
     title: { en: "Event and organizer coverage", ar: "تغطية الفعاليات والمنظمين" },
@@ -236,7 +295,7 @@ export const SERVICE_COPY: Record<ServiceKey, ServiceCopy> = {
     intendedClient: { en: ["Tournament and event organisers", "Federations and governing bodies", "Academies hosting a seminar, a grading or a promotion"], ar: ["منظمو البطولات والفعاليات", "الاتحادات والجهات المنظمة", "الأكاديميات التي تستضيف ندوة أو ترقية أو احتفالًا"] },
     whatWeShoot: { en: ["The event as a whole: mats, podiums, officials, sponsors and the venue", "Key matches or moments you name in advance", "Material for the organiser's channels, sponsors and next year's promotion"], ar: ["الفعالية كاملة: البُسُط ومنصات التتويج والحكام والرعاة والمكان", "النزالات أو اللحظات الرئيسية التي تحددها مسبقًا", "مواد لقنوات المنظم والرعاة والترويج للنسخة القادمة"] },
     photoDeliverables: { en: ["Edited photos organised by the structure agreed with you: by mat, by session or by category", "A private online gallery for the organiser; public event galleries where agreed", "Formats for press, web and social use as set in the quote"], ar: ["صور محررة مرتبة وفق الهيكل المتفق عليه معك: حسب البساط أو الجلسة أو الفئة", "معرض إلكتروني خاص للمنظم؛ ومعارض فعاليات عامة حيث يُتفق على ذلك", "صيغ للصحافة والويب ووسائل التواصل حسب ما يُحدَّد في عرض السعر"] },
-    videoDeliverables: { en: ["Full-match recordings of named matches, edited highlights, reels or raw footage, each named in the quote", "Multi-camera coverage can be proposed for larger events", "Edits are delivered without music unless the agreement says otherwise"], ar: ["تسجيلات كاملة لنزالات محددة أو مونتاج أبرز اللقطات أو ريلز أو لقطات خام، تُسمَّى كلها في عرض السعر", "يمكن اقتراح تغطية بعدة كاميرات للفعاليات الكبيرة", "تُسلَّم المونتاجات من دون موسيقى ما لم تنص الاتفاقية على خلاف ذلك"] },
+    videoDeliverables: { en: ["Full-match recordings of named matches, edited highlights or reels, each named in the quote", "Multi-camera coverage can be proposed for larger events", "Every deliverable is an edited file; raw footage is not provided", "Edits are delivered without music unless the agreement says otherwise"], ar: ["تسجيلات كاملة لنزالات محددة أو مونتاج أبرز اللقطات أو ريلز، تُسمَّى كلها في عرض السعر", "يمكن اقتراح تغطية بعدة كاميرات للفعاليات الكبيرة", "كل المخرجات ملفات محررة؛ لا نقدّم اللقطات الخام", "تُسلَّم المونتاجات من دون موسيقى ما لم تنص الاتفاقية على خلاف ذلك"] },
     needFromYou: { en: ["The event, the dates, the venue and the schedule", "Accreditation or access for the crew, including where cameras may stand", "What the coverage is for and which moments matter most", "Whether a public event gallery should be published"], ar: ["اسم الفعالية والتواريخ والمكان والجدول", "اعتماد أو تصريح وصول للطاقم، بما في ذلك أماكن وقوف الكاميرات", "الغرض من التغطية وأي اللحظات هي الأهم", "ما إذا كان يجب نشر معرض عام للفعالية"] },
     bookingSteps: BOOKING_STEPS_EVENT,
     paymentSteps: PAYMENT_STEPS,
@@ -245,7 +304,7 @@ export const SERVICE_COPY: Record<ServiceKey, ServiceCopy> = {
     cta: { en: "Describe your event", ar: "صف فعاليتك" },
     metaTitle: { en: "Event and organizer coverage in Qatar", ar: "تغطية الفعاليات والمنظمين في قطر" },
     metaDescription: { en: "Official photography and video for jiu-jitsu and martial arts tournaments, seminars and gradings in Doha, planned with the organiser and quoted per event.", ar: "تصوير فوتوغرافي وفيديو رسمي لبطولات وندوات وترقيات الجوجيتسو والفنون القتالية في الدوحة، مخطط مع المنظم ويُسعَّر لكل فعالية." },
-    faqIds: ["organizer-access", "simultaneous-mats", "full-match-vs-highlights", "sponsor-club-usage", "find-buy-photos", "delivery-timing", "payment-status", "cancellation"],
+    faqIds: ["venue-access", "every-match", "club-team-coverage", "raw-footage", "public-gallery", "postponed-cancelled", "payment"],
   },
 };
 
@@ -289,6 +348,8 @@ export function allCatalogCopy(): Array<{ path: string; value: Bilingual<string 
   }
   for (const m of MEDIA_SCOPES) for (const [k, v] of Object.entries(MEDIA_SCOPE_COPY[m])) out.push({ path: `media.${m}.${k}`, value: v });
   for (const d of VIDEO_DELIVERABLES) for (const [k, v] of Object.entries(VIDEO_DELIVERABLE_COPY[d])) out.push({ path: `video.${d}.${k}`, value: v });
+  for (const c of PROJECT_CATEGORIES) for (const [k, v] of Object.entries(PROJECT_CATEGORY_COPY[c])) out.push({ path: `project.${c}.${k}`, value: v });
+  out.push({ path: "payment.policy", value: PAYMENT_POLICY }, { path: "payment.balance", value: PAYMENT_BALANCE_NOTE });
   for (const [c, v] of Object.entries(MEDIA_CATEGORY_COPY)) out.push({ path: `category.${c}`, value: v });
   return out;
 }

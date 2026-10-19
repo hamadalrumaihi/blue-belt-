@@ -23,9 +23,44 @@ export type ServiceKey = (typeof SERVICES)[number];
 export const MEDIA_SCOPES = ["photo", "video", "photo_video"] as const;
 export type MediaScope = (typeof MEDIA_SCOPES)[number];
 
-/** What "video" can mean; each is named explicitly so nothing is implied. */
-export const VIDEO_DELIVERABLES = ["full_match", "edited_highlights", "reels", "raw_footage"] as const;
-export type VideoDeliverable = (typeof VIDEO_DELIVERABLES)[number];
+/** What "video" can mean; each is named explicitly so nothing is implied. Every deliverable is an edited, finished file. */
+export const VIDEO_DELIVERABLES = ["full_match", "edited_highlights", "reels"] as const;
+export type PublicVideoDeliverable = (typeof VIDEO_DELIVERABLES)[number];
+/**
+ * Retired on 19 Oct 2026: raw footage is no longer offered to customers
+ * (Blue Belt Media delivers edited work only). The value stays typed so
+ * bookings that stored it before the change still parse in the owner's
+ * brief and the private pricing engine; it is never offered or rendered
+ * publicly again.
+ */
+export const RETIRED_VIDEO_DELIVERABLES = ["raw_footage"] as const;
+export type VideoDeliverable = PublicVideoDeliverable | (typeof RETIRED_VIDEO_DELIVERABLES)[number];
+
+/**
+ * The six ways Blue Belt Media is hired. Three book through the request
+ * wizard (they map onto bookable services); three are quoted from an
+ * inquiry (photography, videography and custom projects are too varied for
+ * a fixed package). Copy lives in ./copy.ts.
+ */
+export const PROJECT_CATEGORIES = ["tournament_event", "athlete", "clubs_teams", "photography", "videography", "custom"] as const;
+export type ProjectCategoryKey = (typeof PROJECT_CATEGORIES)[number];
+
+export type ProjectCategory = {
+  key: ProjectCategoryKey;
+  /** Bookable services this category leads to, primary first; empty when the category is quote-only. */
+  services: readonly ServiceKey[];
+  /** The inquiry category preselected on the Contact & Inquiries page. */
+  inquiry: "tournament_event" | "athlete" | "club_team" | "photography" | "videography" | "commercial_creative";
+};
+
+export const PROJECT_CATEGORY_DEFINITIONS: Record<ProjectCategoryKey, ProjectCategory> = {
+  tournament_event: { key: "tournament_event", services: ["tournament_athlete", "organizer_custom"], inquiry: "tournament_event" },
+  athlete: { key: "athlete", services: ["tournament_athlete", "athlete_portrait", "training_content"], inquiry: "athlete" },
+  clubs_teams: { key: "clubs_teams", services: ["team_tournament", "training_content"], inquiry: "club_team" },
+  photography: { key: "photography", services: [], inquiry: "photography" },
+  videography: { key: "videography", services: [], inquiry: "videography" },
+  custom: { key: "custom", services: [], inquiry: "commercial_creative" },
+};
 
 export type ServiceDefinition = {
   key: ServiceKey;
@@ -37,8 +72,8 @@ export type ServiceDefinition = {
   audiences: readonly AudienceKey[];
   /** Media scopes the visitor can choose for this service. */
   mediaScopes: readonly MediaScope[];
-  /** Video deliverables that can be requested when the scope includes video. */
-  videoDeliverables: readonly VideoDeliverable[];
+  /** Video deliverables that can be requested when the scope includes video (public ones only). */
+  videoDeliverables: readonly PublicVideoDeliverable[];
   /** Always quoted (no public price is ever shown even if a package carries one). */
   quoteFirst: boolean;
   /** Where the request wizard starts for this service. */
@@ -46,12 +81,15 @@ export type ServiceDefinition = {
 };
 
 export const SERVICE_DEFINITIONS: Record<ServiceKey, ServiceDefinition> = {
-  tournament_athlete: { key: "tournament_athlete", bookingType: "tournament_athlete", slug: "tournament-athlete-coverage", audiences: ["athletes", "parents"], mediaScopes: ["photo", "video", "photo_video"], videoDeliverables: ["full_match", "edited_highlights", "raw_footage"], quoteFirst: false, wizardType: "tournament_athlete" },
-  team_tournament: { key: "team_tournament", bookingType: "club", slug: "team-tournament-coverage", audiences: ["clubs"], mediaScopes: ["photo", "video", "photo_video"], videoDeliverables: ["full_match", "edited_highlights", "reels", "raw_footage"], quoteFirst: true, wizardType: "club" },
-  training_content: { key: "training_content", bookingType: "training_session", slug: "training-and-gym-content", audiences: ["clubs", "athletes"], mediaScopes: ["photo", "video", "photo_video"], videoDeliverables: ["edited_highlights", "reels", "raw_footage"], quoteFirst: false, wizardType: "training_session" },
-  athlete_portrait: { key: "athlete_portrait", bookingType: "private_session", slug: "athlete-portraits-and-private-sessions", audiences: ["athletes", "parents"], mediaScopes: ["photo", "video", "photo_video"], videoDeliverables: ["reels", "raw_footage"], quoteFirst: false, wizardType: "private_session" },
-  organizer_custom: { key: "organizer_custom", bookingType: "custom", slug: "event-and-organizer-coverage", audiences: ["organizers", "clubs"], mediaScopes: ["photo", "video", "photo_video"], videoDeliverables: ["full_match", "edited_highlights", "reels", "raw_footage"], quoteFirst: true, wizardType: "custom" },
+  tournament_athlete: { key: "tournament_athlete", bookingType: "tournament_athlete", slug: "tournament-athlete-coverage", audiences: ["athletes", "parents"], mediaScopes: ["photo", "video", "photo_video"], videoDeliverables: ["full_match", "edited_highlights", "reels"], quoteFirst: false, wizardType: "tournament_athlete" },
+  team_tournament: { key: "team_tournament", bookingType: "club", slug: "team-tournament-coverage", audiences: ["clubs"], mediaScopes: ["photo", "video", "photo_video"], videoDeliverables: ["full_match", "edited_highlights", "reels"], quoteFirst: true, wizardType: "club" },
+  training_content: { key: "training_content", bookingType: "training_session", slug: "training-and-gym-content", audiences: ["clubs", "athletes"], mediaScopes: ["photo", "video", "photo_video"], videoDeliverables: ["edited_highlights", "reels"], quoteFirst: false, wizardType: "training_session" },
+  athlete_portrait: { key: "athlete_portrait", bookingType: "private_session", slug: "athlete-portraits-and-private-sessions", audiences: ["athletes", "parents"], mediaScopes: ["photo", "video", "photo_video"], videoDeliverables: ["reels", "edited_highlights"], quoteFirst: false, wizardType: "private_session" },
+  organizer_custom: { key: "organizer_custom", bookingType: "custom", slug: "event-and-organizer-coverage", audiences: ["organizers", "clubs"], mediaScopes: ["photo", "video", "photo_video"], videoDeliverables: ["full_match", "edited_highlights", "reels"], quoteFirst: true, wizardType: "custom" },
 };
+
+/** The services whose booking is competition coverage: the "Before you book" conditions apply to them. */
+export const COMPETITION_SERVICES: readonly ServiceKey[] = ["tournament_athlete", "team_tournament", "organizer_custom"];
 
 export const AUDIENCE_SERVICES: Record<AudienceKey, readonly ServiceKey[]> = {
   athletes: ["tournament_athlete", "athlete_portrait", "training_content"],
@@ -69,8 +107,16 @@ export function isAudienceKey(v: unknown): v is AudienceKey {
 export function isMediaScope(v: unknown): v is MediaScope {
   return typeof v === "string" && (MEDIA_SCOPES as readonly string[]).includes(v);
 }
-export function isVideoDeliverable(v: unknown): v is VideoDeliverable {
+/** A deliverable that can be requested today (the public offer). */
+export function isVideoDeliverable(v: unknown): v is PublicVideoDeliverable {
   return typeof v === "string" && (VIDEO_DELIVERABLES as readonly string[]).includes(v);
+}
+/** A deliverable as it may appear in stored bookings: the public ones plus the retired raw footage. */
+export function isStoredVideoDeliverable(v: unknown): v is VideoDeliverable {
+  return isVideoDeliverable(v) || (typeof v === "string" && (RETIRED_VIDEO_DELIVERABLES as readonly string[]).includes(v));
+}
+export function isProjectCategoryKey(v: unknown): v is ProjectCategoryKey {
+  return typeof v === "string" && (PROJECT_CATEGORIES as readonly string[]).includes(v);
 }
 
 export function serviceByKey(key: ServiceKey): ServiceDefinition {

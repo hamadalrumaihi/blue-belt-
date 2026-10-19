@@ -109,8 +109,7 @@ export async function saveTestimonial(_prev: WebsiteState, formData: FormData): 
   const published = flag(formData, "published");
   if (!quote) fieldErrors.quote = "The client's words are required.";
   else if (quote.length > TESTIMONIAL_LIMITS.quote) fieldErrors.quote = `Keep it under ${TESTIMONIAL_LIMITS.quote} characters.`;
-  if (!name) fieldErrors.name = "A name (first name is enough) is required.";
-  else if (name.length > TESTIMONIAL_LIMITS.name) fieldErrors.name = `Keep it under ${TESTIMONIAL_LIMITS.name} characters.`;
+  if (name && name.length > TESTIMONIAL_LIMITS.name) fieldErrors.name = `Keep it under ${TESTIMONIAL_LIMITS.name} characters.`;
   if (role && role.length > TESTIMONIAL_LIMITS.role) fieldErrors.role = `Keep it under ${TESTIMONIAL_LIMITS.role} characters.`;
   if (permission_note && permission_note.length > TESTIMONIAL_LIMITS.permission_note) fieldErrors.permission_note = `Keep it under ${TESTIMONIAL_LIMITS.permission_note} characters.`;
   if (permission_granted && !permission_note) fieldErrors.permission_note = "Note where the permission was given (e.g. WhatsApp, 3 Oct 2026).";
@@ -119,7 +118,7 @@ export async function saveTestimonial(_prev: WebsiteState, formData: FormData): 
 
   const current = readTestimonialRecords((await readSettings(ctx.supabase, ctx.userId)).settings as Json);
   const existing = current.find((t) => t.id === id);
-  const record: Omit<TestimonialRecord, "legacy"> = { id, quote: quote!, name: name!, role, permission_granted, permission_note, published, created_at: existing?.created_at ?? new Date().toISOString() };
+  const record: Omit<TestimonialRecord, "legacy"> = { id, quote: quote!, name: name ?? "", role, permission_granted, permission_note, published, created_at: existing?.created_at ?? new Date().toISOString() };
   const next = existing ? current.map((t) => (t.id === id ? record : t)) : [...current, record];
   if (next.length > TESTIMONIAL_LIMITS.max) return { error: `At most ${TESTIMONIAL_LIMITS.max} testimonials can be stored. Delete one first.` };
   const res = await writeKey(ctx.supabase, ctx.userId, "testimonials", next.map(testimonialToJson), existing ? "website.testimonial_updated" : "website.testimonial_added", { id, published, permission_granted });

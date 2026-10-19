@@ -7,7 +7,7 @@
  * `missingInputs`, with `criticalMissing` for the inputs without which a
  * price is indefensible (the assessment is then "needs_detail").
  */
-import { isMediaScope, isServiceKey, isVideoDeliverable, LEGACY_SERVICE_KIND, SERVICE_DEFINITIONS, serviceForBookingType, type MediaScope, type ServiceKey, type VideoDeliverable } from "@/lib/catalog";
+import { isMediaScope, isServiceKey, isStoredVideoDeliverable, isVideoDeliverable, LEGACY_SERVICE_KIND, SERVICE_DEFINITIONS, serviceForBookingType, type MediaScope, type ServiceKey, type VideoDeliverable } from "@/lib/catalog";
 import type { BookingType, UsageType } from "@/lib/supabase/database.types";
 import { isPlainObject, isValidCalendarDate } from "@/lib/validation";
 import type { Assumption, LocationKind, PricingRequest } from "./types";
@@ -200,7 +200,7 @@ export function pricingRequestFromJson(value: unknown): PricingRequest | null {
     service: value.service,
     bookingType: typeof value.bookingType === "string" ? (value.bookingType as BookingType) : def.bookingType,
     media: value.media,
-    videoDeliverables: Array.isArray(value.videoDeliverables) ? value.videoDeliverables.filter(isVideoDeliverable) : [],
+    videoDeliverables: Array.isArray(value.videoDeliverables) ? value.videoDeliverables.filter(isStoredVideoDeliverable) : [],
     hoursOnSite: num(value.hoursOnSite),
     days: int(value.days, 30) ?? 1,
     athleteCount: int(value.athleteCount, 500),

@@ -4,10 +4,13 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { writeAudit } from "@/lib/audit";
 import { depositColumnsFor } from "@/lib/bookings/policy";
-import { HONEYPOT_FIELD, SERVICE_LABEL, composeDivision, mediaChoiceLabel, parseContactForm, parsePublicBookingForm, summarizePublicBooking, toPublicServiceOption, type PublicBookingValues } from "@/lib/bookings/public-form";
+import { HONEYPOT_FIELD, SERVICE_LABEL, composeDivision, mediaChoiceLabel, parsePublicBookingForm, summarizePublicBooking, toPublicServiceOption, type PublicBookingValues } from "@/lib/bookings/public-form";
+import { parseInquiryForm } from "@/lib/inquiries/form";
+import { INQUIRY_CATEGORY_LABEL, makeInquiryRef } from "@/lib/inquiries/labels";
 import { BOOKING_TYPE_LABEL, initialBookingStatus } from "@/lib/bookings/state";
 import { serviceByKey } from "@/lib/catalog";
 import { PRIVACY_VERSION, TERMS_VERSION } from "@/lib/legal/versions";
+import { localized } from "@/lib/i18n/locale";
 import { createLogger } from "@/lib/log";
 import { enqueueClientEmail } from "@/lib/notifications/email/outbox";
 import { buildEmail } from "@/lib/notifications/email/templates";
@@ -217,10 +220,10 @@ export async function submitPublicBooking(_prev: PublicFormState, fd: FormData):
         paragraphs: quoteOnly
           ? [
               `Thanks for your request to ${studio.business_name}. This request is quoted individually: we send you a price first, by e-mail, and nothing is due until you approve it.`,
-              "Once you approve the price you sign the agreement and pay the 50% deposit online to secure the date. The remaining 50% is due after your gallery is delivered.",
+              "Once you approve the price you sign the agreement and make the payment stated in your quotation, a deposit or a full advance payment, online to secure the date. Any remaining balance follows the accepted quote.",
             ]
           : [
-              `Thanks for your request to ${studio.business_name}. We confirm the date and the price with you by e-mail. Then you sign the agreement and pay the 50% deposit online to secure the date. The remaining 50% is due after your gallery is delivered.`,
+              `Thanks for your request to ${studio.business_name}. We confirm the date and the price with you by e-mail. Then you sign the agreement and make the payment stated in your quotation, a deposit or a full advance payment, online to secure the date. Any remaining balance follows the accepted quote.`,
               "Nothing is due until we have confirmed availability and the price with you.",
             ],
         facts: [["Reference", ref], ...summary.filter(([k]) => !["Name", "Phone", "E-mail", "Instagram", "Notes"].includes(k))],
@@ -257,53 +260,140 @@ function redirectToDone(ref: string): never {
   redirect(`/book/done?ref=${encodeURIComponent(ref)}`);
 }
 
-/** The contact form: a lead for the owner, nothing else. */
-export async function submitContact(_prev: PublicFormState, fd: FormData): Promise<PublicFormState> {
-  const log = createLogger({ route: "public/contact" });
+
+/**
+ * The Contact & Inquiries form. Validated and sanitised by `parseInquiryForm`,
+ * stored as one `photo_inquiries` row with a unique IQ- reference (retried
+ * on a collision; replayed on the same idempotency key), then the owner is
+ * pinged on Telegram and the customer gets an acknowledgment e-mail when the
+ * e-mail channel is configured. The success page is reached only after the
+ * row exists; a notification failure after that is logged, never surfaced,
+ * because the queue is idempotent and the runner retries.
+ */
+export async function submitInquiry(_prev: PublicFormState, fd: FormData): Promise<PublicFormState> {
+  const log = createLogger({ route: "public/inquiry" });
   const ip = await clientIp();
   if (!rateLimit(`public-form:${ip}`, RULES.publicFormPerIp).ok) return { error: RATE_LIMITED };
 
   const pub = await loadPublicStudio();
-  if (!pub) return { error: "The contact form is not open yet. Please reach us on Instagram." };
+  if (!pub) return { error: "The inquiry form is not open yet. Please reach us on Instagram." };
   const ownerId = pub.studio.owner_id;
 
-  const { fieldErrors, values } = parseContactForm(fd);
+  const { fieldErrors, values } = parseInquiryForm(fd);
   if (!values) {
     if (fieldErrors[HONEYPOT_FIELD]) return { error: fieldErrors[HONEYPOT_FIELD] };
     return { fieldErrors };
   }
 
+  let ref: string | null = null;
   try {
     const supabase = createServiceClient();
-    const person = await findOrCreatePerson(supabase, ownerId, { fullName: values.full_name, email: values.email, phone: values.phone, source: "website" }, { trusted: false });
-    if (!person.ok) {
-      log.error("public.contact.person_failed", { reason: person.error });
+    const now = new Date();
+    // The CRM person: matched by e-mail only (never by phone from a public form) and never rewritten.
+    const person = await findOrCreatePerson(supabase, ownerId, { fullName: values.full_name, email: values.email, source: "website" }, { trusted: false });
+    if (!person.ok) log.warn("public.inquiry.person_failed", { reason: person.error });
+    const personId = person.ok ? person.found.person.id : null;
+
+    // A retried submission (double click, reload after a slow response) finds its own row by key.
+    if (values.idempotency_key) {
+      const { data: existing } = await supabase.from("photo_inquiries").select("id,reference").eq("owner_id", ownerId).eq("idempotency_key", values.idempotency_key).maybeSingle();
+      if (existing) {
+        log.info("public.inquiry.idempotent_replay", { inquiryId: existing.id });
+        ref = existing.reference;
+      }
+    }
+
+    let inquiryId: string | null = null;
+    for (let attempt = 0; attempt < 3 && !ref; attempt += 1) {
+      const candidate = makeInquiryRef();
+      const { data, error } = await supabase
+        .from("photo_inquiries")
+        .insert({
+          owner_id: ownerId,
+          reference: candidate,
+          person_id: personId,
+          full_name: values.full_name,
+          email: values.email,
+          category: values.category,
+          subject: values.subject,
+          message: values.message,
+          booking_reference: values.booking_reference,
+          source_page: values.source_page,
+          idempotency_key: values.idempotency_key,
+          details: { form: "contact-inquiries" } as Json,
+        })
+        .select("id")
+        .single();
+      if (data) {
+        inquiryId = data.id;
+        ref = candidate;
+      } else if (error?.code === "23505") {
+        // Either the reference collided (retry with a new one) or the key already exists (replay): re-read.
+        if (values.idempotency_key) {
+          const { data: again } = await supabase.from("photo_inquiries").select("id,reference").eq("owner_id", ownerId).eq("idempotency_key", values.idempotency_key).maybeSingle();
+          if (again) {
+            inquiryId = again.id;
+            ref = again.reference;
+          }
+        }
+      } else {
+        log.error("public.inquiry.insert_failed", { reason: error?.message, code: error?.code });
+        return { error: GENERIC_ERROR };
+      }
+    }
+    if (!ref) {
+      log.error("public.inquiry.ref_exhausted");
       return { error: GENERIC_ERROR };
     }
-    const { data: lead, error } = await supabase
-      .from("photo_leads")
-      .insert({ owner_id: ownerId, person_id: person.found.person.id, status: "new", source: "website", message: values.message, details: { form: "contact" } as Json })
-      .select("id")
-      .single();
-    if (error || !lead) {
-      log.error("public.contact.lead_failed", { reason: error?.message });
-      return { error: GENERIC_ERROR };
+
+    // From here on the inquiry exists; nothing below may change the outcome.
+    if (inquiryId) {
+      const audit = await writeAudit(supabase, { ownerId, actorKind: "public", entity: "inquiry", entityId: inquiryId, action: "inquiry.created", data: { source: "website", category: values.category, source_page: values.source_page, reference: ref } });
+      if (!audit.ok) log.warn("public.inquiry.audit_failed", { reason: audit.error });
     }
-    const audit = await writeAudit(supabase, { ownerId, actorKind: "public", entity: "lead", entityId: lead.id, action: "lead.created", data: { source: "website", form: "contact" } });
-    if (!audit.ok) log.warn("public.contact.audit_failed", { reason: audit.error });
+    const category = localized(INQUIRY_CATEGORY_LABEL[values.category], "en");
     const tg = await enqueueOwnerTelegram(supabase, {
       ownerId,
-      kind: "LEAD_NEW",
-      alertKey: `lead:${lead.id}:new`,
-      title: "New website message",
-      lines: [values.full_name, values.message.length > 240 ? `${values.message.slice(0, 240)}...` : values.message],
-      url: `${siteUrl()}/leads`,
+      kind: "INQUIRY_NEW",
+      alertKey: `inquiry:${ref}:new`,
+      title: `New inquiry: ${category}`,
+      lines: [
+        `${values.full_name} · ${values.subject}`,
+        values.message.length > 240 ? `${values.message.slice(0, 240)}...` : values.message,
+        values.booking_reference ? `Customer reference: ${values.booking_reference}` : null,
+        values.source_page ? `From ${values.source_page}` : null,
+        `Ref ${ref}`,
+      ],
+      url: `${siteUrl()}/inquiries`,
+      now,
     });
-    if (!tg.ok) log.warn("public.contact.telegram_failed", { reason: tg.error });
-    log.info("public.contact.created", { leadId: lead.id });
+    if (!tg.ok) log.warn("public.inquiry.telegram_failed", { reason: tg.error });
+
+    const email = await enqueueClientEmail(supabase, {
+      ownerId,
+      kind: "INQUIRY_RECEIVED",
+      alertKey: `email:inquiry:${ref}:received`,
+      personId,
+      now,
+      draft: buildEmail(values.email, {
+        kind: "INQUIRY_RECEIVED",
+        subject: `We received your inquiry (${ref})`,
+        greeting: `Hi ${values.full_name},`,
+        paragraphs: [
+          `Thanks for writing to ${pub.studio.business_name}. Your message about "${values.subject}" is with us and we reply by e-mail as soon as we can.`,
+          "Sending an inquiry does not require any payment. If your request leads to a booking, we confirm the scope and the price in writing first; a deposit or full advance payment may then be required as stated in your quotation.",
+        ],
+        facts: [["Reference", ref], ["Inquiry type", category], ...(values.booking_reference ? [["Your reference", values.booking_reference] as [string, string]] : [])],
+        cta: null,
+        footer: `${pub.studio.business_name} · This message confirms we received your inquiry.`,
+        businessName: pub.studio.business_name,
+      }),
+    });
+    if (!email.ok) log.warn("public.inquiry.email_failed", { reason: email.error });
+    log.info("public.inquiry.created", { inquiryId, category: values.category, sourcePage: values.source_page });
   } catch (err) {
-    log.error("public.contact.unhandled", { reason: err instanceof Error ? err.message : String(err) });
-    return { error: GENERIC_ERROR };
+    log.error("public.inquiry.unhandled", { reason: err instanceof Error ? err.message : String(err) });
+    if (!ref) return { error: GENERIC_ERROR };
   }
-  redirect("/contact?sent=1");
+  redirect(`/contact?sent=${encodeURIComponent(ref)}`);
 }

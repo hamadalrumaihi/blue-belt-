@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Locale } from "@/lib/i18n/locale";
 import { tr, UI } from "@/lib/i18n/ui";
+import { inquiryHref } from "@/lib/inquiries/labels";
 import { businessIdentity, businessLegalLine } from "@/lib/studio/business";
 import { dateInZone, DEFAULT_TIMEZONE } from "@/lib/time";
 import type { PhotoStudioRow } from "@/lib/supabase/database.types";
@@ -27,7 +28,7 @@ export function PublicFooter({ studio, galleryUrl, locale = "en", accountLink }:
     ["/work", t(UI.nav.work)],
     ["/services", t(UI.nav.services)],
     ["/how-it-works", t(UI.nav.howItWorks)],
-    ["/contact", t(UI.nav.contact)],
+    ["/contact", t(UI.nav.contactInquiries)],
     ["/privacy", t(UI.nav.privacy)],
     ["/terms", t(UI.nav.terms)],
   ] as const;
@@ -73,6 +74,9 @@ export function PublicFooter({ studio, galleryUrl, locale = "en", accountLink }:
         <div>
           <p className="eyebrow mb-2 !text-white/50">{t(UI.nav.talkToUs)}</p>
           <ul className="space-y-1 text-sm">
+            <li>
+              <Link href={inquiryHref("commercial_creative", "/footer")} data-umami-event="contact-click" className="inline-flex min-h-9 items-center gap-2 font-semibold text-white hover:text-white/90">{t(UI.nav.getQuote)}</Link>
+            </li>
             {ig && (
               <li>
                 <a href={`https://instagram.com/${ig}`} rel="noopener noreferrer" target="_blank" data-umami-event="contact-click" className="inline-flex min-h-9 items-center gap-2 text-white/80 hover:text-white" dir="ltr">

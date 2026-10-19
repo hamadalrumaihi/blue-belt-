@@ -62,7 +62,7 @@ describe("siteMetadata", () => {
     expect(m.metadataBase).toBeInstanceOf(URL);
     expect((m.metadataBase as URL).origin).toBe(BASE);
     expect(m.title).toEqual({ default: DEFAULT_TITLE, template: "%s · Blue Belt Media" });
-    expect(DEFAULT_TITLE).toBe("Blue Belt Media: BJJ and martial arts photography and video in Qatar");
+    expect(DEFAULT_TITLE).toBe("Blue Belt Media: combat sports photography, video and creative production in Qatar");
     expect(typeof m.description).toBe("string");
     expect((m.description as string).length).toBeLessThanOrEqual(160);
     expect(m.description).toBe(DEFAULT_DESCRIPTION);

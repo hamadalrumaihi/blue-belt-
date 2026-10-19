@@ -2,11 +2,13 @@ import "server-only";
 import { listBookings, NEEDS_ACTION_STATUSES, upcomingBookings, type BookingListRow } from "@/lib/bookings/queries";
 import { BOOKING_STATUS_LABEL, effectivePayment, formatQr } from "@/lib/bookings/state";
 import { countOpenIssues } from "@/lib/incidents/queries";
+import { OPEN_INQUIRY_STATUSES } from "@/lib/inquiries/labels";
+import { summariseInquiries, type InquiryStats } from "@/lib/inquiries/queries";
 import { inRange, monthMoney, monthRange, OUTSTANDING_STATUSES, summariseMoney, type MoneySummary, type MonthRange } from "@/lib/payments/ledger";
 import { nextActionFor, sortByDue, type NextAction } from "@/lib/studio/next-action";
 import { openQuestionCounts } from "@/lib/studio/site-content";
 import { createClient } from "@/lib/supabase/server";
-import type { BookingStatus, DocumentStatus, PaymentRequestStatus, PaymentStage, PhotoAuditLogRow, PhotoBookingRow, PhotoEventRow, PhotoGalleryRow, PhotoIncidentRow, PhotoLeadRow, PhotoPaymentRecordRow } from "@/lib/supabase/database.types";
+import type { BookingStatus, DocumentStatus, PaymentRequestStatus, PaymentStage, PhotoAuditLogRow, PhotoBookingRow, PhotoEventRow, PhotoGalleryRow, PhotoIncidentRow, PhotoInquiryRow, PhotoLeadRow, PhotoPaymentRecordRow } from "@/lib/supabase/database.types";
 import { formatEventDate } from "@/lib/time";
 
 /**
@@ -73,7 +75,7 @@ export function upcomingItems(bookings: BookingListRow[], events: Array<Pick<Pho
 
 export type ActivityItem = { id: number; at: string; text: string; href: string | null; actor: string };
 
-const ENTITY_PATH: Record<string, string> = { booking: "/bookings", person: "/people", organization: "/clubs", document: "/documents", gallery: "/galleries", lead: "/leads", order: "/orders", studio: "/website" };
+const ENTITY_PATH: Record<string, string> = { booking: "/bookings", person: "/people", organization: "/clubs", document: "/documents", gallery: "/galleries", lead: "/leads", inquiry: "/inquiries", order: "/orders", studio: "/website" };
 
 function stageName(v: unknown): string {
   return v === "balance" ? "Final balance" : "Deposit";
@@ -178,6 +180,18 @@ export function describeAudit(row: Pick<PhotoAuditLogRow, "id" | "entity" | "ent
     case "lead.status":
       text = `Lead → ${label(d.status) || "?"}`;
       break;
+    case "inquiry.created":
+      text = `Inquiry received${label(d.reference) ? ` (${label(d.reference)})` : ""}${label(d.category) ? `: ${label(d.category).replace(/_/g, " ")}` : ""}`;
+      break;
+    case "inquiry.status":
+      text = `Inquiry → ${label(d.status).replace(/_/g, " ") || "?"}`;
+      break;
+    case "inquiry.note":
+      text = "Inquiry note added";
+      break;
+    case "inquiry.converted":
+      text = "Inquiry converted to a booking";
+      break;
     case "website.testimonial_added":
     case "website.testimonial_updated":
       text = `Testimonial ${row.action.endsWith("added") ? "added" : "updated"}${d.published ? " (published)" : ""}`;
@@ -196,7 +210,7 @@ export function describeAudit(row: Pick<PhotoAuditLogRow, "id" | "entity" | "ent
       text = row.action.replace(/[._]/g, " ");
   }
   const base = ENTITY_PATH[row.entity];
-  const href = row.entity === "studio" ? (row.action.startsWith("website.") ? (row.action.includes("testimonial") ? "/website/testimonials" : "/website/faqs") : null) : base && row.entity_id ? `${base}/${row.entity_id}` : base ?? null;
+  const href = row.entity === "studio" ? (row.action.startsWith("website.") ? (row.action.includes("testimonial") ? "/website/testimonials" : "/website/faqs") : null) : row.entity === "inquiry" ? "/inquiries" : base && row.entity_id ? `${base}/${row.entity_id}` : base ?? null;
   return { id: row.id, at: row.created_at, text, href, actor: row.actor_kind };
 }
 
@@ -239,7 +253,7 @@ export async function loadStudioDashboard(now: Date = new Date()): Promise<Studi
 
 export type PriorityRow = { booking: BookingListRow; action: NextAction };
 
-export type RequestItem = { kind: "lead" | "booking"; id: string; href: string; title: string; subtitle: string; at: string; status: string };
+export type RequestItem = { kind: "lead" | "booking" | "inquiry"; id: string; href: string; title: string; subtitle: string; at: string; status: string };
 
 export type DeliveryItem = { galleryId: string; bookingId: string | null; name: string; customer: string | null; readyAt: string | null; hasUrl: boolean };
 
@@ -270,9 +284,13 @@ export function splitMoney(
   return { range, forecastMonthQr: m.bookedQr, collectedMonthQr: m.receivedQr, outstandingQr: m.outstandingQr, forecastLiveQr: Math.round(forecastLive * 100) / 100, outstandingCount };
 }
 
-/** Pure: website requests still waiting for a reply (new / contacted leads, inquiry / quoted bookings), oldest first. */
-export function requestsNeedingAction(leads: Array<Pick<PhotoLeadRow, "id" | "status" | "source" | "created_at" | "booking_type" | "message"> & { person?: { full_name: string } | null }>, bookings: BookingListRow[]): RequestItem[] {
+/** Pure: website requests still waiting for a reply (new / contacted leads, new / in-progress inquiries, inquiry / quoted bookings), oldest first. */
+export function requestsNeedingAction(leads: Array<Pick<PhotoLeadRow, "id" | "status" | "source" | "created_at" | "booking_type" | "message"> & { person?: { full_name: string } | null }>, bookings: BookingListRow[], inquiries: Array<Pick<PhotoInquiryRow, "id" | "status" | "created_at" | "full_name" | "subject" | "category" | "reference">> = []): RequestItem[] {
   const out: RequestItem[] = [];
+  for (const i of inquiries) {
+    if (i.status !== "new" && i.status !== "in_progress") continue;
+    out.push({ kind: "inquiry", id: i.id, href: `/inquiries?status=${i.status}`, title: i.full_name, subtitle: [i.subject, i.category.replace(/_/g, " "), i.reference].join(" · "), at: i.created_at, status: i.status.replace("_", " ") });
+  }
   for (const l of leads) {
     if (l.status !== "new" && l.status !== "contacted") continue;
     out.push({ kind: "lead", id: l.id, href: `/leads?status=${l.status}`, title: l.person?.full_name ?? "Unknown", subtitle: [l.booking_type ? BOOKING_TYPE_LABEL_SAFE(l.booking_type) : "Message", `via ${l.source}`].join(" · "), at: l.created_at, status: l.status });
@@ -309,12 +327,13 @@ export type StudioOverview = StudioDashboard & {
   delivery: { ready: DeliveryItem[]; inProgress: number };
   incidents: Array<Pick<PhotoIncidentRow, "id" | "kind" | "status" | "last_seen_at" | "occurrences" | "event_id">>;
   openQuestions: { open: number; resolved: number };
+  inquiries: InquiryStats;
 };
 
 export async function loadStudioOverview(now: Date = new Date()): Promise<StudioOverview> {
   const supabase = await createClient();
   const range = monthRange(now);
-  const [base, live, leads, pending, galleries, sentDocs, incidents, studio, records] = await Promise.all([
+  const [base, live, leads, pending, galleries, sentDocs, incidents, studio, records, inquiries] = await Promise.all([
     loadStudioDashboard(now),
     listBookings({ filter: "all", limit: 400 }),
     supabase.from("photo_leads").select("id,status,source,created_at,booking_type,message,person_id").in("status", ["new", "contacted"]).order("created_at", { ascending: true }).limit(100),
@@ -324,7 +343,9 @@ export async function loadStudioOverview(now: Date = new Date()): Promise<Studio
     supabase.from("photo_incidents").select("id,kind,status,last_seen_at,occurrences,event_id").eq("status", "open").order("last_seen_at", { ascending: false }).limit(5),
     supabase.from("photo_studio").select("settings").maybeSingle(),
     supabase.from("photo_payment_records").select("amount_qr,paid_at").gte("paid_at", range.start).lt("paid_at", range.end).limit(2000),
+    supabase.from("photo_inquiries").select("id,status,category,created_at,full_name,subject,reference").in("status", [...OPEN_INQUIRY_STATUSES]).order("created_at", { ascending: true }).limit(200),
   ]);
+  const inquiryRows = inquiries.data ?? [];
   const leadRows = leads.data ?? [];
   const personIds = [...new Set(leadRows.map((l) => l.person_id).filter((v): v is string => Boolean(v)))];
   const people = personIds.length ? (await supabase.from("photo_people").select("id,full_name").in("id", personIds)).data ?? [] : [];
@@ -335,11 +356,12 @@ export async function loadStudioOverview(now: Date = new Date()): Promise<Studio
   return {
     ...base,
     priorities: prioritise(activeBookings, { pendingRequests: pending.data ?? [], galleries: galleries.data ?? [], sentDocuments: sentDocs.data ?? [], now }),
-    requests: requestsNeedingAction(leadRows.map((l) => ({ ...l, person: l.person_id ? personById.get(l.person_id) ?? null : null })), activeBookings),
+    requests: requestsNeedingAction(leadRows.map((l) => ({ ...l, person: l.person_id ? personById.get(l.person_id) ?? null : null })), activeBookings, inquiryRows),
     moneySplit: splitMoney(live, records.data ?? [], range),
     delivery: { ready, inProgress: activeBookings.filter((b) => b.booking_status === "in_progress").length },
     incidents: incidents.data ?? [],
     openQuestions: openQuestionCounts(studio.data?.settings),
+    inquiries: summariseInquiries(inquiryRows),
   };
 }
 
@@ -448,6 +470,7 @@ export function forecastVsCollected(
 }
 
 export type StudioMetrics = {
+  inquiries: InquiryStats;
   responseTime: ResponseTimeMetric;
   leadSources: Array<{ source: string; count: number }>;
   quoteConversion: QuoteConversion;
@@ -462,15 +485,17 @@ export type StudioMetrics = {
 export async function loadStudioMetrics(now: Date = new Date()): Promise<StudioMetrics> {
   const supabase = await createClient();
   const sixMonthsAgo = monthRange(new Date(now.getTime() - 185 * 86_400_000)).start;
-  const [leads, audit, bookings, records] = await Promise.all([
+  const [leads, audit, bookings, records, inquiries] = await Promise.all([
     supabase.from("photo_leads").select("id,created_at,source").limit(2000),
     supabase.from("photo_audit_log").select("entity,entity_id,action,created_at").eq("entity", "lead").eq("action", "lead.status").limit(5000),
     supabase.from("photo_bookings").select("booking_status,quoted_at,confirmed_at,session_at,delivered_at,gallery_delivered_at,amount_qr,status,amount_paid_qr,manual_paid_at,deposit_state,deposit_qr,balance_state,balance_qr").limit(5000),
     supabase.from("photo_payment_records").select("amount_qr,paid_at").gte("paid_at", sixMonthsAgo).limit(5000),
+    supabase.from("photo_inquiries").select("status,category").limit(5000),
   ]);
   const b = bookings.data ?? [];
   const split = splitMoney(b, records.data ?? [], monthRange(now));
   return {
+    inquiries: summariseInquiries(inquiries.data ?? []),
     responseTime: responseTimes(leads.data ?? [], audit.data ?? []),
     leadSources: leadSourceCounts(leads.data ?? []),
     quoteConversion: quoteConversion(b),

@@ -1,16 +1,24 @@
 /**
- * The questions people ask before and after booking, answered in English
- * and Arabic without promises the studio has not approved. Where a policy is
- * not settled, the answer points to the written quote and the question is
- * listed in OPEN_POLICY_QUESTIONS for the owner (never rendered publicly).
+ * The conditions a customer should understand before booking competition
+ * coverage, plus the two general answers every visitor needs (how payment
+ * works, public event galleries). Answered in English and Arabic without
+ * promises the studio has not approved: where a policy depends on the
+ * written quotation, the answer says so.
  *
- * Rendered on /how-it-works (searchable, by category), as a teaser on the
- * home page, per service on /services/<slug>, and as FAQPage structured data.
+ * Everything else that used to be a FAQ (training locations, revisions,
+ * gallery troubleshooting, custom projects…) is handled through the Contact
+ * & Inquiries page, so the website no longer asks visitors to scroll through
+ * dozens of questions.
+ *
+ * Rendered as "Before you book: competition coverage" on the request page
+ * and on the competition service pages, as a short teaser on the home page,
+ * and as FAQPage structured data on the tournament athlete service page.
  * Pure: no I/O, safe in client components and tests.
  */
 import type { Bilingual, Locale } from "@/lib/i18n/locale";
 import { localized } from "@/lib/i18n/locale";
 import type { FaqCategory as OwnerFaqCategory, FaqOverride } from "@/lib/studio/site-content";
+import { PAYMENT_BALANCE_NOTE, PAYMENT_POLICY } from "./copy";
 import type { ServiceKey } from "./index";
 
 export const FAQ_CATEGORIES = ["booking", "coverage", "video", "delivery", "payment", "usage", "privacy", "account"] as const;
@@ -34,185 +42,136 @@ export type FaqItem = {
   answer: Bilingual;
   /** Shown on the home teaser when true. */
   featured?: boolean;
+  /** Part of "Before you book: competition coverage". */
+  competition?: boolean;
   /** Extra search words (both languages) that are not in the question itself. */
   keywords?: string[];
 };
 
 export const FAQ_ITEMS: readonly FaqItem[] = [
   {
-    id: "photo-vs-video",
-    category: "booking",
-    featured: true,
-    question: { en: "Should I book photography, video, or both?", ar: "هل أحجز تصويرًا فوتوغرافيًا أم فيديو أم الاثنين؟" },
-    answer: { en: "Photography gives you edited stills in a private gallery. Video is booked by naming what you want: full-match recordings, edited highlights, reels or raw footage. Both can be booked for the same day. Pick the option you need when you request, and the quote lists exactly what is delivered.", ar: "التصوير الفوتوغرافي يمنحك صورًا محررة في معرض خاص. أما الفيديو فيُحجز بتحديد ما تريده: تسجيلات النزالات كاملة، أو مونتاج أبرز اللقطات، أو ريلز، أو لقطات خام. ويمكن حجز الاثنين لليوم نفسه. اختر ما تحتاجه عند الطلب، ويحدد عرض السعر بالضبط ما سيُسلَّم." },
-  },
-  {
-    id: "full-match-vs-highlights",
-    category: "video",
-    featured: true,
-    question: { en: "What is the difference between a full-match recording and highlights?", ar: "ما الفرق بين تسجيل النزال كاملًا وأبرز اللقطات؟" },
-    answer: { en: "A full-match recording is each agreed match from start to finish, trimmed at both ends and otherwise uncut, one file per match. Edited highlights are the strongest moments cut into one short edit. Reels are short vertical clips for social media. Raw footage is the unedited material for your own editor. Edits come without music unless the agreement says otherwise.", ar: "تسجيل النزال كاملًا هو كل نزال متفق عليه من البداية إلى النهاية، مقصوص من الطرفين فقط ومن دون مونتاج، ملف لكل نزال. أما مونتاج أبرز اللقطات فهو أقوى اللحظات في مونتاج قصير واحد. والريلز مقاطع قصيرة عمودية لوسائل التواصل. واللقطات الخام هي المادة غير المحررة لمحرر الفيديو الخاص بك. تُسلَّم المونتاجات من دون موسيقى ما لم تنص الاتفاقية على خلاف ذلك." },
-  },
-  {
-    id: "gi-nogi-divisions",
+    id: "wins-losses",
     category: "coverage",
-    question: { en: "The athlete competes in gi and no-gi, or in several divisions. Is that one booking?", ar: "الرياضي يتنافس بالبدلة ومن دونها، أو في عدة فئات. هل هذا حجز واحد؟" },
-    answer: { en: "Tell us every division in the request. When they fall on the same day at the same venue we quote them together; divisions on different days are quoted as separate days. What is included is written in the quote.", ar: "اذكر كل الفئات في الطلب. إذا كانت في اليوم نفسه وفي المكان نفسه نسعّرها معًا؛ أما الفئات في أيام مختلفة فتُسعَّر كأيام منفصلة. وما هو مشمول يُكتب في عرض السعر." },
-  },
-  {
-    id: "wins-losses-elimination",
-    category: "coverage",
-    question: { en: "Do you shoot losses as well as wins? What if the athlete is eliminated early?", ar: "هل تصورون الخسارة كما تصورون الفوز؟ وماذا لو خرج الرياضي مبكرًا؟" },
-    answer: { en: "We shoot the matches as they happen, wins and losses alike. If the athlete is eliminated early, everything shot up to that point is edited and delivered as agreed. The booking covers the day, not a number of matches.", ar: "نصوّر النزالات كما تحدث، فوزًا وخسارة. وإذا خرج الرياضي مبكرًا، يُحرَّر كل ما صُوِّر حتى تلك اللحظة ويُسلَّم وفق الاتفاق. الحجز يغطي اليوم وليس عددًا من النزالات." },
+    competition: true,
+    featured: true,
+    question: { en: "Do you shoot losses as well as wins?", ar: "هل تصورون الخسارة كما تصورون الفوز؟" },
+    answer: {
+      en: "Yes. We photograph and film matches as they happen, regardless of the result, so coverage includes wins and losses. If an athlete is eliminated early, the content captured up to that point is edited and delivered according to the booking agreement. A booking does not promise a particular number of matches.",
+      ar: "نعم. نصوّر النزالات كما تحدث بغض النظر عن النتيجة، فالتغطية تشمل الفوز والخسارة. وإذا خرج الرياضي مبكرًا، يُحرَّر ما صُوِّر حتى تلك اللحظة ويُسلَّم وفق اتفاقية الحجز. الحجز لا يضمن عددًا معينًا من النزالات.",
+    },
   },
   {
     id: "one-match-no-match",
     category: "coverage",
-    question: { en: "What if the athlete has only one match, or no match at all?", ar: "ماذا لو كان للرياضي نزال واحد فقط، أو لم يكن له نزال أصلًا؟" },
-    answer: { en: "One match is still a full booking: we are at the venue for the day and deliver what was shot, including warm-up and podium moments where access allows. If there is no match because the bracket is empty or the athlete does not compete, what happens next is set out in your written quote.", ar: "النزال الواحد يبقى حجزًا كاملًا: نكون في المكان طوال اليوم ونسلّم ما صُوِّر، بما في ذلك لحظات الإحماء ومنصة التتويج حيث يسمح الوصول. وإذا لم يكن هناك نزال لأن الفئة فارغة أو لأن الرياضي لم يتنافس، فإن ما يحدث بعدها محدد في عرض السعر المكتوب." },
+    competition: true,
+    question: { en: "What if the athlete has only one match, or does not compete?", ar: "ماذا لو كان للرياضي نزال واحد فقط، أو لم يتنافس أصلًا؟" },
+    answer: {
+      en: "A single match still counts as a booking. Coverage may include other moments such as warm-ups, preparation and podium appearances where they happen and where access is permitted; we cannot promise that warm-up or podium footage will always exist. If the athlete does not compete or their bracket is empty, the applicable arrangements are those in the written quotation and booking agreement.",
+      ar: "النزال الواحد يبقى حجزًا كاملًا. وقد تشمل التغطية لحظات أخرى مثل الإحماء والاستعداد ومنصة التتويج حيث تحدث وحيث يُسمح بالوصول؛ ولا يمكننا الوعد بوجود لقطات إحماء أو تتويج دائمًا. وإذا لم يتنافس الرياضي أو كانت فئته فارغة، فتُطبَّق الترتيبات الواردة في عرض السعر واتفاقية الحجز المكتوبة.",
+    },
   },
   {
     id: "athlete-identification",
     category: "coverage",
-    question: { en: "How do you know which matches are ours, and what if the bracket changes?", ar: "كيف تعرفون أي النزالات لنا، وماذا لو تغير جدول النزالات؟" },
-    answer: { en: "We take the athlete's registered name, academy and division before the day and find them on the organiser's bracket. A link to the bracket or the athlete's profile helps. Bracket changes on the day are followed as far as the schedule allows; tell us as soon as you know of one.", ar: "نأخذ اسم الرياضي المسجل وأكاديميته وفئته قبل اليوم ونحدده في جدول المنظم. ويفيد إرسال رابط الجدول أو ملف الرياضي. أما التغييرات في اليوم نفسه فنتابعها بقدر ما يسمح الجدول؛ أخبرنا فور علمك بأي تغيير." },
+    competition: true,
+    question: { en: "How do you identify our matches?", ar: "كيف تحددون نزالاتنا؟" },
+    answer: {
+      en: "Before the event we request the athlete's registered name, academy and division. A bracket or athlete profile link helps us identify the correct schedule. Tell us about bracket changes as soon as possible; changes are accommodated according to scheduling and coverage availability.",
+      ar: "قبل الفعالية نطلب اسم الرياضي المسجل وأكاديميته وفئته. ويساعدنا رابط جدول النزالات أو ملف الرياضي على تحديد الجدول الصحيح. أخبرنا بأي تغيير في الجدول في أقرب وقت ممكن؛ وتُستوعب التغييرات حسب الجدول وتوفر التغطية.",
+    },
   },
   {
-    id: "simultaneous-mats",
+    id: "every-match",
     category: "coverage",
+    competition: true,
     featured: true,
-    question: { en: "Do you cover every match? What about mats running at the same time?", ar: "هل تغطون كل نزال؟ وماذا عن البُسُط التي تعمل في الوقت نفسه؟" },
-    answer: { en: "We cannot promise every match. Coverage depends on the schedule, how many mats run at the same time, and where the venue lets photographers stand. For one athlete we follow their bracket mat by mat. For a team, the quote says how many athletes can be covered with the crew booked.", ar: "لا يمكننا الوعد بتغطية كل نزال. تعتمد التغطية على الجدول، وعدد البُسُط التي تعمل في الوقت نفسه، والأماكن التي تسمح الصالة للمصورين بالوقوف فيها. لرياضي واحد نتابع جدوله من بساط إلى آخر. وللفريق، يحدد عرض السعر عدد الرياضيين الذين يمكن تغطيتهم بالطاقم المحجوز." },
+    question: { en: "Do you cover every match?", ar: "هل تغطون كل نزال؟" },
+    answer: {
+      en: "We aim to capture the agreed coverage as completely as possible, but we cannot promise every match. Coverage depends on match scheduling, overlapping mats, venue restrictions and crew availability. For an individual athlete we follow their competition schedule as closely as we can. For clubs and teams our approach is different: we capture as many athletes and moments from the team as possible throughout the event, according to the opportunities available. Team coverage does not automatically mean that every match or every athlete will be photographed or filmed.",
+      ar: "نسعى إلى تغطية ما اتُّفق عليه بأكمل صورة ممكنة، لكن لا يمكن ضمان كل نزال. تعتمد التغطية على جدول النزالات، وتزامن البُسُط، وقيود الصالة، وتوفر الطاقم. للرياضي الواحد نتابع جدول منافساته بأقرب ما يمكن. أما للأندية والفرق فنهجنا مختلف: نلتقط أكبر عدد ممكن من رياضيي الفريق ولحظاته على مدار الفعالية حسب الفرص المتاحة. وتغطية الفريق لا تضمن تلقائيًا تصوير كل نزال أو كل رياضي.",
+    },
   },
   {
-    id: "booking-child",
+    id: "club-team-coverage",
     category: "booking",
-    question: { en: "Can I book for my child, or for several children?", ar: "هل يمكنني الحجز لطفلي، أو لعدة أطفال؟" },
-    answer: { en: "Yes. Book as a parent or guardian, name each child in the request and confirm the guardian consent there. Several children on the same day are quoted together; the quote says how they are covered when their matches overlap.", ar: "نعم. احجز بصفتك ولي أمر، واذكر اسم كل طفل في الطلب وأكد موافقة ولي الأمر هناك. عدة أطفال في اليوم نفسه يُسعَّرون معًا؛ ويوضح عرض السعر كيف تتم التغطية عندما تتداخل نزالاتهم." },
+    competition: true,
+    question: { en: "How does club and team coverage work?", ar: "كيف تتم تغطية الأندية والفرق؟" },
+    answer: {
+      en: "Clubs submit a roster with athlete names, divisions and the schedule information available. We assess the roster, the event schedule and the requested deliverables before preparing a quote. We aim to capture the team throughout the event, across different athletes, matches and moments whenever possible. Gallery arrangements and deliverables are defined in the quotation; crew size and image counts per athlete are not promised in advance.",
+      ar: "يرسل النادي قائمة بأسماء الرياضيين وفئاتهم ومعلومات الجدول المتاحة. نقيّم القائمة وجدول الفعالية والمخرجات المطلوبة قبل إعداد عرض السعر. ونسعى إلى تغطية الفريق على مدار الفعالية عبر مختلف الرياضيين والنزالات واللحظات كلما أمكن. تُحدَّد ترتيبات المعرض والمخرجات في عرض السعر؛ ولا يُوعد مسبقًا بحجم الطاقم أو بعدد الصور لكل رياضي.",
+    },
   },
   {
-    id: "team-roster",
+    id: "separate-bookings",
     category: "booking",
-    question: { en: "We are a club with a large team. How does that work?", ar: "نحن نادٍ بفريق كبير. كيف يتم ذلك؟" },
-    answer: { en: "Send the roster with names as registered, divisions and, when known, mat assignments. We quote the day based on the roster and the schedule, including how many photographers or cameras are needed. One private gallery goes to the club, shareable with every athlete.", ar: "أرسل القائمة بالأسماء كما هي مسجلة والفئات وتوزيع البُسُط عند معرفته. نسعّر اليوم بناءً على القائمة والجدول، بما في ذلك عدد المصورين أو الكاميرات المطلوبة. ويُسلَّم معرض خاص واحد للنادي يمكن مشاركته مع كل رياضي." },
+    competition: true,
+    featured: true,
+    question: { en: "Is each athlete a separate booking?", ar: "هل كل رياضي حجز منفصل؟" },
+    answer: {
+      en: "Yes. One individual athlete is one booking. If you ask for coverage of several athletes, the quote is adjusted accordingly. Multi-athlete, team and club projects may have different rates and coverage structures; individual package pricing is not automatically applied to a team. The final scope and price are confirmed in writing.",
+      ar: "نعم. الرياضي الواحد هو حجز واحد. وإذا طلبت تغطية عدة رياضيين يُعدَّل عرض السعر وفقًا لذلك. وقد تختلف أسعار وهياكل التغطية لمشاريع الرياضيين المتعددين والفرق والأندية؛ ولا تُطبَّق أسعار الباقات الفردية تلقائيًا على الفريق. يُثبَّت النطاق والسعر النهائيان كتابيًا.",
+    },
   },
   {
-    id: "coach-academy-content",
-    category: "booking",
-    question: { en: "Can you make content for our academy's social media?", ar: "هل يمكنكم إعداد محتوى لحسابات أكاديميتنا؟" },
-    answer: { en: "Yes. Training and gym content covers a class, open mat or sparring round at your academy, as photos, reels, edited highlights or raw footage. Use on the academy's channels and website is confirmed in the quote.", ar: "نعم. تغطي خدمة محتوى التدريب والصالة حصة أو بساطًا مفتوحًا أو جولة سبارينغ في أكاديميتك، كصور أو ريلز أو مونتاج أبرز اللقطات أو لقطات خام. ويُحدَّد الاستخدام على قنوات الأكاديمية وموقعها في عرض السعر." },
+    id: "raw-footage",
+    category: "video",
+    competition: true,
+    featured: true,
+    question: { en: "Do you provide raw footage or unedited files?", ar: "هل تقدمون اللقطات الخام أو الملفات غير المحررة؟" },
+    answer: {
+      en: "No. Blue Belt Media provides edited photography and video deliverables according to the agreed booking. Raw camera footage, RAW photo files and unedited source material are not included or provided.",
+      ar: "لا. تقدّم بلو بلت ميديا صورًا ومقاطع فيديو محررة وفق الحجز المتفق عليه. لا تشمل الخدمة لقطات الكاميرا الخام ولا ملفات الصور بصيغة RAW ولا أي مواد مصدرية غير محررة.",
+    },
+    keywords: ["RAW", "source files", "unedited"],
   },
   {
-    id: "organizer-access",
-    category: "booking",
-    question: { en: "We organise an event. What access do you need?", ar: "نحن ننظم فعالية. ما الذي تحتاجونه من صلاحيات الوصول؟" },
-    answer: { en: "Accreditation for the crew, the schedule, and a clear word on where cameras may stand (mat side, podium, officials' area). The organiser arranges access; we plan the coverage around it and set everything out in the quote.", ar: "اعتماد للطاقم، والجدول، وتوضيح أماكن وقوف الكاميرات (جانب البساط، منصة التتويج، منطقة الحكام). يتولى المنظم ترتيب الوصول؛ ونخطط التغطية وفقًا له ونثبّت كل شيء في عرض السعر." },
-  },
-  {
-    id: "venue-restrictions",
+    id: "venue-access",
     category: "coverage",
-    question: { en: "What if the venue restricts where photographers can go?", ar: "ماذا لو قيّدت الصالة أماكن تحرك المصورين؟" },
-    answer: { en: "Venue and organiser rules apply to us like everyone else. We work from wherever we are allowed, and coverage of podiums, corners and warm-up areas depends on that access.", ar: "تنطبق علينا قواعد الصالة والمنظم كما تنطبق على الجميع. نعمل من الأماكن المسموح بها، وتعتمد تغطية منصات التتويج والزوايا ومناطق الإحماء على تلك الصلاحيات." },
-  },
-  {
-    id: "private-sessions",
-    category: "booking",
-    question: { en: "Do you offer private or female-only sessions?", ar: "هل تقدمون جلسات خاصة أو نسائية فقط؟" },
-    answer: { en: "Private sessions are available. Female-only sessions are offered only when suitable staffing is confirmed for the date, so ask in the request and we confirm in writing before anything is booked.", ar: "الجلسات الخاصة متاحة. أما الجلسات النسائية فقط فتُقدَّم فقط عند تأكيد توفر الطاقم المناسب للموعد، لذا اسأل عنها في الطلب ونؤكد كتابيًا قبل تثبيت أي حجز." },
-  },
-  {
-    id: "training-location",
-    category: "booking",
-    question: { en: "Where do training sessions and portraits take place?", ar: "أين تُقام جلسات التدريب والبورتريه؟" },
-    answer: { en: "Training content is shot at your academy. Portraits can be at the academy or at a location you choose; a location that needs a permit is arranged by you unless the quote says otherwise. Travel outside Doha is set out in the quote.", ar: "يُصوَّر محتوى التدريب في أكاديميتك. أما البورتريهات فيمكن أن تكون في الأكاديمية أو في موقع تختاره؛ والموقع الذي يتطلب تصريحًا تتولى أنت ترتيبه ما لم ينص عرض السعر على خلاف ذلك. ويُحدَّد السفر خارج الدوحة في عرض السعر." },
-  },
-  {
-    id: "sponsor-club-usage",
-    category: "usage",
-    featured: true,
-    question: { en: "Can we use the photos for our club, a sponsor or advertising?", ar: "هل يمكننا استخدام الصور للنادي أو لراعٍ أو للإعلانات؟" },
-    answer: { en: "Personal use is included with every booking. Club, team, sponsor or commercial use is confirmed in the quote when you tell us how the work will be used. Say so in the request so the right licence is in writing from the start.", ar: "الاستخدام الشخصي مشمول في كل حجز. أما استخدام النادي أو الفريق أو الراعي أو الاستخدام التجاري فيُحدَّد في عرض السعر عندما تخبرنا كيف سيُستخدم العمل. اذكر ذلك في الطلب ليكون الترخيص الصحيح مكتوبًا من البداية." },
-  },
-  {
-    id: "delivery-timing",
-    category: "delivery",
-    featured: true,
-    question: { en: "How and when are the photos and video delivered?", ar: "كيف ومتى تُسلَّم الصور والفيديو؟" },
-    answer: { en: "In a private online gallery sent to the e-mail you booked with, where you can view, download and share. The delivery method and timing for your booking are as agreed in your written quote.", ar: "في معرض إلكتروني خاص يُرسل إلى البريد الإلكتروني الذي حجزت به، حيث يمكنك المشاهدة والتحميل والمشاركة. وطريقة التسليم وتوقيته لحجزك حسب ما اتُّفق عليه في عرض السعر المكتوب." },
-  },
-  {
-    id: "revisions",
-    category: "delivery",
-    question: { en: "Can I ask for changes to the edit?", ar: "هل يمكنني طلب تعديلات على المونتاج أو التحرير؟" },
-    answer: { en: "Tell us what you would like changed after delivery. What is included as a revision, and what is extra, is set out in your written quote.", ar: "أخبرنا بما تود تغييره بعد التسليم. وما يُعد تعديلًا مشمولًا وما يُعد إضافيًا محدد في عرض السعر المكتوب." },
-  },
-  {
-    id: "raw-files",
-    category: "delivery",
-    question: { en: "Can I get the raw files?", ar: "هل يمكنني الحصول على الملفات الخام؟" },
-    answer: { en: "Raw video footage can be booked as a named deliverable. Unedited photo files are not part of a standard booking; if you need them, ask in the request and the quote says whether and how they are provided.", ar: "يمكن حجز لقطات الفيديو الخام كمخرج محدد بالاسم. أما ملفات الصور غير المحررة فليست جزءًا من الحجز الاعتيادي؛ إذا كنت تحتاجها فاطلبها في الطلب ويوضح عرض السعر ما إذا كانت ستُقدَّم وكيف." },
-  },
-  {
-    id: "watermarks-downloads",
-    category: "delivery",
-    question: { en: "Are the photos watermarked? Can I download them?", ar: "هل تحمل الصور علامة مائية؟ وهل يمكنني تحميلها؟" },
-    answer: { en: "Photos delivered under a booking are downloadable from your private gallery. Which sizes are downloadable, and whether previews carry a watermark before purchase in a public event gallery, is set out in your quote or shown in the gallery itself.", ar: "الصور المسلَّمة ضمن الحجز قابلة للتحميل من معرضك الخاص. أما المقاسات القابلة للتحميل، وما إذا كانت المعاينات تحمل علامة مائية قبل الشراء في معرض فعالية عام، فيُحدَّد في عرض السعر أو يظهر في المعرض نفسه." },
-  },
-  {
-    id: "find-buy-photos",
-    category: "delivery",
-    featured: true,
-    question: { en: "I did not book. Can I still find and buy my photos from an event?", ar: "لم أحجز. هل يمكنني مع ذلك إيجاد صوري من فعالية وشراؤها؟" },
-    answer: { en: "When an organiser agrees to a public event gallery, it is published in the same place as private galleries. Use Find my photos to look for the event; photos bought there are paid in the gallery and are separate from bookings.", ar: "عندما يوافق المنظم على معرض عام للفعالية، يُنشر في المكان نفسه الذي تُنشر فيه المعارض الخاصة. استخدم «ابحث عن صوري» للبحث عن الفعالية؛ والصور التي تُشترى هناك تُدفع داخل المعرض وهي منفصلة عن الحجوزات." },
-  },
-  {
-    id: "missing-photos",
-    category: "delivery",
-    question: { en: "I cannot find myself in an event gallery. What can I do?", ar: "لا أجد نفسي في معرض الفعالية. ماذا أفعل؟" },
-    answer: { en: "Write to us with the event, your name as registered, your division and the mat if you know it. Public galleries only show what was shot on the day, and not everyone is photographed at an event we were not booked to follow.", ar: "راسلنا باسم الفعالية واسمك كما هو مسجل وفئتك ورقم البساط إن عرفته. تعرض المعارض العامة ما صُوِّر في اليوم فقط، ولا يُصوَّر الجميع في فعالية لم نُحجز فيها لمتابعتهم." },
-  },
-  {
-    id: "payment-status",
-    category: "payment",
-    featured: true,
-    question: { en: "How does payment work?", ar: "كيف يتم الدفع؟" },
-    answer: { en: "Nothing is paid when you send the request. After the scope and the price are confirmed in writing, you pay a 50% deposit by online payment, which secures the booking. The remaining 50% is due after your gallery is delivered. Photos bought in a public event gallery are separate and paid in the gallery.", ar: "لا تدفع شيئًا عند إرسال الطلب. بعد تثبيت النطاق والسعر كتابيًا، تدفع عربونًا بنسبة 50% عبر الدفع الإلكتروني، وبذلك يُؤكَّد الحجز. وتُستحق الـ50% المتبقية بعد تسليم معرضك. أما الصور التي تُشترى من معرض فعالية عام فهي منفصلة وتُدفع داخل المعرض." },
-  },
-  {
-    id: "payment-check",
-    category: "payment",
-    question: { en: "How do I check whether my deposit or balance has been received?", ar: "كيف أتحقق من استلام العربون أو الباقي؟" },
-    answer: { en: "Sign in to the client portal with the e-mail you booked with. Each booking shows its status, what has been paid and what is still due. Payment links are sent by e-mail as well.", ar: "سجّل الدخول إلى بوابة العملاء بالبريد الإلكتروني الذي حجزت به. يعرض كل حجز حالته وما دُفع وما لا يزال مستحقًا. وتُرسل روابط الدفع عبر البريد الإلكتروني أيضًا." },
-  },
-  {
-    id: "client-login",
-    category: "account",
-    question: { en: "How do I sign in, and what if I lost my gallery link?", ar: "كيف أسجل الدخول، وماذا لو فقدت رابط المعرض؟" },
-    answer: { en: "The client portal sends a sign-in link to the e-mail you booked with; there is no password to remember. Your gallery link is in your booking there. If the e-mail address has changed, write to us from the old address or with your booking reference.", ar: "ترسل بوابة العملاء رابط دخول إلى البريد الإلكتروني الذي حجزت به؛ لا توجد كلمة مرور لتذكرها. ورابط معرضك موجود في حجزك هناك. وإذا تغير بريدك الإلكتروني، راسلنا من العنوان القديم أو برقم الحجز المرجعي." },
-  },
-  {
-    id: "cancellation",
-    category: "payment",
-    question: { en: "What if I need to cancel or reschedule, or the event is postponed?", ar: "ماذا لو احتجت إلى الإلغاء أو تغيير الموعد، أو تأجلت الفعالية؟" },
-    answer: { en: "Tell us as early as you can. What happens to the deposit, and whether a new date can be offered, is set out in your written quote and agreement. For postponed events we move with the event where our schedule allows.", ar: "أخبرنا في أقرب وقت ممكن. وما يحدث للعربون، وما إذا كان يمكن تقديم موعد جديد، محدد في عرض السعر والاتفاقية المكتوبة. وفي حال تأجيل الفعالية ننتقل معها حيث يسمح جدولنا." },
+    competition: true,
+    question: { en: "What if venue access is restricted?", ar: "ماذا لو كان الوصول داخل الصالة مقيدًا؟" },
+    answer: {
+      en: "We follow venue and organiser rules, so coverage depends on where photographers and videographers are permitted to operate. If additional media access or accreditation is available, you or the organiser may arrange it for our crew. Access to restricted locations, podiums, warm-up areas or mat-side positions cannot be promised without the necessary permission.",
+      ar: "نلتزم بقواعد الصالة والمنظم، لذا تعتمد التغطية على الأماكن المسموح فيها للمصورين بالعمل. وإذا توفر اعتماد إعلامي أو تصريح وصول إضافي، يمكنك أنت أو المنظم ترتيبه لطاقمنا. ولا يمكن ضمان الوصول إلى المناطق المقيدة أو منصات التتويج أو مناطق الإحماء أو جانب البساط من دون الإذن اللازم.",
+    },
   },
   {
     id: "no-show",
+    category: "booking",
+    competition: true,
+    question: { en: "What happens if the athlete does not show up?", ar: "ماذا يحدث إذا لم يحضر الرياضي؟" },
+    answer: {
+      en: "The crew may already have committed time and resources to the booked event. No-shows are handled according to the written quotation and booking agreement. Please tell us about any change as early as possible.",
+      ar: "قد يكون الطاقم قد خصص وقته وموارده للفعالية المحجوزة مسبقًا. يُتعامل مع عدم الحضور وفق عرض السعر واتفاقية الحجز المكتوبة. يرجى إخبارنا بأي تغيير في أقرب وقت ممكن.",
+    },
+  },
+  {
+    id: "postponed-cancelled",
+    category: "booking",
+    competition: true,
+    question: { en: "What if the competition is postponed or cancelled?", ar: "ماذا لو تأجلت البطولة أو أُلغيت؟" },
+    answer: {
+      en: "Tell us as soon as possible. Rescheduling, the treatment of any deposit and alternative arrangements depend on the written quotation and agreement. For postponed events we may move the coverage to the new date, subject to availability and agreement; we cannot promise automatic rescheduling.",
+      ar: "أخبرنا في أقرب وقت ممكن. يعتمد تغيير الموعد والتعامل مع أي عربون والترتيبات البديلة على عرض السعر والاتفاقية المكتوبة. وفي حال تأجيل الفعالية قد ننقل التغطية إلى الموعد الجديد رهنًا بالتوفر والاتفاق؛ ولا يُضمن تغيير الموعد تلقائيًا.",
+    },
+  },
+  {
+    id: "payment",
     category: "payment",
-    question: { en: "What if the athlete does not show up on the day?", ar: "ماذا لو لم يحضر الرياضي في اليوم؟" },
-    answer: { en: "The crew is at the venue for the booked day either way. How a no-show is treated is set out in your written quote and agreement.", ar: "يكون الطاقم في المكان في اليوم المحجوز في كل الأحوال. وكيفية التعامل مع عدم الحضور محددة في عرض السعر والاتفاقية المكتوبة." },
+    featured: true,
+    question: { en: "How does payment work?", ar: "كيف يتم الدفع؟" },
+    answer: {
+      en: `${PAYMENT_POLICY.en} ${PAYMENT_BALANCE_NOTE.en} Photos bought from a public event gallery are separate and are paid in the gallery.`,
+      ar: `${PAYMENT_POLICY.ar} ${PAYMENT_BALANCE_NOTE.ar} أما الصور التي تُشترى من معرض فعالية عام فهي منفصلة وتُدفع داخل المعرض.`,
+    },
   },
   {
-    id: "privacy-publication",
-    category: "privacy",
-    question: { en: "Can I ask that photos of me or my child are not published?", ar: "هل يمكنني طلب عدم نشر صوري أو صور طفلي؟" },
-    answer: { en: "Yes. Say so in the request or write to us at any time. Photos from a booking stay in your private gallery; the studio shows work in its portfolio only as agreed, and never minors without the guardian's say.", ar: "نعم. اذكر ذلك في الطلب أو راسلنا في أي وقت. تبقى صور الحجز في معرضك الخاص؛ ويعرض الاستوديو أعماله في معرض أعماله فقط حسب الاتفاق، ولا يعرض القاصرين أبدًا من دون موافقة ولي الأمر." },
-  },
-  {
-    id: "contact-method",
-    category: "account",
-    question: { en: "How do we stay in touch before the day?", ar: "كيف نبقى على تواصل قبل اليوم؟" },
-    answer: { en: "By e-mail, using the address you booked with. The booking reference, the quote, the agreement, payment links and the gallery link all go there, so keep an eye on that inbox.", ar: "عبر البريد الإلكتروني، باستخدام العنوان الذي حجزت به. يُرسل إليه رقم الحجز المرجعي وعرض السعر والاتفاقية وروابط الدفع ورابط المعرض، فتابع ذلك البريد." },
+    id: "public-gallery",
+    category: "delivery",
+    question: { en: "I did not book. Can I still find and buy my photos from an event?", ar: "لم أحجز. هل يمكنني مع ذلك إيجاد صوري من فعالية وشراؤها؟" },
+    answer: {
+      en: "Sometimes. Public gallery availability depends on whether a gallery was created and published for that event. Use Find my photos to look for the event; photos bought there are paid in the gallery and are separate from bookings. Not every participant appears in a public event gallery, because we only shoot what the day and our booked coverage allow.",
+      ar: "أحيانًا. يعتمد توفر المعرض العام على ما إذا كان قد أُنشئ معرض لتلك الفعالية ونُشر. استخدم «ابحث عن صوري» للبحث عن الفعالية؛ والصور التي تُشترى هناك تُدفع داخل المعرض وهي منفصلة عن الحجوزات. ولا يظهر كل مشارك في معرض الفعالية العام، لأننا نصوّر ما يسمح به اليوم والتغطية المحجوزة فقط.",
+    },
   },
 ];
 
@@ -233,6 +192,7 @@ export function applyFaqOverrides(items: readonly FaqItem[], overrides: readonly
     id: o.id,
     category: base?.category ?? OWNER_CATEGORY[o.category] ?? "booking",
     featured: base?.featured,
+    competition: base?.competition ?? o.category === "tournaments",
     keywords: base?.keywords,
     question: { en: o.question_en, ar: o.question_ar ?? undefined },
     answer: { en: o.answer_en, ar: o.answer_ar ?? undefined },
@@ -258,6 +218,11 @@ export function featuredFaqs(limit = 5, items: readonly FaqItem[] = FAQ_ITEMS): 
   return items.filter((f) => f.featured).slice(0, limit);
 }
 
+/** "Before you book: competition coverage", in the order the conditions are explained. */
+export function competitionFaqs(items: readonly FaqItem[] = FAQ_ITEMS): FaqItem[] {
+  return items.filter((f) => f.competition);
+}
+
 /** The FAQs a service page shows, in the order its copy lists them. */
 export function faqsForService(key: ServiceKey, faqIds: readonly string[], items: readonly FaqItem[] = FAQ_ITEMS): FaqItem[] {
   void key;
@@ -269,16 +234,16 @@ export function normalizeForSearch(text: string): string {
   return text
     .toLowerCase()
     .normalize("NFKD")
-    .replace(/[\u064B-\u0655\u0670]/g, "")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\u0623\u0625\u0622\u0671]/g, "\u0627")
-    .replace(/\u0629/g, "\u0647")
-    .replace(/\u0649/g, "\u064A")
+    .replace(/[ً-ٰٕ]/g, "")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[أإآٱ]/g, "ا")
+    .replace(/ة/g, "ه")
+    .replace(/ى/g, "ي")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-/** Client-side filter used by the FAQ explorer: every query word must appear in the item (either language, plus keywords). */
+/** Filter used by the owner's FAQ tools and tests: every query word must appear in the item (either language, plus keywords). */
 export function filterFaqs(items: readonly FaqItem[], query: string, category: FaqCategory | "all" = "all"): FaqItem[] {
   const words = normalizeForSearch(query).split(" ").filter(Boolean);
   return items.filter((item) => {
@@ -289,7 +254,7 @@ export function filterFaqs(items: readonly FaqItem[], query: string, category: F
   });
 }
 
-/** FAQPage structured data in one language; rendered on /how-it-works only, so the same questions are not claimed by two pages. */
+/** FAQPage structured data in one language; rendered on one page only, so the same questions are not claimed twice. */
 export function buildFaqJsonLd(locale: Locale = "en", items: readonly FaqItem[] = FAQ_ITEMS): Record<string, unknown> {
   return {
     "@context": "https://schema.org",
@@ -306,18 +271,13 @@ export function buildFaqJsonLd(locale: Locale = "en", items: readonly FaqItem[] 
  * owner decides.
  */
 export const OPEN_POLICY_QUESTIONS: ReadonlyArray<{ id: string; question: string; where: string }> = [
-  { id: "turnaround", question: "Standard delivery time for photos and for each video deliverable (days after the event / session).", where: "FAQ delivery-timing; service pages (Good to know); process step 5" },
-  { id: "revisions", question: "How many revision rounds are included, what counts as a revision, and the price of extra rounds.", where: "FAQ revisions" },
-  { id: "raw-photos", question: "Whether unedited photo files are ever supplied, and at what price.", where: "FAQ raw-files" },
-  { id: "watermarks", question: "Whether booked-gallery downloads are watermark-free at all sizes, and which sizes are included.", where: "FAQ watermarks-downloads" },
-  { id: "cancellation", question: "Cancellation and rescheduling terms: deposit refundable or not, notice periods, and what happens when the event is postponed by the organiser.", where: "FAQ cancellation; terms page" },
+  { id: "deposit-structure", question: "Which projects take a deposit and which take full advance payment, and the deposit share when one applies (the booking tools default to the BOOKINGS_DEPOSIT_PERCENT setting).", where: "FAQ payment; every service page payment steps; quotation template" },
+  { id: "turnaround", question: "Standard delivery time for photos and for each video deliverable (days after the event / session).", where: "Service pages (Good to know); How it works step 4" },
   { id: "no-show", question: "No-show and no-match policy: is the deposit kept, is the balance due, is a credit offered.", where: "FAQ no-show; FAQ one-match-no-match" },
-  { id: "response-time", question: "A reply-time promise for requests and contact messages (the previous site said 24 hours; not in the approved list).", where: "Contact page; FAQ contact-method; how-it-works" },
-  { id: "female-staffing", question: "Whether female-only sessions can be offered and with which staff; the copy says only when staffing is confirmed.", where: "FAQ private-sessions; athlete_portrait limitations" },
-  { id: "travel", question: "Travel outside Doha: whether it is offered and how it is charged.", where: "FAQ training-location" },
-  { id: "usage-licence", question: "Price and terms of club / sponsor / commercial licences, and the studio's own portfolio use (opt-out wording is currently in the copy).", where: "FAQ sponsor-club-usage; permitted use on every service page" },
+  { id: "cancellation", question: "Cancellation and rescheduling terms for postponed events: deposit refundable or not, notice periods.", where: "FAQ postponed-cancelled; terms page" },
+  { id: "team-crew", question: "How crew size and per-athlete coverage are decided for large rosters, and whether a minimum image count per athlete is ever offered.", where: "FAQ club-team-coverage; team service page" },
+  { id: "usage-licence", question: "Price and terms of club / sponsor / commercial licences, and the studio's own portfolio use (opt-out wording is currently in the copy).", where: "Permitted use on every service page" },
   { id: "music", question: "Whether licensed music can be added to edits on request and at what cost; default is without music.", where: "Video deliverable copy" },
-  { id: "multi-child", question: "How several children or several divisions on one day are priced (together, per athlete, per division).", where: "FAQ booking-child; FAQ gi-nogi-divisions" },
-  { id: "accreditation", question: "Who is responsible when an organiser refuses accreditation after a booking is confirmed.", where: "FAQ organizer-access; FAQ venue-restrictions" },
-  { id: "missing-photos", question: "What is offered when a booked athlete has no usable photos from a match (re-shoot, partial refund, nothing).", where: "FAQ missing-photos" },
+  { id: "accreditation", question: "Who is responsible when an organiser refuses accreditation after a booking is confirmed.", where: "FAQ venue-access" },
+  { id: "custom-projects", question: "Day rates or starting points for photography, videography and custom productions, so quotes for non-tournament work are consistent.", where: "Project categories on the home and services pages; inquiry replies" },
 ];

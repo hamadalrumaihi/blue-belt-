@@ -678,6 +678,46 @@ export type PhotoLeadRow = {
   updated_at: string;
 };
 
+export type InquiryCategory =
+  | "general"
+  | "tournament_event"
+  | "athlete"
+  | "club_team"
+  | "photography"
+  | "videography"
+  | "commercial_creative"
+  | "booking_question"
+  | "existing_order"
+  | "payment_billing"
+  | "partnership"
+  | "technical_support"
+  | "other";
+
+export type InquiryStatus = "new" | "in_progress" | "waiting_customer" | "quoted" | "converted" | "resolved" | "closed";
+
+/** One message from the Contact & Inquiries page (20261019100000_inquiries). */
+export type PhotoInquiryRow = {
+  id: string;
+  owner_id: string;
+  reference: string;
+  person_id: string | null;
+  full_name: string;
+  email: string;
+  category: InquiryCategory;
+  subject: string;
+  message: string;
+  booking_reference: string | null;
+  source_page: string | null;
+  status: InquiryStatus;
+  booking_id: string | null;
+  /** [{ at, by, text }] internal notes, never shown to the customer. */
+  notes: Json;
+  details: Json;
+  idempotency_key: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type DocumentKind = "services_agreement" | "event_agreement" | "session_agreement" | "print_release" | "model_release" | "guardian_release" | "club_agreement" | "custom";
 export type DocumentStatus = "draft" | "sent" | "viewed" | "signed" | "declined" | "expired" | "void";
 export type SignerRole = "client" | "guardian";
@@ -1382,6 +1422,12 @@ export type Database = {
         Row: PhotoLeadRow;
         Insert: Optional<PhotoLeadRow, GeneratedCols | "person_id" | "organization_id" | "event_id" | "booking_type" | "status" | "source" | "message" | "details" | "booking_id">;
         Update: Partial<PhotoLeadRow>;
+        Relationships: [];
+      };
+      photo_inquiries: {
+        Row: PhotoInquiryRow;
+        Insert: Optional<PhotoInquiryRow, GeneratedCols | "person_id" | "booking_reference" | "source_page" | "status" | "booking_id" | "notes" | "details" | "idempotency_key">;
+        Update: Partial<PhotoInquiryRow>;
         Relationships: [];
       };
       photo_document_templates: {

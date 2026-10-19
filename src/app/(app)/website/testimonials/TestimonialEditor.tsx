@@ -9,7 +9,7 @@ import { TESTIMONIAL_LIMITS, type TestimonialRecord } from "@/lib/studio/site-co
 import { cn } from "@/lib/utils";
 
 /** Add / edit form for one testimonial. Publishing requires written permission. */
-export function TestimonialForm({ record, onDone }: { record: TestimonialRecord | null; onDone?: () => void }) {
+export function TestimonialForm({ record, onDone, prefill }: { record: TestimonialRecord | null; onDone?: () => void; prefill?: { quote: string; role?: string | null } | null }) {
   const router = useRouter();
   const [state, formAction, pending] = useActionState<WebsiteState, FormData>(saveTestimonial, null);
   const fe = state?.fieldErrors ?? {};
@@ -26,14 +26,14 @@ export function TestimonialForm({ record, onDone }: { record: TestimonialRecord 
       <FormError message={state?.error} />
       {record?.legacy && <p className="rounded-xl border border-warning/30 bg-warning-soft px-3 py-2 text-xs font-semibold text-warning">This review was added before permission tracking. Confirm the client agreed to appear on the website, then publish. Saving creates a proper record; the old row is kept until you delete it.</p>}
       <FormField label="The client's words" htmlFor={`quote-${record?.id ?? "new"}`} required error={fe.quote} hint="Their own sentence or two. No ratings, no edits beyond trimming.">
-        <textarea id={`quote-${record?.id ?? "new"}`} name="quote" className="input min-h-24 py-3" defaultValue={record?.quote ?? ""} maxLength={TESTIMONIAL_LIMITS.quote} required dir="auto" />
+        <textarea id={`quote-${record?.id ?? "new"}`} name="quote" className="input min-h-24 py-3" defaultValue={record?.quote ?? prefill?.quote ?? ""} maxLength={TESTIMONIAL_LIMITS.quote} required dir="auto" />
       </FormField>
       <div className="grid gap-3 sm:grid-cols-2">
-        <FormField label="Name" htmlFor={`name-${record?.id ?? "new"}`} required error={fe.name} hint="First name is enough.">
-          <input id={`name-${record?.id ?? "new"}`} name="name" className="input" defaultValue={record?.name ?? ""} maxLength={TESTIMONIAL_LIMITS.name} required dir="auto" />
+        <FormField label="Name" htmlFor={`name-${record?.id ?? "new"}`} error={fe.name} hint="First name is enough. Leave blank to show the review as “Client” when the customer did not approve a name.">
+          <input id={`name-${record?.id ?? "new"}`} name="name" className="input" defaultValue={record?.name ?? ""} maxLength={TESTIMONIAL_LIMITS.name} dir="auto" />
         </FormField>
         <FormField label="Role" htmlFor={`role-${record?.id ?? "new"}`} error={fe.role} hint="Athlete, Parent, Coach, Club…">
-          <input id={`role-${record?.id ?? "new"}`} name="role" className="input" defaultValue={record?.role ?? ""} maxLength={TESTIMONIAL_LIMITS.role} dir="auto" />
+          <input id={`role-${record?.id ?? "new"}`} name="role" className="input" defaultValue={record?.role ?? prefill?.role ?? ""} maxLength={TESTIMONIAL_LIMITS.role} dir="auto" />
         </FormField>
       </div>
       <div className="rounded-xl border border-line bg-page p-3">
@@ -75,7 +75,7 @@ export function TestimonialRow({ record }: { record: TestimonialRecord }) {
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div className="min-w-0 flex-1">
               <p className="whitespace-pre-line text-sm text-ink" dir="auto">“{record.quote}”</p>
-              <p className="mt-1 text-xs font-semibold text-muted" dir="auto">{record.name}{record.role ? ` · ${record.role}` : ""}</p>
+              <p className="mt-1 text-xs font-semibold text-muted" dir="auto">{record.name || "Client (anonymous)"}{record.role ? ` · ${record.role}` : ""}</p>
             </div>
             <span className={cn("shrink-0 rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider", live ? "bg-success-soft text-success" : record.legacy ? "bg-warning-soft text-warning" : "bg-page text-muted")}>
               {live ? "Live" : record.legacy ? "Needs permission confirmation" : record.published ? "Blocked: no permission" : record.permission_granted ? "Draft (permission ok)" : "Draft"}
@@ -105,14 +105,40 @@ export function TestimonialRow({ record }: { record: TestimonialRecord }) {
   );
 }
 
-/** "Add" disclosure at the top of the list. */
-export function AddTestimonial() {
-  const [open, setOpen] = useState(false);
+/** "Add" disclosure at the top of the list; `prefill` opens it with a supplied review already in the quote box. */
+export function AddTestimonial({ prefill = null }: { prefill?: { quote: string; role?: string | null } | null }) {
+  const [open, setOpen] = useState(Boolean(prefill));
   if (!open) return <button type="button" className="btn-primary min-h-11" onClick={() => setOpen(true)}>Add a testimonial</button>;
   return (
     <div className="card p-4">
       <h2 className="mb-3 text-base font-bold text-ink">New testimonial</h2>
-      <TestimonialForm record={null} onDone={() => setOpen(false)} />
+      <TestimonialForm record={null} onDone={() => setOpen(false)} prefill={prefill} />
     </div>
+  );
+}
+
+/** Reviews supplied by the owner that are not stored yet: one click opens the add form with the words filled in; permission is still confirmed by hand. */
+export function SuppliedReviews({ reviews }: { reviews: ReadonlyArray<{ key: string; quote: string }> }) {
+  const [picked, setPicked] = useState<string | null>(null);
+  if (!reviews.length) return null;
+  const chosen = reviews.find((r) => r.key === picked) ?? null;
+  return (
+    <section className="card p-4" aria-labelledby="supplied-h">
+      <h2 id="supplied-h" className="text-base font-bold text-ink">Reviews supplied for the website</h2>
+      <p className="mt-1 text-xs text-muted">Customer words you provided on 19 Oct 2026 that are not stored yet. Pick one to open it as a draft: confirm the customer agreed in writing, add a name only if they approved it, then publish.</p>
+      <ul className="mt-3 space-y-2">
+        {reviews.map((r) => (
+          <li key={r.key} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line bg-page px-3 py-2">
+            <p className="text-sm text-ink" dir="auto">“{r.quote}”</p>
+            <button type="button" className="btn-secondary min-h-9 px-3 text-xs" onClick={() => setPicked(r.key)}>Use as draft</button>
+          </li>
+        ))}
+      </ul>
+      {chosen && (
+        <div className="mt-3">
+          <TestimonialForm key={chosen.key} record={null} prefill={{ quote: chosen.quote }} onDone={() => setPicked(null)} />
+        </div>
+      )}
+    </section>
   );
 }

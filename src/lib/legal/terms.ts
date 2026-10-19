@@ -91,7 +91,7 @@ export function buildTerms(id: BusinessIdentity = businessIdentity()): LegalDocu
       id: "services",
       title: "Our services",
       paragraphs: [
-        "We photograph and film jiu-jitsu and martial arts: tournament athletes, tournament and event coverage, club and team days, training sessions, fighter and athlete portrait sessions, private sessions and custom requests.",
+        "We are a sports media and creative production studio specialising in combat sports. We photograph and film tournament athletes, tournament and event coverage, club and team days, training sessions, athlete portrait sessions and private sessions, and we take on photography, videography, commercial and creative projects beyond the mats, each quoted individually.",
         "What is included in a booking (hours, number of athletes, photo, video, or both) is what the services page and your signed agreement say. Anything else is extra and is agreed in writing before the shoot.",
       ],
     },
@@ -107,7 +107,7 @@ export function buildTerms(id: BusinessIdentity = businessIdentity()): LegalDocu
       id: "booking-confirmation",
       title: "Booking confirmation",
       paragraphs: [
-        "A booking is confirmed only when both of these have happened: you have signed the agreement we send you, and the 50% deposit has been paid and confirmed by our payment provider.",
+        "A booking is confirmed only when both of these have happened: you have signed the agreement we send you, and the deposit or advance payment stated in your quotation has been paid and confirmed by our payment provider.",
         "Until then the date is not held for you, and we may accept another booking for the same date and time.",
       ],
     },
@@ -115,23 +115,23 @@ export function buildTerms(id: BusinessIdentity = businessIdentity()): LegalDocu
       id: "pricing",
       title: "Pricing",
       paragraphs: [
-        "Prices are in Qatari riyal (QAR) and are shown on the services page. Team days, event coverage and custom work are quoted individually.",
+        "Prices are in Qatari riyal (QAR). Packages with a published price are shown on the services page; team days, event coverage, photography, videography and custom work are quoted individually.",
         "We confirm the total price with you before you sign and before you pay anything. The price in your signed agreement is the price for that booking. Extra hours, extra athletes or extra deliverables requested later are priced and agreed in writing before we do the work.",
       ],
     },
     {
       id: "deposit",
-      title: "50% deposit",
+      title: "Deposit or advance payment",
       paragraphs: [
-        "A deposit of 50% of the agreed price is due before the booking is confirmed. We send you a secure payment page on our website once you have signed the agreement. The deposit is part of the price, not an extra charge.",
+        "Submitting an inquiry or booking request does not require payment. Once the scope and the price are confirmed, a deposit or full advance payment may be required to secure your booking, as specified in your quotation or agreement. We send you a secure payment page on our website once you have signed the agreement. A deposit is part of the price, not an extra charge.",
         "The deposit is non-refundable except as set out under cancellations, refunds and consumer rights below. " + QATAR_CONSUMER_LAW_SENTENCE,
       ],
     },
     {
       id: "balance",
-      title: "Remaining 50% after delivery",
+      title: "Remaining balance",
       paragraphs: [
-        "The remaining 50% becomes due after we deliver your gallery. We send a payment request for it at that point; nothing is charged automatically.",
+        "Any remaining balance and payment milestones are determined by the accepted quotation or agreement. Unless it says otherwise, the balance becomes due after we deliver your gallery and we send a payment request for it at that point; nothing is charged automatically.",
         "Where a booking changed in size after the deposit was paid, the final payment request reflects the agreed changes.",
       ],
     },
@@ -178,7 +178,7 @@ export function buildTerms(id: BusinessIdentity = businessIdentity()): LegalDocu
       id: "athlete-coverage",
       title: "Athlete coverage",
       paragraphs: [
-        "For a tournament athlete booking we follow the athlete's bracket and aim to photograph or film every match they fight. We need the athlete's registered name, division and, where available, the bracket or profile link.",
+        "One individual athlete is one booking; coverage of several athletes, a team or a club is quoted separately and may follow a different coverage structure. For a tournament athlete booking we follow the athlete's bracket and aim to photograph or film every match they fight, wins and losses alike. We need the athlete's registered name, academy, division and, where available, the bracket or profile link. A booking does not promise a particular number of matches, and warm-up or podium moments are captured only where they happen and where access allows.",
         "We cannot cover a match we were not told about, a match moved without notice, or a match that overlaps with another booked athlete on a mat we cannot reach in time. Where that happens we tell you and, if a booked match was missed through our fault, we refund the part of the price that relates to it.",
       ],
     },
@@ -186,7 +186,7 @@ export function buildTerms(id: BusinessIdentity = businessIdentity()): LegalDocu
       id: "team-club-bookings",
       title: "Team and club bookings",
       paragraphs: [
-        "A club or team booking is made by the person who signs the agreement on the club's behalf. That person confirms they are allowed to book for the club and to agree these terms for it.",
+        "A club or team booking is made by the person who signs the agreement on the club's behalf. That person confirms they are allowed to book for the club and to agree these terms for it. We capture as many of the club's athletes and moments as the day allows; team coverage does not promise every match or every athlete, and the crew size, gallery arrangements and deliverables are those in the quotation.",
         "The club is responsible for telling its athletes and, for members under 18, their parents or guardians, that photography and video take place, and for obtaining their consent. The club tells us in writing about any athlete who must not be photographed.",
       ],
     },
@@ -209,7 +209,7 @@ export function buildTerms(id: BusinessIdentity = businessIdentity()): LegalDocu
       id: "raw-files",
       title: "RAW and source files",
       paragraphs: [
-        "Unedited RAW photos and raw video footage are our working files and are not delivered or sold. They are not part of any booking.",
+        "We deliver edited photography and video only. Unedited RAW photos, raw camera footage and unedited source material are our working files and are not delivered, sold or included in any booking.",
       ],
     },
     {
